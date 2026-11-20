@@ -99,7 +99,7 @@
 
 /* ── 絵 v122・v153・v155・v154 の型（11-20 夜・作り直し）── */
 .seg button[aria-checked="true"] { background: var(--c-men); color: var(--c-kon); box-shadow: 0 1px 3px var(--c-kage); }
-.bar-r { position: relative; margin-left: auto; min-height: 36px; padding: 0; font: inherit; font-size: 14px; font-weight: 700; border: 0; background: transparent; color: var(--c-kon-ji); }
+.bar-r { position: relative; margin-left: auto; min-height: 36px; padding: 0; font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--c-kon); }
 .bar-r::after { content: ""; position: absolute; inset: -4px -8px; }
 .b { font-weight: 700; }
 .kon { color: var(--c-kon); }
@@ -136,7 +136,7 @@
 .r-er { display: grid; grid-template-columns: 70px 1fr 70px; align-items: center; gap: 8px; min-height: 52px; padding: 0 12px; font-size: 16px; border-bottom: 1px solid var(--c-sen); }
 .r-er:last-child { border-bottom: 0; }
 .r-er-n { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.r-er-v { justify-self: end; width: 100%; max-width: 140px; min-height: 40px; text-align: right; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; border: 1.5px solid var(--c-sen); border-radius: 10px; }
+.r-er-v { justify-self: end; width: 100%; max-width: 140px; min-height: 40px; padding: 0 12px; font-family: inherit; color: var(--c-ji); background: var(--c-men); text-align: right; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; border: 1.5px solid var(--c-sen); border-radius: 10px; }
 .r-er-v:focus { border-color: var(--c-kin); background: var(--c-man); outline: 0; }
 .r-er-p { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* 枠の線のボタン */

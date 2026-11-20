@@ -283,7 +283,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       // 元の点で飛んでいない席の受け取りは entry に持たない（片付け・§6-7）
       const bs = bustedSeats(R, x.cells), tobi = {};
       for (const [k, v] of Object.entries(x.tobi_to)) if (bs.includes(Number(k))) tobi[k] = v;
-      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map(String), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
+      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map((v) => Number(v).toLocaleString("ja-JP")), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
     } else {
       const seats = lastSeats();
       if (!seats) { picking = { seats: [] }; page = 'pick'; render(); return; }
@@ -581,7 +581,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function wireEdit() {
     const q = (s) => el.querySelector(s);
     q('#eOk').onclick = entryNext;
-    for (const inp of el.querySelectorAll('[data-c]')) inp.addEventListener('input', liveUpdate);
+    for (const inp of el.querySelectorAll('[data-c]')) {
+      inp.addEventListener('input', liveUpdate);
+      // 絵 nyuryoku4 ③＝枠の素点は「20,100」と区切って見せる（打っている間はそのまま・離れたら区切る）
+      inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = v.toLocaleString('ja-JP'); readCells(); } });
+    }
     if (q('#eLost')) q('#eLost').addEventListener('input', liveUpdate);
     if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); picking = { seats: entry.seats.slice() }; entry = null; page = 'pick'; render(); };
     if (q('#eVoid')) q('#eVoid').onclick = () => { commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); toRoom(); };
