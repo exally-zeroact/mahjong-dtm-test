@@ -70,7 +70,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
 
   function ensureTable() {
-    const sid0 = pickSession(st, Date.now()); // 暦の日で探さない（0時をまたいでも同じ開催を続ける・新しい開催は締めて12時間後）
+    const sid0 = pickSession(st); // 区切りは［この対局を終える］を押した時だけ（時間・日付で決めない・司さん 11-20）
     const t0 = sid0 && st.tables.find((t) => t.session_id === sid0);
     if (t0) return t0;
     const sid = uuid(), tid = uuid();
@@ -417,11 +417,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const last = settles[settles.length - 1];
     const changed = last ? d.order.filter((m) => (last.snap.ten[m] || 0) !== (s.ten[m] || 0)) : [];
     let h = top;
-    if (last) h += '<div class="r-white">' + hm(last.at) + ' に締めました</div>';
+    if (last) h += '<div class="r-white">' + hm(last.at) + ' にこの対局を終えました</div>';
     if (last && changed.length && !viewSnap) {
-      h += '<div class="r-red"><b>締めた後に変わりました（' + changed.length + '人）</b><span>' + changed.map((m) => esc(s.name(m))).join('・') + '</span></div>';
-      h += '<p class="sec">締めた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.snap.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
-      h += '<button class="btn btn-main" id="sClose">もう一度締める</button><button class="btn btn-line" id="sSnap">締めた時のまま見る</button>';
+      h += '<div class="r-red"><b>終えた後に変わりました（' + changed.length + '人）</b><span>' + changed.map((m) => esc(s.name(m))).join('・') + '</span></div>';
+      h += '<p class="sec">終えた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.snap.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
+      h += '<button class="btn btn-main" id="sClose">この中身で終え直す</button><button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
       el.innerHTML = h; wireSeisan(d, settles.length); return;
     }
     const pay = viewSnap && last ? last.snap.pay : s.pay;
@@ -452,8 +452,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';
     else if (!last || changed.length) {
-      h += '<button class="btn btn-main" id="sClose">締める（' + (s.missing.length ? '入っていない物 ' + s.missing.length + '件のまま' : 'この中身を残す') + '）</button>';
-      if (!s.missing.length) h += '<p class="r-hint">締めても後から直せる。直したら「締めた後に変わりました」が出る。単位は点（円は出さない）。</p>';
+      h += '<button class="btn btn-main" id="sClose">この対局を終える（' + (s.missing.length ? '入っていない物 ' + s.missing.length + '件のまま' : 'この中身を残す') + '）</button>';
+      if (!s.missing.length) h += '<p class="r-hint">終えると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
     }
     el.innerHTML = h;
     wireSeisan(d, settles.length);
