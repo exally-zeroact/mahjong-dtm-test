@@ -1,0 +1,2 @@
+# 件4b の外の計算器（試験の時だけ・アプリに入れない）。版と hash を固定＝pip install --require-hashes --only-binary=:all: -r tests/score-gaibu.req.txt
+mahjong==2.2.0 --hash=sha256:cd878ded188dc63dda0cc8b115f84d9a80ff9bd99f9ba4f0925b95f725ec2bcf

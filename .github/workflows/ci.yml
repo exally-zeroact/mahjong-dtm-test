@@ -96,6 +96,19 @@ jobs:
         run: |
           node tests/score.test.mjs --self-test | tee score-calc-self.out
           sh scripts/ci-yuka.sh score-calc-self.out 17
+      - name: 外の点数計算器（PyPI mahjong・版と hash を固定）を試験の時だけ使い捨ての箱に入れる（アプリには入れない）
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/score-py"
+          "$RUNNER_TEMP/score-py/bin/python" -m pip install --require-hashes --only-binary=:all: -r tests/score-gaibu.req.txt
+          echo "SCORE_PY=$RUNNER_TEMP/score-py/bin/python" >> "$GITHUB_ENV"
+      - name: 点数計算（lib/score.mjs）を外の計算器と乱数1,000手で突き合わせる（翻・符・点が全部同じか・版・免状 MIT）
+        run: node tests/score-gaibu.test.mjs
+      - name: 外の計算器との突き合わせの自己確認（lib/score.mjs の式を4か所壊して全部赤になるか）
+        shell: bash
+        run: |
+          node tests/score-gaibu.test.mjs --self-test | tee score-gaibu-self.out
+          sh scripts/ci-yuka.sh score-gaibu-self.out 4
 
       # ── 計算の道具（待ち読み）＝画面と同じ lib/shanten.mjs を手で決めた答えと突き合わせる ──────
       - name: 待ち読み（lib/shanten.mjs）のシャンテン・待ち・受け入れが手で決めた答えと同じか（清一色の全通り・七対子・国士・純空・3人）
