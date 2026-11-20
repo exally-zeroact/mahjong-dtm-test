@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 19, ops: 28, caps: 12, public_funcs: 0 };
+export const EXPECT = { tables: 20, ops: 28, caps: 12, rule_keys: 41, public_funcs: 0 };
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {
@@ -73,7 +73,7 @@ select
     where has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE')) as client_private_funcs
 `;
 const SEED_SQL = `select (select count(*) from mahjong.mj_ops) as ops, (select count(*) from mahjong.mj_caps) as caps,
- (select count(*) from mahjong.totals) as totals_rows`;
+ (select count(*) from mahjong.totals) as totals_rows, (select count(*) from mahjong.mj_rule_keys) as rule_keys`;
 
 async function main() {
   const cfg = readConfig();
@@ -113,11 +113,11 @@ async function main() {
 
   const clientOk = Number(a.client_usage) === 0 && Number(a.client_table_priv) === 0 && Number(a.client_private_funcs) === 0;
   const ok = Number(a.tables) === EXPECT.tables && Number(a.rls_on) === EXPECT.tables && Number(a.policies) === 0
-    && Number(s.ops) === EXPECT.ops && Number(s.caps) === EXPECT.caps && Number(s.totals_rows) === 1
+    && Number(s.ops) === EXPECT.ops && Number(s.caps) === EXPECT.caps && Number(s.rule_keys) === EXPECT.rule_keys && Number(s.totals_rows) === 1
     && Number(a.public_funcs) === EXPECT.public_funcs && clientOk;
   console.log(`\nAPPLY RESULT: ${ok ? 'OK' : 'NG'}`
     + `  表=${a.tables}/${EXPECT.tables} RLS=${a.rls_on} 決まり書き=${a.policies} 操作=${s.ops}/${EXPECT.ops}`
-    + ` 上限=${s.caps}/${EXPECT.caps} public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}`);
+    + ` 上限=${s.caps}/${EXPECT.caps} ルールの鍵=${s.rule_keys}/${EXPECT.rule_keys} public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}`);
   console.log(`  客（anon・authenticated）… 部屋の USAGE=${a.client_usage} 表の権限=${a.client_table_priv} 部屋の関数=${a.client_private_funcs}`
     + `（★全部0★）${clientOk ? '' : ' ← ★ここが NG★'}`);
   process.exit(ok ? 0 : 1);

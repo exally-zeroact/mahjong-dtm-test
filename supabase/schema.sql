@@ -66,7 +66,10 @@ create index if not exists rule_sets_room on mahjong.rule_sets(room_id);
 --   coalesce で '' に倒して弾く。最初の版の無名の決まり（rule_sets_rules_check1＝素通りする形）は付け替える（行は消えない）
 alter table mahjong.rule_sets drop constraint if exists rule_sets_rules_check1;
 alter table mahjong.rule_sets drop constraint if exists rule_sets_players_ok;
-alter table mahjong.rule_sets add constraint rule_sets_players_ok check (coalesce(rules->>'players', '') in ('3', '4'));
+-- ★jsonb の数で比べる★（->> は字 "3" と数 3 を同じ '3' にする＝字を通した・N2）
+alter table mahjong.rule_sets add constraint rule_sets_players_ok check (coalesce(rules->'players', 'null'::jsonb) in ('3'::jsonb, '4'::jsonb));
+alter table mahjong.rule_sets drop constraint if exists rule_sets_size_ok;
+alter table mahjong.rule_sets add constraint rule_sets_size_ok check (octet_length(rules::text) <= 4096);
 
 do $$ begin
   if not exists (select 1 from pg_constraint where conname = 'rooms_rule_fk') then
@@ -316,6 +319,9 @@ create table if not exists mahjong.mj_ops (
   revert         text not null check (revert in ('prev', 'void', 'unvoid', 'inactive', 'rules_version', 'none')),
   versioned      boolean not null default false   -- base_version つき
 );
+-- ★種に無い行は消す★（種から外した op が倉庫に残って通り続けない・N4）＝送り込みと消しを1つの文で
+do $opsdo$ begin
+with up as (
 insert into mahjong.mj_ops (name, kan, nyu, on_deleted, needs_secret, writes_history, revert, versioned) values
   ('device_leave',   true, true,  true,  false, false, 'none',          false),
   ('member_pick',    true, true,  false, false, true,  'prev',          false),
@@ -348,7 +354,10 @@ insert into mahjong.mj_ops (name, kan, nyu, on_deleted, needs_secret, writes_his
 on conflict (name) do update set
   kan = excluded.kan, nyu = excluded.nyu, on_deleted = excluded.on_deleted,
   needs_secret = excluded.needs_secret, writes_history = excluded.writes_history,
-  revert = excluded.revert, versioned = excluded.versioned;
+  revert = excluded.revert, versioned = excluded.versioned
+  returning name)
+delete from mahjong.mj_ops o where o.name not in (select up.name from up);
+end $opsdo$;
 
 -- ── 表ごとの行の上限（段6＝当てた後に実の数で見る・§3.2） ──────────────────
 --   scope: room＝部屋ごと／session＝開催日ごと／table＝卓ごと
@@ -385,6 +394,138 @@ language sql immutable strict parallel safe set search_path = '' as $fn$
     'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖゝゞabcdefghijklmnopqrstuvwxyz')
 $fn$;
 revoke all on function mahjong_private.mj_name_key(text) from public, anon, authenticated;
+
+-- ── ルールの鍵の表（★正本★・種は下の rk 札で囲んだ jsonb の字1本＝lib/rules.mjs の RULE_KEYS と同じ・tests/rules-keys.test.mjs が CI で比べる）──
+-- ★鍵を後から足す日は、新しい鍵の既定を「足す前の振る舞い」と同じ値に限る（古い rules_snapshot の pt を変えない）★
+create table if not exists mahjong.mj_rule_keys (
+  key      text primary key check (key ~ '^[a-z][a-z0-9_]*$'),
+  kind     text not null check (kind in ('int', 'enum', 'bool', 'uma')),
+  min      numeric,
+  max      numeric,
+  step     numeric check (step is null or step > 0),
+  vals     jsonb check (vals is null or jsonb_typeof(vals) = 'array'),
+  nullable boolean not null,
+  def4     jsonb not null,                  -- 4人の既定（null は 'null'::jsonb）
+  def3     jsonb not null,                  -- 3人の既定
+  need     boolean not null,                -- 無いと弾く（players だけ）
+  check ((kind = 'enum') = (vals is not null)),
+  check ((kind in ('int', 'uma')) = (min is not null and max is not null and step is not null))
+);
+do $rkdo$
+declare seed jsonb := $rk$[
+  {"key":"aka","kind":"int","min":0,"max":4,"step":1,"vals":null,"nullable":false,"def4":3,"def3":2,"need":false},
+  {"key":"atozuke","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"chip_pt10","kind":"int","min":1,"max":9999,"step":1,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
+  {"key":"chombo","kind":"enum","min":null,"max":null,"step":null,"vals":["mangan","pt"],"nullable":false,"def4":"mangan","def3":"mangan","need":false},
+  {"key":"chombo_pt","kind":"int","min":0,"max":999,"step":1,"vals":null,"nullable":false,"def4":20,"def3":20,"need":false},
+  {"key":"double_ron","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"double_ron_kyotaku","kind":"enum","min":null,"max":null,"step":null,"vals":["kamicha","split"],"nullable":false,"def4":"kamicha","def3":"kamicha","need":false},
+  {"key":"double_yakuman","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"hakoshita","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
+  {"key":"honba","kind":"enum","min":null,"max":null,"step":null,"vals":[300,1500],"nullable":false,"def4":300,"def3":300,"need":false},
+  {"key":"kazoe","kind":"enum","min":null,"max":null,"step":null,"vals":["yakuman","sanbai"],"nullable":false,"def4":"yakuman","def3":"yakuman","need":false},
+  {"key":"kiriage","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
+  {"key":"kita","kind":"enum","min":null,"max":null,"step":null,"vals":["nuki","none"],"nullable":false,"def4":"none","def3":"nuki","need":false},
+  {"key":"kuitan","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"kyotaku_end","kind":"enum","min":null,"max":null,"step":null,"vals":["top","kieru"],"nullable":false,"def4":"top","def3":"top","need":false},
+  {"key":"nagashi","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"oorasu_stop","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"pao","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"players","kind":"int","min":3,"max":4,"step":1,"vals":null,"nullable":false,"def4":4,"def3":3,"need":true},
+  {"key":"rate","kind":"int","min":10,"max":100000,"step":10,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
+  {"key":"renpu_fu","kind":"enum","min":null,"max":null,"step":null,"vals":[2,4],"nullable":false,"def4":4,"def3":4,"need":false},
+  {"key":"return_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":30000,"def3":40000,"need":false},
+  {"key":"round","kind":"enum","min":null,"max":null,"step":null,"vals":["gosha","shisha","kirisute","none"],"nullable":false,"def4":"gosha","def3":"gosha","need":false},
+  {"key":"shugi_pt10","kind":"int","min":1,"max":9999,"step":1,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
+  {"key":"start_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":25000,"def3":35000,"need":false},
+  {"key":"tenpai_ryo","kind":"int","min":0,"max":30000,"step":1000,"vals":null,"nullable":false,"def4":3000,"def3":3000,"need":false},
+  {"key":"tie","kind":"enum","min":null,"max":null,"step":null,"vals":["kamicha","split"],"nullable":false,"def4":"kamicha","def3":"kamicha","need":false},
+  {"key":"tobi","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"tobi_from","kind":"enum","min":null,"max":null,"step":null,"vals":["busted","all"],"nullable":false,"def4":"busted","def3":"busted","need":false},
+  {"key":"tobi_pt","kind":"int","min":0,"max":999,"step":1,"vals":null,"nullable":false,"def4":10,"def3":10,"need":false},
+  {"key":"tobi_zero","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"tochu_kyushu","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"tochu_sucha","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"tochu_sufu","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"tochu_sukan","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"triple_ron","kind":"enum","min":null,"max":null,"step":null,"vals":["ryukyoku","ari"],"nullable":false,"def4":"ryukyoku","def3":"ryukyoku","need":false},
+  {"key":"tsumo3","kind":"enum","min":null,"max":null,"step":null,"vals":["son","secchan"],"nullable":false,"def4":"son","def3":"son","need":false},
+  {"key":"uma","kind":"uma","min":-999,"max":999,"step":1,"vals":null,"nullable":false,"def4":[20,10,-10,-20],"def3":[15,0,-15],"need":false},
+  {"key":"west","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
+  {"key":"yakitori","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
+  {"key":"yakitori_pt","kind":"int","min":0,"max":999,"step":1,"vals":null,"nullable":false,"def4":0,"def3":0,"need":false}
+]$rk$;
+begin
+  with up as (
+    insert into mahjong.mj_rule_keys (key, kind, min, max, step, vals, nullable, def4, def3, need)
+    select e->>'key', e->>'kind', (e->>'min')::numeric, (e->>'max')::numeric, (e->>'step')::numeric,
+           case when jsonb_typeof(e->'vals') = 'array' then e->'vals' end,
+           (e->>'nullable')::boolean, e->'def4', e->'def3', (e->>'need')::boolean
+      from jsonb_array_elements(seed) e
+    on conflict (key) do update set kind = excluded.kind, min = excluded.min, max = excluded.max, step = excluded.step,
+      vals = excluded.vals, nullable = excluded.nullable, def4 = excluded.def4, def3 = excluded.def3, need = excluded.need
+    returning key)
+  delete from mahjong.mj_rule_keys r where r.key not in (select up.key from up);
+end $rkdo$;
+
+-- ── ルールの確かめ（rules_save・league_save・mj_room_create・mj_room_import が同じ物を呼ぶ＝設計図 §3）──
+-- 確かめて、足りない鍵を players の既定で埋めた jsonb を返す。弾く時は例外 'mj_range:<鍵>'（呼ぶ側が「範囲」の値に換える）。
+-- 見る順は lib/rules.mjs の rulesOk と同じ：object → 表に無い鍵 → players → 鍵の名の順（collate "C"）→ 返し≧持ち点。
+-- ★数は整数に直して持つ（25000.0 → 25000）・enum は表の値を持つ★＝写し（rules_snapshot）の ->>::int が落ちない。
+create or replace function mahjong_private.mj_rules_ok(p_rules jsonb) returns jsonb
+language plpgsql stable set search_path = '' as $fn$
+declare
+  k record; v jsonb; e jsonb; o jsonb := '{}'::jsonb; n int; i int; ok boolean; x numeric; prev numeric; s numeric; arr jsonb;
+begin
+  if p_rules is null or pg_catalog.jsonb_typeof(p_rules) <> 'object' then raise exception 'mj_range:(object)'; end if;
+  if exists (select 1 from pg_catalog.jsonb_object_keys(p_rules) t(key)
+             where not exists (select 1 from mahjong.mj_rule_keys r where r.key = t.key)) then
+    raise exception 'mj_range:(unknown)';
+  end if;
+  v := p_rules -> 'players';
+  if v is null or pg_catalog.jsonb_typeof(v) <> 'number' or v not in ('3'::jsonb, '4'::jsonb) then raise exception 'mj_range:players'; end if;
+  n := (v::numeric)::int;
+  for k in select * from mahjong.mj_rule_keys r order by r.key collate "C" loop
+    v := p_rules -> k.key;
+    if v is null then
+      o := o || pg_catalog.jsonb_build_object(k.key, case when n = 4 then k.def4 else k.def3 end);
+      continue;
+    end if;
+    ok := false;
+    if pg_catalog.jsonb_typeof(v) = 'null' then
+      ok := k.nullable;
+    elsif k.kind = 'bool' then
+      ok := pg_catalog.jsonb_typeof(v) = 'boolean';
+    elsif k.kind = 'enum' then
+      select t.x into e from pg_catalog.jsonb_array_elements(k.vals) t(x)
+        where pg_catalog.jsonb_typeof(t.x) = pg_catalog.jsonb_typeof(v) and t.x = v limit 1;
+      if found then ok := true; v := e; end if;
+    elsif k.kind = 'int' then
+      if pg_catalog.jsonb_typeof(v) = 'number' then
+        x := v::numeric;
+        if x % 1 = 0 and x >= k.min and x <= k.max and x % k.step = 0 then ok := true; v := pg_catalog.to_jsonb(x::bigint); end if;
+      end if;
+    elsif k.kind = 'uma' then
+      if pg_catalog.jsonb_typeof(v) = 'array' and pg_catalog.jsonb_array_length(v) = n then
+        ok := true; s := 0; prev := null; arr := '[]'::jsonb;
+        for i in 0 .. n - 1 loop
+          e := v -> i;
+          if pg_catalog.jsonb_typeof(e) <> 'number' then ok := false; exit; end if;
+          x := e::numeric;
+          if x % 1 <> 0 or x < k.min or x > k.max or (prev is not null and x > prev) then ok := false; exit; end if;
+          s := s + x; prev := x; arr := arr || pg_catalog.jsonb_build_array(x::bigint);
+        end loop;
+        if ok and s <> 0 then ok := false; end if;
+        if ok then v := arr; end if;
+      end if;
+    end if;
+    if not ok then raise exception 'mj_range:%', k.key; end if;
+    o := o || pg_catalog.jsonb_build_object(k.key, v);
+  end loop;
+  if (o ->> 'return_pts')::numeric < (o ->> 'start_pts')::numeric then raise exception 'mj_range:return_pts'; end if;
+  return o;
+end $fn$;
+revoke all on function mahjong_private.mj_rules_ok(jsonb) from public, anon, authenticated;
 
 -- ── 権限：部屋は誰にも開けない（RLS も入・決まり書き0本） ─────────────────
 do $$
