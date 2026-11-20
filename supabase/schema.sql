@@ -206,7 +206,7 @@ create table if not exists mahjong.extras (
   primary key (table_id, member_id, kind)
 );
 
--- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から） ────────────────────
+-- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から＝飛んだ人が他の全員に tobi_pt ずつ・分けない＝v15.9） ──
 create table if not exists mahjong.tobi (
   hanchan_id  uuid not null references mahjong.hanchans(id) on delete cascade,
   busted_seat smallint not null check (busted_seat between 0 and 3),
@@ -526,6 +526,37 @@ begin
   return o;
 end $fn$;
 revoke all on function mahjong_private.mj_rules_ok(jsonb) from public, anon, authenticated;
+
+-- ── 起家からの順が要る半荘か（lib/needs-order.mjs と同じ答え・設計図 v15.9 §3） ──────────────────
+-- 返し＝理由の jsonb 配列：[]＝要らない／["tie"]＝同じ素点が2人以上（箱下なしは0未満を0にして比べる・鍵が無ければ箱下なし）／
+-- ["incomplete"]＝rules が object でない・players が 3/4 でない・cells が長さ players の整数の並びでない（止める側）。
+create or replace function mahjong_private.mj_needs_order(p_rules jsonb, p_cells jsonb) returns jsonb
+language plpgsql immutable set search_path = '' as $fn$
+declare
+  n int; hako boolean; e jsonb; x numeric; seen numeric[] := '{}';
+begin
+  if p_rules is null or pg_catalog.jsonb_typeof(p_rules) <> 'object' then return '["incomplete"]'::jsonb; end if;
+  e := p_rules -> 'players';
+  if e is null or pg_catalog.jsonb_typeof(e) <> 'number' or e not in ('3'::jsonb, '4'::jsonb) then return '["incomplete"]'::jsonb; end if;
+  n := (e::numeric)::int;
+  if p_cells is null or pg_catalog.jsonb_typeof(p_cells) <> 'array' or pg_catalog.jsonb_array_length(p_cells) <> n then
+    return '["incomplete"]'::jsonb;
+  end if;
+  hako := coalesce(p_rules -> 'hakoshita' = 'true'::jsonb, false);
+  -- 形を先に全部見る（lib と同じ順＝同点と形の崩れが混ざっても incomplete）
+  if exists (select 1 from pg_catalog.jsonb_array_elements(p_cells) t(v)
+             where pg_catalog.jsonb_typeof(t.v) <> 'number' or (t.v::numeric) % 1 <> 0) then
+    return '["incomplete"]'::jsonb;
+  end if;
+  for e in select t.v from pg_catalog.jsonb_array_elements(p_cells) t(v) loop
+    x := e::numeric;
+    if not hako and x < 0 then x := 0; end if;
+    if x = any(seen) then return '["tie"]'::jsonb; end if;
+    seen := seen || x;
+  end loop;
+  return '[]'::jsonb;
+end $fn$;
+revoke all on function mahjong_private.mj_needs_order(jsonb, jsonb) from public, anon, authenticated;
 
 -- ── 権限：部屋は誰にも開けない（RLS も入・決まり書き0本） ─────────────────
 do $$

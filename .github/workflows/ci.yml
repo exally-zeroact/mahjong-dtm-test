@@ -62,6 +62,8 @@ jobs:
         run: node tests/name-key.test.mjs
       - name: ルールの鍵の表（schema.sql の種）と lib/rules.mjs が同じか・鍵41の名を字で固定・確かめの答え（倉庫と同じかは rules.live.mjs＝手元）
         run: node tests/rules.test.mjs
+      - name: 起家からの順が要る半荘か（lib/needs-order.mjs が手で決めた答えを出すか・倉庫と同じかは needs-order.live.mjs＝手元）
+        run: node tests/needs-order.test.mjs
 
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
