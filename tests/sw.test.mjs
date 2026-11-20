@@ -133,6 +133,7 @@ async function run(t) {
   const reg = fs.readFileSync(path.join(root, 'js/sw-reg.js'), 'utf8');
   ok('S sw-reg は /sw.js を scope / で登録', /register\('\/sw\.js', \{ scope: '\/' \}\)/.test(reg));
   ok('S sw-reg は load で mj.swap を消す・初めての claim を無視する形', /removeItem\('mj\.swap'\)/.test(reg) && /!hadCtl && changes === 1 && !swapping/.test(reg));
+  ok('S sw-reg の installed の帯は前の版が動いている時だけ（初めての取り込みで偽の帯を出さない）', /w\.state === 'installed' && reg\.active && reg\.active !== w && sw\.controller/.test(reg));
 
   // 動き（真似の台）。名簿が空の写し（壊しで名簿が合わない時）でも回す。
   const V = cur.ver;
@@ -320,6 +321,7 @@ const BREAKS = [
   ['html の sw-reg 行を外す', { file: ['tensu.html', rep('<script src="/js/sw-reg.js" defer></script>', '')] }],
   ['sw-reg を相対で登録', { file: ['js/sw-reg.js', rep("register('/sw.js', { scope: '/' })", "register('sw.js', { scope: '/' })")] }],
   ['sw-reg が初めての claim で帯を出す', { file: ['js/sw-reg.js', rep('if (!hadCtl && changes === 1 && !swapping) return;', '')] }],
+  ['sw-reg の installed で前の版を見ない', { file: ['js/sw-reg.js', rep('reg.active && reg.active !== w && sw.controller', 'sw.controller')] }],
   ['名簿の js に import( を足す', { file: ['lib/score.mjs', (s) => s + '\nexport const later = () => import("./tiles.mjs");\n'] }],
   ['css に url( を足す', { file: ['css/app.css', (s) => s + '\n.x { background: url(/icons/icon-192.png); }\n'] }],
   ['version.json をずらす', { file: ['version.json', () => '{"ver":"eeeeeeeeeeee"}\n'], raw: true }],

@@ -239,28 +239,44 @@ const BREAKS = [
 ];
 
 const t0 = Date.now();
+/* webkit そのものの落ち（internal error）だけは写しを作り直して1回やり直す（11-21 CI で1回・後ろが巻き添えで赤）。
+   壊しの赤は assert の赤なのでやり直しで消えない。壊しが webkit の落ちで「赤に見える」のもこれで防ぐ */
+const isWk = (x) => /internal error/i.test(x);
+async function runFresh(mk) {
+  for (let i = 0; ; i++) {
+    const d = mk();
+    try {
+      const r = await run(d);
+      if (i === 0 && r.bad.some(isWk)) {
+        const msg = 'webkit の internal error＝1回やり直す：' + r.bad.find(isWk).split('\n')[0];
+        console.log('  ↻ ' + msg);
+        // やり直しは緑に隠れる＝CI の summary に残して、増えたら人が見る（客の端末で間欠的に落ちる不具合かもしれない）
+        if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '- ⚠ sw e2e ' + msg + '\n');
+        continue;
+      }
+      return r;
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  }
+}
 try {
   if (!SELF) {
-    const d = copyRoot();
-    try { const { n, bad } = await run(d); for (const b of bad) console.log('  ✗ ' + b); console.log(`\nsw e2e: ${n - bad.length}/${n} ・ ${Math.round((Date.now() - t0) / 1000)}秒`); process.exitCode = bad.length ? 1 : 0; }
-    finally { fs.rmSync(d, { recursive: true, force: true }); }
+    const { n, bad } = await runFresh(copyRoot);
+    for (const b of bad) console.log('  ✗ ' + b);
+    console.log(`\nsw e2e: ${n - bad.length}/${n} ・ ${Math.round((Date.now() - t0) / 1000)}秒`);
+    process.exitCode = bad.length ? 1 : 0;
   } else {
-    const d0 = copyRoot();
-    let base;
-    try { base = await run(d0); } finally { fs.rmSync(d0, { recursive: true, force: true }); }
+    const base = await runFresh(copyRoot);
     if (base.bad.length) { console.log(`✗ 壊す前に赤が ${base.bad.length} 本（先に本体を緑に）`); for (const b of base.bad) console.log('  ✗ ' + b); process.exitCode = 1; }
     else {
       fast = true;
       let red = 0;
       for (const [name, file, fn] of BREAKS) {
-        const d = copyRoot();
         try {
-          fs.writeFileSync(path.join(d, file), fn(rd(d, file)));
-          rewrite(d);
-          const r = await run(d);
-          if (r.bad.length) red++; else console.log(`  ✗ 壊しても緑のまま：${name}`);
+          const r = await runFresh(() => { const d = copyRoot(); fs.writeFileSync(path.join(d, file), fn(rd(d, file))); rewrite(d); return d; });
+          // webkit の落ちだけの赤は「壊しが効いた」と数えない（偽の n/n を出さない）
+          if (r.bad.length && r.bad.every(isWk)) console.log(`  ✗ 不定（webkit の落ちだけ）：${name}`);
+          else if (r.bad.length) red++; else console.log(`  ✗ 壊しても緑のまま：${name}`);
         } catch (e) { console.log(`  ✗ 壊しが作れない：${name} — ${e.message}`); }
-        finally { fs.rmSync(d, { recursive: true, force: true }); }
       }
       console.log(`自己確認: ${red}/${BREAKS.length}`);
       process.exitCode = red === BREAKS.length ? 0 : 1;

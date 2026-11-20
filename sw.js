@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'a776a0b45bd0';
+const VER = 'ec336dd27881';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0ae4a6fb1b6a163b2f4d29948694815e30157b71a6908be442c0991483a5eb3d'],
@@ -25,7 +25,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-taikyoku.mjs', '211284d6d021b7bd3e94c5b378451b66cf664aa3f893dd26ef8ee3491c72afba'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
-  ['/js/sw-reg.js', 'af7250a96495eb5c23d4b2fbed616c6efbe9aa01a1b1fc2e4bf9474c66bb1f2a'],
+  ['/js/sw-reg.js', '3dbafecd87029e9eb4f3165e7b2f01011ca3f289030a25c92a7a530109bf2c85'],
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
   ['/league.html', '01bc8f9a527152f4e259097007dda5eb4b943c199f7d1776f30a8f59dc60db27'],

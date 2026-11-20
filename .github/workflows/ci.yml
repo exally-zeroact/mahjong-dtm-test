@@ -122,11 +122,11 @@ jobs:
       # ── 端末に控える（sw.js・js/sw-reg.js・scripts/sw-assets.mjs）
       - name: 端末の控え（sw.js）＝名簿の道と sha が今の中身と同じ・VER と version.json・全画面に sw-reg の1行・/v/ と素の道・install の失敗で控えを残さない・取り直しは1本・supa-config の3秒
         run: node tests/sw.test.mjs
-      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json を24か所壊して全部赤になるか）
+      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json を25か所壊して全部赤になるか）
         shell: bash
         run: |
           node tests/sw.test.mjs --self-test | tee sw-self.out
-          sh scripts/ci-yuka.sh sw-self.out 24
+          sh scripts/ci-yuka.sh sw-self.out 25
 
       # ── 計算の道具の画面（早見表・待ち読み）を本物の WebKit で押す ──────
       #   playwright は package.json に入れない（Vercel が devDependencies を入れる）＝ここで --no-save で入れる

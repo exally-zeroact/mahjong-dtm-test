@@ -73,7 +73,8 @@
     function track(w) {
       if (!w) return;
       w.addEventListener('statechange', function () {
-        if (w.state === 'installed' && sw.controller && !swapping) offerSwap();
+        // 本当に待っている版の時だけ（前の版が動いていて、これがそれと別）。初めての取り込みは installed の知らせが claim の後に届く事がある（webkit）＝controller だけ見ると偽の帯
+        if (w.state === 'installed' && reg.active && reg.active !== w && sw.controller && !swapping) offerSwap();
       });
     }
     track(reg.installing);
