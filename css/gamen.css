@@ -49,3 +49,59 @@
 .qr svg { display: block; width: 100%; height: auto; }
 .qr-bg { fill: var(--c-men); }
 .qr-fg { fill: var(--c-ji); }
+
+/* ── 対局の1ページ（js/gamen-room.mjs）・見本＝memory/mahjong_tataki_2026-11-20/mahjong_nyuryoku3_v12.png ── */
+.plus { color: var(--c-midori); }
+.minus { color: var(--c-aka); }
+.zero { color: var(--c-ji); }
+.r-top { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--c-ji-usui); }
+.r-top .btn-s { margin-left: auto; }
+.r-unsent { padding: 2px 8px; border-radius: 10px; font-size: 13px; font-weight: 600; background: var(--c-aka-usui); color: var(--c-aka); }
+/* 表：計の行は下に固定・10回を越えたら表の中だけスクロール（見出し 40＋1行 56×10＋計 44） */
+.r-hyou-wrap { max-height: 644px; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; }
+.r-hyou { width: 100%; border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.r-hyou th, .r-hyou td { padding: 0 2px; text-align: center; border-bottom: 1px solid var(--c-sen); }
+.r-hyou thead th { position: sticky; top: 0; z-index: 1; height: 40px; font-size: 15px; font-weight: 700; background: var(--c-men); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-hyou thead th:first-child, .r-hyou tbody th, .r-hyou tfoot th { width: 42px; }
+.r-hyou tbody th { font-size: 14px; font-weight: 400; color: var(--c-ji-usui); }
+.r-hyou tbody td { height: 56px; }
+.r-hyou td b { display: block; font-size: 17px; font-weight: 700; }
+.r-hyou td small { display: block; margin-top: 2px; font-size: 11px; color: var(--c-ji-usui); white-space: nowrap; }
+.r-hyou tfoot th, .r-hyou tfoot td { position: sticky; bottom: 0; height: 44px; font-size: 17px; font-weight: 800; background: var(--c-seg); border-bottom: 0; }
+.r-row { cursor: pointer; }
+.r-row:active > * { background: var(--c-haikei); }
+.r-void > * { opacity: .45; text-decoration: line-through; }
+.r-na { color: var(--c-ji-usui); }
+.r-why td { padding: 6px 8px; font-size: 13px; text-align: left; color: var(--c-aka); background: var(--c-aka-usui); }
+.r-add { min-height: 56px; font-size: 18px; border-radius: 12px; }
+.r-sec { margin: 8px 2px 0; font-size: 13px; font-weight: 700; color: var(--c-ji-usui); }
+/* 人ごとの窓 2×2 */
+.r-mado { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.r-w { min-width: 0; padding: 10px 8px; background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 14px; }
+.r-w-name { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-w-big { position: relative; margin-top: 2px; font-size: 28px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.r-w-big small { margin-left: 2px; font-size: 14px; font-weight: 600; }
+.r-w-big.dim { opacity: .45; }
+.r-bang { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 6px; vertical-align: middle; border-radius: 10px; font-size: 14px; font-weight: 800; background: var(--c-aka); color: var(--c-men); }
+.r-w-sub { font-size: 12px; font-weight: 600; color: var(--c-ji-usui); font-variant-numeric: tabular-nums; }
+.r-w-sub2 { margin: 2px 0 4px; font-size: 11px; color: var(--c-ji-usui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-w-k { margin-top: 4px; font-size: 12px; color: var(--c-ji-usui); }
+.r-w-row { display: flex; align-items: center; gap: 2px; }
+.r-pm { position: relative; width: 36px; height: 36px; padding: 0; font: inherit; font-size: 14px; font-weight: 800; border: 0; border-radius: 10px; background: var(--c-seg); color: var(--c-kon); }
+.r-pm::after { content: ""; position: absolute; inset: -4px -2px; }
+.r-cnt { width: 28px; text-align: center; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.r-w-val { margin-left: auto; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.r-check { margin: 0 2px; font-size: 13px; font-weight: 700; }
+.r-check.ok { color: var(--c-midori); }
+.r-check.bad { color: var(--c-aka); }
+/* 精算 */
+.r-seisan { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; }
+.r-seisan .made dd { font-variant-numeric: tabular-nums; }
+.r-pay { margin: 0; padding: 0; list-style: none; }
+.r-pay li { display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-size: 16px; border-top: 1px solid var(--c-sen); }
+.r-pay li b { font-variant-numeric: tabular-nums; }
+/* 点を入れる */
+.r-nyu { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.r-nyu input { text-align: right; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.btn-line { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button[aria-pressed="true"] { background: var(--c-kon); color: var(--c-kon-ji); border-color: var(--c-kon); }

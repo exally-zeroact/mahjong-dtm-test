@@ -117,20 +117,24 @@ export function mountRoom(el, { me, room, showShare }) {
   }
 
   function renderWindows(v) {
-    let h = '<div class="r-mado">';
+    let h = '<h3 class="r-sec">人ごと（合計＝半荘の pt' + (v.used.chip ? '＋チップ' : '') + (v.used.shugi ? '＋祝儀' : '') + (v.rate === null ? '' : ' を 1pt＝' + v.rate.toLocaleString('ja-JP') + ' で換えた数') + '）</h3><div class="r-mado">';
     for (const w of v.windows) {
-      const unit = w.unit === 'pt' ? 'pt' : '';
-      const big = w.unit === 'pt' ? fmtPt(w.big) : fmt(w.big);
+      const big = w.unit === 'pt' ? fmtPt(w.big) + '<small>pt</small>' : fmt(w.big);
       h += '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div>' +
-        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + unit + (w.dim ? '<span class="r-bang" aria-label="チップか祝儀の合計が合いません">!</span>' : '') + '</div>';
+        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="チップか祝儀の合計が合いません">!</span>' : '') + '</div>';
+      if (w.unit !== 'pt') h += '<div class="r-w-sub">' + fmtPt(w.pt10) + 'pt × ' + v.rate.toLocaleString('ja-JP') + '</div>';
+      const br = ['半荘 ' + fmtPt(w.hanPt10)];
+      if (v.used.chip) br.push('チ ' + fmtPt(w.chipPt10));
+      if (v.used.shugi) br.push('祝 ' + fmtPt(w.shugiPt10));
+      if (br.length > 1) h += '<div class="r-w-sub2">' + br.join('・') + '</div>';
       for (const kind of ['chip', 'shugi']) {
         if (!v.used[kind]) continue;
-        const cnt = w[kind], val = kind === 'chip' ? w.chipBig : w.shugiBig;
-        h += '<div class="r-w-row"><span class="r-w-k">' + (kind === 'chip' ? 'チップ' : '祝儀') + '</span>' +
-          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="-1" aria-label="減らす">−</button>' +
-          '<span class="r-cnt">' + (cnt > 0 ? '+' : '') + cnt + '</span>' +
-          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="1" aria-label="増やす">＋</button>' +
-          '<span class="r-w-val ' + sign(val) + '">' + (w.unit === 'pt' ? fmtPt(val) : fmt(val)) + '</span></div>';
+        const cnt = w[kind], val = kind === 'chip' ? w.chipPt10 : w.shugiPt10;
+        h += '<div class="r-w-k">' + (kind === 'chip' ? 'チップ' : '祝儀') + '</div><div class="r-w-row">' +
+          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="-1" aria-label="' + esc(w.name) + 'の' + (kind === 'chip' ? 'チップ' : '祝儀') + 'を減らす">−</button>' +
+          '<span class="r-cnt">' + (cnt > 0 ? '+' : cnt < 0 ? '−' : '') + Math.abs(cnt) + '</span>' +
+          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="1" aria-label="' + esc(w.name) + 'の' + (kind === 'chip' ? 'チップ' : '祝儀') + 'を増やす">＋</button>' +
+          '<span class="r-w-val ' + sign(val) + '">' + fmtPt(val) + '</span></div>';
       }
       h += '</div>';
     }
