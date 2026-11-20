@@ -29,6 +29,8 @@
   --c-aka: #B42318;
   --c-aka-usui: #FEF3F2;
   --c-midori: #067647;
+  --c-midori-usui: #ECFDF3;
+  --c-kon-usui: #E6ECF5;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }

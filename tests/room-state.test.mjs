@@ -155,5 +155,24 @@ console.log('■ 取り消した半荘');
   ok('取り消した半荘は計に入れず、入っていない物にも数えない', J(v.total10) === '{}' && v.missing.length === 0 && v.rows[0].voided, J(v));
 }
 
+console.log('■ 締め（settle_snap）');
+{
+  const b = base();
+  const snap = { ten: { m1: 500 }, pay: [] };
+  const r1 = applyOps(b, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T01:33:00Z', snap }]);
+  ok('1回目の締めは rev 1 で残る', r1.ok && r1.state.settles.length === 1 && r1.state.settles[0].snap.ten.m1 === 500, J(r1));
+  const r2 = applyOps(r1.state, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T01:34:00Z', snap }]);
+  ok('同じ rev の送り直しは足さない', r2.ok && r2.state.settles.length === 1, J(r2));
+  const r3 = applyOps(r1.state, [{ op: 'settle_snap', session_id: 's1', rev: 3, at: '2026-11-20T01:35:00Z', snap }]);
+  ok('飛んだ rev は重なりで弾く', !r3.ok && r3.res.err === 'conflict', J(r3));
+  const r4 = applyOps(b, [{ op: 'settle_snap', session_id: 'nai', rev: 1, at: 'x', snap }]);
+  ok('無い開催日は弾く', !r4.ok && r4.res.err === 'bad', J(r4));
+  const old = JSON.parse(JSON.stringify(b)); delete old.settles;
+  const r5 = applyOps(old, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: 'x', snap }]);
+  ok('settles の無い古い写しにも当たる', r5.ok && r5.state.settles.length === 1, J(r5));
+  const r6 = applyOps(b, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: 'x', snap: { big: 'x'.repeat(33000) } }]);
+  ok('中身 32KB 超えは弾く', !r6.ok && r6.res.err === 'range', J(r6.res));
+}
+
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
