@@ -59,8 +59,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   let entry = null;
   let picking = null;
   let viewSnap = false;
+  let confirming = false; // 入っていない物があるまま終える時の確かめ（開いている画面の間だけ）
+  let closeErr = null;    // 対局終了を残せなかった時の err
+  const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add の1秒まとめ
-  const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; render(); };
+  const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; render(); };
 
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
@@ -89,7 +92,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
 
   function ensureTable() {
-    const sid0 = pickSession(st); // 区切りは［この対局を終える］を押した時だけ（時間・日付で決めない・司さん 11-20）
+    const sid0 = pickSession(st); // 区切りは［対局終了］を押した時だけ（時間・日付で決めない・司さん 11-20）
     const t0 = sid0 && st.tables.find((t) => t.session_id === sid0);
     if (t0) return t0;
     const sid = uuid(), tid = uuid();
@@ -420,6 +423,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     }
     return pre + (m.what === 'chip' ? 'チップ' : '祝儀') + 'の合計が ' + fmtCnt(m.diff) + ' で合いません（チップ・祝儀を入れていません）';
   }
+  // ①［対局終了］（shuuryou_v1.md v4〜v4.3・司さん 11-21「対局終了にしろ」）
+  // ★入っていない物が1件でもある間（今か、終えた時の控えに）は、お金の数を1つも出さない（止めて警告）★＝partial の1つの判じを下の全部が見る
   function renderSeisan() {
     bar({ back: '対局', onBack: toRoom, title: '精算' });
     const d = seisanData(), s = d.s;
@@ -427,59 +432,88 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; return; }
     const settles = st.settles.filter((x) => x.session_id === d.sid);
     const last = settles[settles.length - 1];
-    const changed = last ? tenChanged(last.content.ten, s.ten) : []; // 鍵を合わせて比べる（取り消した卓にだけ居た人も漏らさない・S2 v1.1 止め2）
+    const lastMissing = last ? (last.missing || []) : [];
+    const partial = lastMissing.length > 0 || s.missing.length > 0;
+    if (partial) viewSnap = false; // 終えた時の額を見る道も無い（N2）
+    const tenCh = last && !partial ? tenChanged(last.content.ten, s.ten) : []; // 鍵を合わせて比べる（S2 v1.1 止め2）
+    const changed = !!last && (partial ? cn(lastMissing) !== cn(s.missing) : tenCh.length > 0);
+    const many = d.tables > 1;
+    const goBtn = s.missing.length ? '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>' : '';
+    const errLine = closeErr ? '<div class="r-red"><b>対局終了を残せませんでした（' + esc(closeErr) + '）</b></div>' : '';
+    // ［対局終了］の所＝入っていない物があれば1回目は確かめ（同じ位置に［戻って入れる］・その下に赤の箱と［n件のまま対局終了］）
+    const closeArea = (label) => (confirming && s.missing.length
+      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2">' + s.missing.length + '件のまま対局終了</button>'
+      : '<button class="btn btn-main" id="sClose">' + label + '</button>');
     let h = top;
-    if (last) h += '<div class="r-white">' + hm(last.at) + ' にこの対局を終えました</div>';
-    if (last && changed.length && !viewSnap) {
-      h += '<div class="r-red"><b>終えた後に変わりました（' + changed.length + '人）</b><span>' + changed.map((m) => esc(s.name(m))).join('・') + '</span></div>';
-      h += '<p class="sec">終えた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.content.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
-      if (!s.missing.length) h += '<button class="btn btn-main" id="sClose">この中身で終え直す</button>';
-      h += '<button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
+    if (last) {
+      if (lastMissing.length) h += '<div class="r-red"><b>' + hm(last.at) + ' に対局終了（入っていない物 ' + lastMissing.length + '件のまま・額は出しません）</b></div>';
+      else h += '<div class="r-white">' + hm(last.at) + ' に対局終了</div>';
+    }
+    if (changed && !viewSnap) {
+      if (partial) {
+        h += '<div class="r-red"><b>入っていない物が変わりました（' + lastMissing.length + '件 → ' + s.missing.length + '件）</b></div>' + goBtn;
+      } else {
+        h += '<div class="r-red"><b>終えた後に変わりました（' + tenCh.length + '人）</b><span>' + tenCh.map((m) => esc(s.name(m))).join('・') + '</span></div>';
+        h += '<p class="sec">終えた時 → 今</p><div class="list">' + tenCh.map((m) => { const a = last.content.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
+      }
+      h += errLine + closeArea('今の中身で対局終了し直す');
+      if (!partial) h += '<button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
       el.innerHTML = h; wireSeisan(d, settles.length); return;
     }
-    const pay = viewSnap && last ? last.content.pay : s.pay;
-    const ten = viewSnap && last ? last.content.ten : s.ten;
-    const many = d.tables > 1;
     if (!viewSnap) {
-      if (s.missing.length) h += '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>';
-      else if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + '</p>';
-      if (s.noRateTables.length) h += '<div class="r-red"><b>レートなしの卓は点に入れていません（pt で下に別に出します）</b></div>';
-    }
-    if (Object.keys(ten).length) {
-      h += '<p class="sec">誰が誰に（' + pay.length + '回' + (s.missing.length || viewSnap ? '' : 'で済む') + '）</p>';
-      if (pay.length) h += '<div class="list">' + pay.map((x) => '<div class="li r-pay"><span class="minus b">' + esc(s.name(x.from)) + '</span><span class="plus b r-pay-to">→ ' + esc(s.name(x.to)) + '</span><span class="r-pay-n">' + x.ten.toLocaleString('ja-JP') + '</span></div>').join('') + '</div>';
-      else h += '<p class="setsumei">払う人はいません。</p>';
-      h += '<p class="sec">1人ずつ（' + (s.missing.length ? 'そろった分の pt だけ' : '点＝pt × レート') + '）</p>';
-      // 札は今の並び＋点にだけ在る人（終えた時にだけ居た人も札を出す）・内訳の無い人は名前と額だけ
-      for (const m of d.order.concat(Object.keys(ten).filter((k) => !d.order.includes(k)))) {
-        if (ten[m] === undefined) continue;
-        const b = d.by[m];
-        if (!b) { h += '<div class="r-card"><div class="r-card-top"><span class="r-w-name">' + esc(s.name(m)) + '</span><span class="r-card-big ' + sign(ten[m]) + '">' + fmt(ten[m]) + '</span></div></div>'; continue; }
-        const parts = ['半荘 ' + b.n + '回 ' + fmtPt(b.han)];
-        if (d.used.chip) parts.push('チップ ' + fmtCnt(b.chip) + '枚 ' + fmtPt(b.chip10));
-        if (d.used.shugi) parts.push('祝儀 ' + fmtCnt(b.shugi) + '枚 ' + fmtPt(b.shugi10));
-        const total10 = b.han + b.chip10 + b.shugi10;
-        h += '<div class="r-card"><div class="r-card-top"><span class="r-w-name">' + esc(s.name(m)) + '</span><span class="r-card-big ' + sign(ten[m]) + '">' + fmt(ten[m]) + '</span></div>' +
-          '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
+      h += goBtn;
+      if (!partial) {
+        if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + '</p>';
+        else h += '<div class="r-red"><b>レートなしの卓は点に入れていません（pt で下に別に出します）</b></div>';
       }
     }
-    const nr = Object.entries(s.pt10NoRate || {});
-    if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
+    if (!partial) {
+      const pay = viewSnap ? last.content.pay : s.pay;
+      const ten = viewSnap ? last.content.ten : s.ten;
+      if (Object.keys(ten).length) {
+        h += '<p class="sec">誰が誰に（' + pay.length + '回' + (viewSnap ? '' : 'で済む') + '）</p>';
+        if (pay.length) h += '<div class="list">' + pay.map((x) => '<div class="li r-pay"><span class="minus b">' + esc(s.name(x.from)) + '</span><span class="plus b r-pay-to">→ ' + esc(s.name(x.to)) + '</span><span class="r-pay-n">' + x.ten.toLocaleString('ja-JP') + '</span></div>').join('') + '</div>';
+        else h += '<p class="setsumei">払う人はいません。</p>';
+        h += '<p class="sec">1人ずつ（点＝pt × レート）</p>';
+        // 札は今の並び＋点にだけ在る人・内訳の無い人と終えた時のまま見る間は名前と額だけ（内訳は今の数＝控えと混ざる・N1）
+        for (const m of d.order.concat(Object.keys(ten).filter((k) => !d.order.includes(k)))) {
+          if (ten[m] === undefined) continue;
+          const b = d.by[m];
+          const head = '<div class="r-card"><div class="r-card-top"><span class="r-w-name">' + esc(s.name(m)) + '</span><span class="r-card-big ' + sign(ten[m]) + '">' + fmt(ten[m]) + '</span></div>';
+          if (!b || viewSnap) { h += head + '</div>'; continue; }
+          const parts = ['半荘 ' + b.n + '回 ' + fmtPt(b.han)];
+          if (d.used.chip) parts.push('チップ ' + fmtCnt(b.chip) + '枚 ' + fmtPt(b.chip10));
+          if (d.used.shugi) parts.push('祝儀 ' + fmtCnt(b.shugi) + '枚 ' + fmtPt(b.shugi10));
+          const total10 = b.han + b.chip10 + b.shugi10;
+          h += head + '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
+        }
+      }
+      const nr = Object.entries(s.pt10NoRate || {});
+      if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
+    }
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';
-    else if ((!last || changed.length) && !s.missing.length) {
-      // 入っていない物がある間は終えさせない（終えた対局は今は開き直せない＝その分のお金が黙って落ちる・taiketsu-naoshi 11-20）
-      h += '<button class="btn btn-main" id="sClose">この対局を終える（この中身を残す）</button>';
-      h += '<p class="r-hint">終えると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
+    else if (!last) {
+      h += errLine + closeArea('対局終了');
+      h += '<p class="r-hint">対局終了すると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
     }
     el.innerHTML = h;
     wireSeisan(d, settles.length);
   }
   function wireSeisan(d, revs) {
     const q = (x) => el.querySelector(x);
-    if (q('#sClose')) q('#sClose').onclick = () => {
+    const goMissing = () => {
+      confirming = false;
+      const m = d.s.missing[0];
+      if (m && m.no) {
+        const t = st.tables.filter((x) => x.session_id === d.sid)[(m.table || 1) - 1];
+        const h = t && st.hanchans.find((x) => x.table_id === t.table_id && x.no === m.no);
+        if (h) { startEntry(h.hanchan_id); return; }
+      }
+      toRoom();
+    };
+    // §3 settle_snap：content（精算の中身）・used（使った版）・missing（入っていない物の一覧＝n件のまま終えた時はここに残る）。at は倉庫の now()
+    const doClose = () => {
       const s = d.s;
-      if (s.missing.length) return;
-      // §3 settle_snap：content（精算の中身）・used（使った版）・missing（入っていない物の一覧）。at は倉庫の now()
       const ss = st.sessions.find((x) => x.session_id === d.sid);
       // 使った版（S2 v1.1 D'）＝取り消していない卓だけ・卓は実際に使ったレート（倉庫は used の中身を見ない）
       const tabs = st.tables.filter((t) => t.session_id === d.sid && !t.voided);
@@ -489,19 +523,20 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
         hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version })),
       };
       const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, content: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, sig: sessionSig(st, d.sid) }, used, missing: s.missing }]);
-      if (r.ok) { viewSnap = false; render(); }
+      confirming = false;
+      closeErr = r.ok ? null : (r.err || '?');
+      if (r.ok) viewSnap = false;
+      render();
     };
+    if (q('#sClose')) q('#sClose').onclick = () => {
+      if (d.s.missing.length) { confirming = true; closeErr = null; render(); return; } // 1回目は確かめだけ
+      doClose();
+    };
+    if (q('#sClose2')) q('#sClose2').onclick = () => { if (confirming) doClose(); };
+    if (q('#sBack')) q('#sBack').onclick = goMissing;
+    if (q('#sGo')) q('#sGo').onclick = goMissing;
     if (q('#sSnap')) q('#sSnap').onclick = () => { viewSnap = true; render(); };
     if (q('#sNow')) q('#sNow').onclick = () => { viewSnap = false; render(); };
-    if (q('#sGo')) q('#sGo').onclick = () => {
-      const m = d.s.missing[0];
-      if (m && m.no) {
-        const t = st.tables.filter((x) => x.session_id === d.sid)[(m.table || 1) - 1];
-        const h = st.hanchans.find((x) => x.table_id === t.table_id && x.no === m.no);
-        if (h) { startEntry(h.hanchan_id); return; }
-      }
-      toRoom();
-    };
   }
 
   function plusMinus(mid, kind, add) {
@@ -529,7 +564,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function wireRoom() {
     const q = (s) => el.querySelector(s);
     q('#rAdd').onclick = () => startEntry(null);
-    if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; render(); };
+    if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; render(); };
     for (const b of el.querySelectorAll('.r-no')) b.onclick = () => startEntry(b.dataset.h);
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
   }

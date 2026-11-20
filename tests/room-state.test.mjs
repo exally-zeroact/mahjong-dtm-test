@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
-  migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
+  migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
 } from '../lib/room-state.mjs';
 import { defaultRules, rulesOk } from '../lib/rules.mjs';
 
@@ -300,7 +300,7 @@ console.log('■ 締め（settle_snap＝content・used・missing・at は opts.n
   ok('あ 10,000字（30,000 バイト）は通る', applyOps(b, [snap(1, { big: 'あ'.repeat(10000) })]).ok);
 }
 
-console.log('■ 続ける開催（pickSession＝［この対局を終える］を押した時だけ区切る・時間や日付で決めない・司さん 11-20 19時）');
+console.log('■ 続ける開催（pickSession＝［対局終了］を押した時だけ区切る・時間や日付で決めない・司さん 11-20 19時）');
 {
   const end = (st, sid, rev = 1) => applyOps(st, [{ op: 'settle_snap', session_id: sid, rev, content: { ten: sessionSeisan(st, sid).ten, pay: [], sig: sessionSig(st, sid) }, used: {}, missing: [] }], { now: '2026-11-21T04:00:00+09:00' }).state;
   ok('開催が無ければ null（新しく作る）', pickSession(emptyState()) === null);
@@ -308,7 +308,7 @@ console.log('■ 続ける開催（pickSession＝［この対局を終える］�
   ok('終えていなければ続ける（何日・何時間空いても・日を跨いでも）', pickSession(st) === 's1');
   ok('pickSession は時刻を受け取らない（引数1つ）', pickSession.length === 1);
   const ended = end(st, 's1');
-  ok('［この対局を終える］の後に開けば新しい開催（null）', pickSession(ended) === null);
+  ok('［対局終了］の後に開けば新しい開催（null）', pickSession(ended) === null);
   const two = applyOps(ended, [{ op: 'session_add', session_id: 's2', date: '2026-11-21', rate: 100 }, { op: 'table_add', table_id: 't2', session_id: 's2', label: '卓1' }, { ...hs('h9', [40000, 30000, 20000, 10000]), table_id: 't2' }]).state;
   ok('新しい開催を作った後はそれを続ける', pickSession(two) === 's2');
   ok('終えた開催の半荘は消えない', two.hanchans.some((h) => h.hanchan_id === 'h1') && sessionSeisan(two, 's1').ok && J(sessionSeisan(two, 's1').ten) === J(sessionSeisan(st, 's1').ten));
@@ -479,6 +479,22 @@ console.log('■ S2 卓のレート・取り消した卓・終えた後の比べ
   ok('門7 開催の voided が真偽値でない → rules_bad', is(gw((x) => { x.sessions[0].voided = 1; }), 'rules_bad', 'voided'));
   ok('門＋ 開催の rate が範囲の外 → rules_bad・null は ok', is(gw((x) => { x.sessions[0].rate = 15; }), 'rules_bad', 'rate') && gw((x) => { x.sessions[0].rate = null; }).mode === 'ok');
   ok('門で止まった部屋へは op が当たらない', applyOps((() => { const x = clone(st); T(x, 't1').rate_mode = 'zzz'; return x; })(), [{ op: 'member_add', member_id: 'mz', name: 'z' }]).res.err === 'newer');
+}
+
+console.log('■ canon（終えた時の控えの missing と今の missing を比べる字・鍵の順に左右されない＝倉庫の jsonb を回っても同じ・①v4.3）');
+{
+  const a = [{ table: 1, no: 2, why: 'sum', diff: -10000 }, { table: 1, what: 'chip', diff: 1 }];
+  const b = a.map((m) => Object.fromEntries(Object.entries(m).reverse()));
+  ok('鍵を逆の順にしても同じ字', canon(a) === canon(b) && JSON.stringify(a) !== JSON.stringify(b));
+  ok('並びの順が違えば違う字（1件目と2件目を入れ替え）', canon(a) !== canon([a[1], a[0]]));
+  ok('値が違えば違う字（diff −10000 → −9900）', canon(a) !== canon([{ ...a[0], diff: -9900 }, a[1]]));
+  ok('入れ子の鍵の順も見ない', canon({ x: { b: 1, a: [{ d: 1, c: 2 }] } }) === canon({ x: { a: [{ c: 2, d: 1 }], b: 1 } }));
+  ok('undefined は null と同じ字', canon(undefined) === canon(null));
+  // 画面の試験では鍵の順を変えた控えを作れない（倉庫を回った時だけ）＝画面が canon を通して比べている事を字で見る（naoshi 任意1）
+  const gr = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'gamen-room.mjs'), 'utf8');
+  const cnDef = gr.match(/const cn = \(x\) => ([^;]+);/);
+  ok('gamen-room の比べは canon を通す（cn の中身が canon(JSON.parse(JSON.stringify(…)))）', !!cnDef && /^canon\(JSON\.parse\(JSON\.stringify\(/.test(cnDef[1]), cnDef && cnDef[1]);
+  ok('gamen-room の missing の比べは cn だけ（JSON.stringify で比べない）', /cn\(lastMissing\) !== cn\(s\.missing\)/.test(gr) && !/JSON\.stringify\(lastMissing\)|JSON\.stringify\(s\.missing\)/.test(gr));
 }
 
 console.log(`\n${p} passed, ${f} failed`);
