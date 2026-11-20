@@ -72,6 +72,8 @@ jobs:
         run: node tests/hanchan-pt.test.mjs
       - name: 精算（lib/seisan.mjs）＝正解表（チップ・祝儀・飛び賞・レートの無い卓）＋乱数の卓で合計0と払う回数
         run: node tests/seisan.test.mjs
+      - name: 部屋の中の状態（lib/room-state.mjs）＝op を当てる・版の conflict・組ごと当てる・半荘の表・人ごとの窓・チップ祝儀・精算
+        run: node tests/room-state.test.mjs
 
       # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
       - name: 早見表（lib/score-table.mjs）が正解表の 600 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）

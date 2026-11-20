@@ -95,7 +95,8 @@ async function doCreate() {
     return;
   }
   localStorage.removeItem(PENDING());
-  const room = { room_id: res.room_id, room_no: res.room_no, name, role: 'kan', owner: true, token: p.token, channel_key: res.channel_key };
+  // rules＝倉庫の既定で埋めた形（倉庫の mj_read が来るまで、作った端末だけが部屋のルールを持つ）
+  const room = { room_id: res.room_id, room_no: res.room_no, name, role: 'kan', owner: true, token: p.token, channel_key: res.channel_key, rules: rulesOk(rules).rules };
   rememberRoom(me.id, room);
   showMade(room, pass);
 }
