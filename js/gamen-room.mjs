@@ -421,7 +421,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (last && changed.length && !viewSnap) {
       h += '<div class="r-red"><b>終えた後に変わりました（' + changed.length + '人）</b><span>' + changed.map((m) => esc(s.name(m))).join('・') + '</span></div>';
       h += '<p class="sec">終えた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.snap.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
-      h += '<button class="btn btn-main" id="sClose">この中身で終え直す</button><button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
+      if (!s.missing.length) h += '<button class="btn btn-main" id="sClose">この中身で終え直す</button>';
+      h += '<button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
       el.innerHTML = h; wireSeisan(d, settles.length); return;
     }
     const pay = viewSnap && last ? last.snap.pay : s.pay;
@@ -451,9 +452,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const nr = Object.entries(s.pt10NoRate || {});
     if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';
-    else if (!last || changed.length) {
-      h += '<button class="btn btn-main" id="sClose">この対局を終える（' + (s.missing.length ? '入っていない物 ' + s.missing.length + '件のまま' : 'この中身を残す') + '）</button>';
-      if (!s.missing.length) h += '<p class="r-hint">終えると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
+    else if ((!last || changed.length) && !s.missing.length) {
+      // 入っていない物がある間は終えさせない（終えた対局は今は開き直せない＝その分のお金が黙って落ちる・taiketsu-naoshi 11-20）
+      h += '<button class="btn btn-main" id="sClose">この対局を終える（この中身を残す）</button>';
+      h += '<p class="r-hint">終えると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
     }
     el.innerHTML = h;
     wireSeisan(d, settles.length);
@@ -462,6 +464,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const q = (x) => el.querySelector(x);
     if (q('#sClose')) q('#sClose').onclick = () => {
       const s = d.s;
+      if (s.missing.length) return;
       const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, at: new Date().toISOString(), snap: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, missing: s.missing.length, sig: sessionSig(st, d.sid) } }]);
       if (r.ok) { viewSnap = false; render(); }
     };
