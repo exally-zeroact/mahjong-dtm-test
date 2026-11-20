@@ -374,6 +374,18 @@ insert into mahjong.mj_caps (tbl, scope, cap) values
   ('rooms',     'all',     200)      -- R（消した取り消し待ちも数える）
 on conflict (tbl, scope) do update set cap = excluded.cap;
 
+-- ── 名前のそろえた字（v15.8 N1・版1）＝lib/name-key.mjs と1字も違わない手順 ───────
+--   ① NFKC ② カタカナ（ァ〜ヶ・ヽ ヾ）→ひらがな ③ 空白の字（下の13字を字で固定・s は場所の設定で変わるので使わない）を消す
+--   ④ 英字 A〜Z だけ小文字（lower() は場所の設定で変わるので使わない）＝translate 1回で ②③④
+--   試験＝tests/name-key.live.mjs（同じ字の表を倉庫と lib に通して同じ答え）
+create or replace function mahjong_private.mj_name_key(p_name text) returns text
+language sql immutable strict parallel safe set search_path = '' as $fn$
+  select pg_catalog.translate(pg_catalog.normalize(p_name, 'NFKC'),
+    'ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴヵヶヽヾABCDEFGHIJKLMNOPQRSTUVWXYZ' || chr(9) || chr(10) || chr(11) || chr(12) || chr(13) || chr(32) || chr(133) || chr(5760) || chr(6158) || chr(8203) || chr(8232) || chr(8233) || chr(65279),
+    'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖゝゞabcdefghijklmnopqrstuvwxyz')
+$fn$;
+revoke all on function mahjong_private.mj_name_key(text) from public, anon, authenticated;
+
 -- ── 権限：部屋は誰にも開けない（RLS も入・決まり書き0本） ─────────────────
 do $$
 declare t record;
