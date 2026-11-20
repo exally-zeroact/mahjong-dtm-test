@@ -350,6 +350,14 @@ if (process.argv.includes('--self-test')) {
     ['喰い平和形は30符', "fu = 30; fuParts.push({ name: '喰い平和形（30符）'", "fu = 20; fuParts.push({ name: '喰い平和形（30符）'"],
     ['赤の色ごとの上限', '4: [1, 2, 1] };', '4: [1, 2, 2] };'],
     ['包の R の責任者分（who で親子を分けない）', "const mine = Rp ? (pao.who === 'oya' ? Rp.oya : Rp.ko) : 0;", 'const mine = Rp ? Rp.ko : 0;'],
+    ['大三元', "isDragon(s.idx)).length === 3) ym.push", "isDragon(s.idx)).length === 9) ym.push"],
+    ['三色同刻2->1', "add('三色同刻', 2)", "add('三色同刻', 1)"],
+    ['三槓子2->1', "add('三槓子', 2)", "add('三槓子', 1)"],
+    ['混老頭2->1', "if (allIdx.every(isYao) && hasHonor) add('混老頭', 2);", "if (allIdx.every(isYao) && hasHonor) add('混老頭', 1);"],
+    ['純全帯3->2', "add('純全帯么九', k(3))", "add('純全帯么九', k(2))"],
+    ['本場ロン x3 -> x2', 'const hRon = unit * 3 * honba', 'const hRon = unit * 2 * honba'],
+    ['天和なし', "inp.tenhou ? { name: '天和', mult: 1 }", "inp.tenhou ? null"],
+    ['供託（1本 1,000 点）', 'return { rows, total, kyotaku: 1000 * kyotaku };', 'return { rows, total, kyotaku: 0 };'],
     ['包の who を見る', "if (ts && !oya && !['oya', 'ko'].includes(pao.who)) return fail('flags', 'pao-who');", ''],
   ];
   const dir = mkdtempSync(join(tmpdir(), 'score-self-'));

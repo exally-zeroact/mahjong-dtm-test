@@ -91,11 +91,11 @@ jobs:
       # ── 計算の道具（点数計算）＝lib/score.mjs の役・符・翻・払いを手で書いた正解表と突き合わせる ──────
       - name: 点数計算（lib/score.mjs）の役・符・翻・払いが手で書いた正解表 238 行と同じか（包・3人・赤・ドラ・flags の行つき）
         run: node tests/score.test.mjs
-      - name: 点数計算の見張りの自己確認（平和・符の切り上げ・高点法・ドラ・包・赤の上限・包の R など式を17か所壊して全部赤になるか）
+      - name: 点数計算の見張りの自己確認（平和・符の切り上げ・高点法・ドラ・包・赤の上限・包の R・役満・本場・三色同刻・三槓子・混老頭・純全帯・供託 など式を25か所壊して全部赤になるか）
         shell: bash
         run: |
           node tests/score.test.mjs --self-test | tee score-calc-self.out
-          sh scripts/ci-yuka.sh score-calc-self.out 17
+          sh scripts/ci-yuka.sh score-calc-self.out 25
       - name: 外の点数計算器（PyPI mahjong・版と hash を固定）を試験の時だけ使い捨ての箱に入れる（アプリには入れない）
         shell: bash
         run: |
