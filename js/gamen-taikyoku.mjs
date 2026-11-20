@@ -9,6 +9,7 @@ import { needLogin, showLogin, rpc, errText, rememberRoom, myRooms, roomUrl, tok
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
+import { mountRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
@@ -179,8 +180,7 @@ async function openRoom(roomId) {
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
   obi('');
   show('vRoom');
-  const m = await import('./gamen-room.mjs');
-  m.mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null), bar });
+  mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null), bar });
 }
 
 /* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま */
