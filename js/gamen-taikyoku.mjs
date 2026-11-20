@@ -53,6 +53,10 @@ function nameAndPass() {
   if (pass.trim().length < 4) return { err: 'パスは4字以上で入れてください。' };
   return { name, pass };
 }
+async function sha256Hex(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
 function goRules() {
   $('cErr0').textContent = '';
   const np = nameAndPass();
@@ -73,14 +77,16 @@ async function doCreate() {
   // 送り直しの印：同じ中身なら同じ op_id と token（返事が切れた時に部屋を2つ作らない）
   const body = JSON.stringify({ name, pass, rules });
   if (lastMade && lastMade.body === body) { showMade(lastMade.room, pass); return; }
+  // 端末に残すのは中身の sha256 だけ（パスの平文を localStorage に置かない）
+  const bodyH = await sha256Hex(body);
   let p = null;
   try { p = JSON.parse(localStorage.getItem(PENDING()) || 'null'); } catch { p = null; }
-  if (!p || p.body !== body) { p = { op_id: uuid(), token: newToken(), body }; localStorage.setItem(PENDING(), JSON.stringify(p)); }
+  if (!p || p.bodyH !== bodyH) { p = { op_id: uuid(), token: newToken(), bodyH }; localStorage.setItem(PENDING(), JSON.stringify(p)); }
   busy(btn, true);
   const res = await rpc('mj_room_create', { p_op_id: p.op_id, p_name: name, p_pass: pass, p_rules: rules, p_secrets: { url_token_hash: await tokenHash(p.token) } });
   busy(btn, false);
   if (!res.ok) {
-    if (res.err === 'mj_session') { showLogin(() => doCreate()); return; }
+    if (res.err === 'mj_session') { relogin(doCreate); return; }
     if (['bad', 'common', 'range', 'mismatch', 'mj_op_other_user'].includes(res.err)) localStorage.removeItem(PENDING());
     $('cErr').textContent = res.err === 'range' && RULE_ERR[res.key] ? RULE_ERR[res.key] : errText(res);
     return;
@@ -137,7 +143,7 @@ async function doJoin() {
   const res = await rpc('mj_room_join', { p_way: 'pass', p_room_no: no, p_key: null, p_pass: pass });
   busy(btn, false);
   if (!res.ok) {
-    if (res.err === 'mj_session') { showLogin(() => doJoin()); return; }
+    if (res.err === 'mj_session') { relogin(doJoin); return; }
     $('jErr').textContent = errText(res);
     return;
   }
@@ -156,7 +162,7 @@ async function urlJoin(token) {
   $('btnUrlRetry').hidden = true;
   const res = await rpc('mj_room_join', { p_way: 'url', p_room_no: null, p_key: token, p_pass: null });
   if (!res.ok) {
-    if (res.err === 'mj_session') { showLogin(() => urlJoin(token)); return; }
+    if (res.err === 'mj_session') { relogin(() => urlJoin(token)); return; }
     $('uMsg').textContent = '入れませんでした。';
     $('uErr').textContent = errText(res);
     $('btnUrlRetry').hidden = !['net', 'offline', 'busy', 'server'].includes(res.err);
@@ -191,6 +197,15 @@ function bar({ back = 'ホーム', onBack, title = '', right, onRight } = {}) {
 }
 
 /* ── 始め ── */
+/* ログインが切れた時：入り直した人で me を替える。別の人が入ったら、前の人の続き（作る・入る）はせず始めからにする
+ * （前の人の mj-rooms:<id>・mj-pending-create:<id> に別の人の部屋を混ぜない） */
+function relogin(next) {
+  showLogin((u) => {
+    const same = me && u && u.id === me.id;
+    me = u;
+    if (same) next(); else start(u);
+  });
+}
 function start(user) {
   me = user;
   obi('');
@@ -208,7 +223,7 @@ $('chSeg').addEventListener('click', (e) => {
 $('goRules').onclick = goRules;
 $('btnCreate').onclick = doCreate;
 $('btnJoin').onclick = doJoin;
-$('btnLogin').onclick = () => showLogin(start);
+$('btnLoginOpen').onclick = () => showLogin(start);
 
 show('vLogin');
 needLogin(start).catch((e) => { obi('止まりました：' + esc(e.message), 'err'); });

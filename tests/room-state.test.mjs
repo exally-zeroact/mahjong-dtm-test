@@ -2,7 +2,7 @@
  * 例は設計図 §2 の絵（1pt＝100・チップ1枚2.0pt・祝儀1枚1.0pt）に寄せた数。
  * 使い方: node tests/room-state.test.mjs
  */
-import { emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry } from '../lib/room-state.mjs';
+import { emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession } from '../lib/room-state.mjs';
 import { defaultRules } from '../lib/rules.mjs';
 
 let p = 0, f = 0;
@@ -172,6 +172,25 @@ console.log('■ 締め（settle_snap）');
   ok('settles の無い古い写しにも当たる', r5.ok && r5.state.settles.length === 1, J(r5));
   const r6 = applyOps(b, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: 'x', snap: { big: 'x'.repeat(33000) } }]);
   ok('中身 32KB 超えは弾く', !r6.ok && r6.res.err === 'range', J(r6.res));
+}
+
+console.log('■ 続ける開催（pickSession・taiketsu 止め2＝0時をまたいでも前の半荘を消さない）');
+{
+  const h1 = { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: [40000, 30000, 20000, 10000] };
+  ok('開催が無ければ null（新しく作る）', pickSession(emptyState(), '2026-11-21') === null);
+  const st = applyOps(base(), [h1]).state;
+  ok('同じ日は続ける', pickSession(st, '2026-11-20') === 's1');
+  ok('0時をまたいでも締めていなければ続ける（11/20 の開催を 11/21 に開き直す）', pickSession(st, '2026-11-21') === 's1');
+  const ten = sessionSeisan(st, 's1').ten;
+  const closed = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [] } }]).state;
+  ok('締めて何も変わっていない・別の日なら新しく作る', pickSession(closed, '2026-11-27') === null);
+  ok('締めても同じ日なら続ける', pickSession(closed, '2026-11-20') === 's1');
+  const more = applyOps(closed, [{ op: 'hanchan_start', hanchan_id: 'h2', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: [10000, 20000, 30000, 40000] }]).state;
+  ok('締めた後に半荘が増えていれば別の日でも続ける', pickSession(more, '2026-11-21') === 's1');
+  const two = applyOps(closed, [{ op: 'session_add', session_id: 's2', date: '2026-11-27', rate: 100 }, { op: 'table_add', table_id: 't2', session_id: 's2', rules }]).state;
+  ok('一番新しい開催を続ける（日付の字で探さない）', pickSession(two, '2026-11-28') === 's2');
+  const nosettles = JSON.parse(JSON.stringify(st)); delete nosettles.settles;
+  ok('settles の無い古い写しでも続ける', pickSession(nosettles, '2026-11-21') === 's1');
 }
 
 console.log(`\n${p} passed, ${f} failed`);

@@ -10,7 +10,7 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession } from '../lib/room-state.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid } from './gamen-core.mjs';
@@ -70,8 +70,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
 
   function ensureTable() {
-    const s = st.sessions.find((x) => x.date === today());
-    if (s) return st.tables.find((t) => t.session_id === s.session_id);
+    const sid0 = pickSession(st, today()); // 暦の日で探さない（0時をまたいでも同じ開催を続ける）
+    const t0 = sid0 && st.tables.find((t) => t.session_id === sid0);
+    if (t0) return t0;
     const sid = uuid(), tid = uuid();
     commit([
       { op: 'session_add', session_id: sid, date: today(), rate: room.rules.rate },

@@ -94,8 +94,12 @@ export async function needLogin(onUser) {
   if (u) { onUser(u); return; }
   showLogin(onUser);
 }
+/* ★呼びごとの onUser を持つ★（部品は mount の1回しか作らない＝最初の cb を閉じ込めると、2回目の showLogin の続きが捨てられる）
+ * 部品の setNewPass は ok(null) を返すことがある＝その時は今の人を引き直してから渡す */
+let loginNext = null;
 export function showLogin(onUser) {
   if (!globalThis.ExallyLogin) throw new Error('exally-login.js が読めていません');
+  loginNext = onUser || null;
   if (!loginUi) {
     loginUi = globalThis.ExallyLogin.mount({
       app: '麻雀の点数・精算',
@@ -104,7 +108,11 @@ export function showLogin(onUser) {
       theme: themeFromCss(),
       note: '一度ログインすれば、次からは自動で入れます。戦績はアカウントごとに残ります。',
       sb: sb(),
-      onLogin: (user) => { if (onUser) onUser(user); },
+      onLogin: async (user) => {
+        const u = user || (await currentUser());
+        const next = loginNext; loginNext = null;
+        if (u && next) next(u);
+      },
     });
   }
   loginUi.show();
