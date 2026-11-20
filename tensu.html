@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>点数計算｜麻雀〜do the math〜</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#14213D">
+<link rel="stylesheet" href="css/app.css">
+<script src="js/supa-config.js"></script>
+<script src="js/env-badge.js"></script>
+</head>
+<body class="tensu">
+<header class="appbar"><a class="back" id="back" href="index.html">‹ ホーム</a><h1>点数計算</h1></header>
+<main>
+<p class="obi" id="obi" hidden></p>
+<section class="pick hand-sec" id="hand-card" data-t="hand">
+  <div class="row-h"><h2 id="hand-h">手牌（13枚）＋ 和了牌</h2><button type="button" class="btn-s" id="clear-hand">全部消す</button></div>
+  <div class="tiles hand" id="hand"></div>
+</section>
+<div class="chips" id="chips">
+  <button type="button" class="chip" data-k="agari" data-v="ron">ロン</button>
+  <button type="button" class="chip" data-k="agari" data-v="tsumo">ツモ</button>
+  <button type="button" class="chip" data-k="oya" data-v="ko">子</button>
+  <button type="button" class="chip" data-k="oya" data-v="oya">親</button>
+  <button type="button" class="chip" data-k="riichi" data-v="1">立直</button>
+  <button type="button" class="chip" data-k="ippatsu" data-v="1">一発</button>
+</div>
+<div class="chips">
+  <button type="button" class="chip" id="bakaze">場風 東</button>
+  <button type="button" class="chip" id="jikaze">自風 南</button>
+</div>
+<button type="button" class="card pick dora" id="dora-card" data-t="dora"><span>ドラ表示</span><span class="tiles" id="dora"></span><span class="dora-to" id="dora-to"></span></button>
+<section class="card" id="result" aria-live="polite"></section>
+<section class="kb-sec">
+  <h2 class="sec-h" id="kb-h">牌を足す</h2>
+  <div class="kb" id="kb" aria-label="牌を選ぶ"></div>
+</section>
+<details class="card" id="more">
+  <summary>詳しい状況</summary>
+  <div class="chips" id="chips2">
+    <button type="button" class="chip" data-k="riichi" data-v="2">ダブル立直</button>
+    <button type="button" class="chip" data-k="rinshan" data-v="1">嶺上</button>
+    <button type="button" class="chip" data-k="haitei" data-v="1">海底</button>
+    <button type="button" class="chip" data-k="houtei" data-v="1">河底</button>
+    <button type="button" class="chip" data-k="chankan" data-v="1">槍槓</button>
+    <button type="button" class="chip" data-k="tenhou" data-v="1">天和</button>
+    <button type="button" class="chip" data-k="chiihou" data-v="1">地和</button>
+  </div>
+  <button type="button" class="card pick dora" id="ura-card" data-t="ura"><span>裏ドラ表示</span><span class="tiles" id="ura"></span></button>
+  <div class="steps" id="steps"></div>
+  <div class="sec-h">鳴き</div>
+  <div class="chips" id="meld-kinds">
+    <button type="button" class="chip pick" data-t="chi">チー</button>
+    <button type="button" class="chip pick" data-t="pon">ポン</button>
+    <button type="button" class="chip pick" data-t="minkan">明槓</button>
+    <button type="button" class="chip pick" data-t="ankan">暗槓</button>
+  </div>
+  <div class="tiles" id="melds"></div>
+  <div id="pao-box">
+    <div class="opts">
+      <label for="pao">包（責任払い）</label>
+      <select id="pao"><option value="">なし</option><option value="daisangen">大三元</option><option value="daisuushii">大四喜</option><option value="suukantsu">四槓子</option></select>
+    </div>
+    <div class="chips" id="pao-same"><button type="button" class="chip" data-v="1">放銃者が責任者</button></div>
+    <div class="chips" id="pao-who"><span class="sec-h">責任者</span><button type="button" class="chip" data-v="oya">親</button><button type="button" class="chip" data-v="ko">子</button></div>
+  </div>
+</details>
+<p class="note">記録はしない道具（半荘の点は終わった時に人が打つ）</p>
+</main>
+<script type="module" src="js/tensu.js"></script>
+</body>
+</html>

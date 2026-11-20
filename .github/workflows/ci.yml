@@ -125,15 +125,15 @@ jobs:
         run: |
           npm i --no-save playwright@1.60.0
           npx playwright install --with-deps webkit
-      - name: 早見表・待ち読みの画面（webkit 390×844・切り替え・3人折半・切り上げ・九蓮・中切り・見えている牌・3人・読み直し・壊れた端末の値）
+      - name: 早見表・待ち読み・点数計算の画面（webkit 390×844・切り替え・3人折半・切り上げ・九蓮・中切り・見えている牌・3人・読み直し・壊れた端末の値）
         timeout-minutes: 10
         run: node tests/e2e/keisan.e2e.mjs
-      - name: 画面の試験の自己確認（配る中身を1か所ずつ壊して 15 回とも赤になるか・作業木は触らない）
-        timeout-minutes: 15
+      - name: 画面の試験の自己確認（配る中身を1か所ずつ壊して 35 回とも赤になるか・作業木は触らない）
+        timeout-minutes: 20
         shell: bash
         run: |
           node tests/e2e/keisan.e2e.mjs --self-test | tee e2e-self.out
-          sh scripts/ci-yuka.sh e2e-self.out 15
+          sh scripts/ci-yuka.sh e2e-self.out 35
 
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。

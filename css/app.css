@@ -118,3 +118,30 @@ details.card > summary { min-height: 44px; display: flex; align-items: center; f
 .drow .tiles { grid-column: 2; }
 .empty { color: var(--c-ji-usui); font-size: 14px; margin: 4px 0; }
 .sec-h { margin: 0 0 8px; font-size: 14px; color: var(--c-ji-usui); font-weight: 600; }
+
+/* ── 点数計算（tensu.html・絵 dougu_v153 ①）── 押す所は字 16px→44・14px→36（11-19 の決め）・★body.tensu の時だけ効かせる（対局の gamen.css の .chips 等を変えない・11-20 taiketsu 止め2）★ */
+body.tensu .obi { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--c-man); color: var(--c-ji); font-size: 14px; }
+body.tensu .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; align-items: center; }
+body.tensu .chips[hidden] { display: none; }
+body.tensu .chip { position: relative; min-height: 36px; padding: 0 12px; font: inherit; font-size: 14px; border: 1px solid var(--c-sen); border-radius: 18px; background: var(--c-men); color: var(--c-ji); }
+body.tensu .chip::after { content: ""; position: absolute; inset: -4px 0; }
+body.tensu .chip[aria-pressed="true"] { border: 2px solid var(--c-kon); background: var(--c-kon-usui); color: var(--c-kon); font-weight: 600; }
+body.tensu .card.pick[aria-pressed="true"] { border: 2px solid var(--c-kon); }
+body.tensu .hand-sec, body.tensu .kb-sec { margin: 0 0 12px; }
+body.tensu .hand-sec .row-h { margin: 0 0 8px; }
+body.tensu .hand-sec .row-h h2, body.tensu .kb-sec .sec-h { margin: 0; font-size: 14px; color: var(--c-ji-usui); font-weight: 600; }
+body.tensu .kb-sec .sec-h { margin: 0 0 8px; }
+body.tensu button.card { display: flex; width: 100%; font: inherit; font-size: 16px; color: var(--c-ji); text-align: left; }
+body.tensu .dora { align-items: center; gap: 12px; min-height: 56px; }
+body.tensu .dora .dora-to { margin-left: auto; color: var(--c-ji-usui); }
+body.tensu .tbtn.win svg { outline: 2px solid var(--c-kin); outline-offset: 1px; border-radius: 3px; }
+body.tensu .tbtn.meld { display: inline-flex; align-items: flex-end; gap: 1px; margin: 0 8px 8px 0; line-height: 1; }
+body.tensu .tbtn.meld .mk { font-size: 12px; color: var(--c-ji-usui); margin-left: 4px; }
+body.tensu .yk { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 15px; font-variant-numeric: tabular-nums; margin: 8px 0; }
+body.tensu .yk > span:nth-child(2n) { text-align: right; font-weight: 600; }
+body.tensu .yk2 { grid-template-columns: 1fr auto 1fr auto; column-gap: 16px; }
+body.tensu .err { color: var(--c-aka); font-size: 15px; margin: 4px 0; }
+body.tensu .steps { display: grid; gap: 8px; margin: 0 0 12px; }
+body.tensu .step { display: grid; grid-template-columns: 1fr 44px 3em 44px; align-items: center; gap: 8px; font-size: 16px; }
+body.tensu .step .v { text-align: center; font-variant-numeric: tabular-nums; }
+body.tensu #pao-box .chips { margin-top: 8px; }

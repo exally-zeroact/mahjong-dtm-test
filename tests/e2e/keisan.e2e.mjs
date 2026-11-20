@@ -169,9 +169,125 @@ async function machi() {
   await b.ctx.close(); await b2.ctx.close();
 }
 
+// 点数計算（tensu.html・件4c）：絵 dougu_v153 ① の手（立直・平和・ドラ1＝3翻30符 3,900）と、ルールの帯・戻り先・端末の値・包・本場・3人
+const R4 = { players: 4, kuitan: true, aka: 3, double_yakuman: true, renpu_fu: 4, kiriage: false, kazoe: 'yakuman', tsumo3: 'son', honba: 300, kita: 'none', pao: true };
+const tq = (r, from) => 'tensu.html?' + (r === undefined ? '' : 'r=' + encodeURIComponent(typeof r === 'string' ? r : JSON.stringify(r))) + (from === undefined ? '' : '&from=' + encodeURIComponent(from));
+const HAND = '2m3m4m5m6m7m2p3p4p6s7s9p9p8s';
+async function tensu() {
+  const { p, ctx, errs } = await open(tq(R4, '/taikyoku.html?t=1'));
+  ok('点数 4人の牌の選びは34', (await p.$$('#kb button[data-c]')).length === 34);
+  ok('点数 11鍵そろい＝帯なし', await p.$eval('#obi', (e) => e.hidden));
+  ok('点数 戻り先＝/taikyoku.html?t=1', (await p.getAttribute('#back', 'href')) === '/taikyoku.html?t=1' && (await txt(p, '#back')).includes('対局'));
+  await p.click('.chip[data-k="riichi"][data-v="1"]');
+  await p.click('#dora-card'); await tap(p, ['7s']);
+  ok('点数 ドラ表示 7索→ドラ 8索', (await txt(p, '#dora-to')).includes('8索'));
+  await p.click('#hand-h');
+  await tap(p, split(HAND));
+  ok('点数 14枚で鍵盤が押せない', await p.$eval('#kb button[data-c="1m"]', (e) => e.disabled));
+  ok('点数 最後の牌に和了の枠', (await p.$$('#hand .tbtn.win')).length === 1 && await p.$eval('#hand .tbtn:last-child', (e) => e.classList.contains('win')));
+  ok(`点数 子ロン 3翻30符 3,900（${(await txt(p, '#result')).slice(0, 20)}）`, (await txt(p, '#hanfu')).includes('3翻 30符') && (await txt(p, '#pts')) === '3,900');
+  const y = await txt(p, '#yaku');
+  ok('点数 役＝立直・平和・ドラ', ['立直', '平和', 'ドラ'].every((s) => y.includes(s)));
+  ok('点数 符の内訳＝副底20・門前ロン10', (await txt(p, '#fu')).includes('門前ロン') && (await txt(p, '#fu')).includes('20符'));
+  const [a, b2] = await p.$$eval('#yaku > span', (s) => [s[0].getBoundingClientRect().top, s[2].getBoundingClientRect().top]);
+  ok('点数 役は2列（立直と平和が同じ行）', Math.abs(a - b2) < 1);
+  ok('点数 払いの箱は本場0・包なしで出さない', !(await p.$('#pay')));
+  await p.click('.chip[data-k="agari"][data-v="tsumo"]');
+  ok('点数 子ツモ 4翻20符 1,300-2,600', (await txt(p, '#pts')) === '1,300-2,600');
+  await p.click('.chip[data-k="oya"][data-v="oya"]');
+  ok('点数 親を押すと自風 東', (await txt(p, '#jikaze')).includes('東'));
+  ok('点数 親ツモ 2,600オール', (await txt(p, '#pts')) === '2,600オール');
+  await p.click('.chip[data-k="agari"][data-v="ron"]');
+  ok('点数 親ロン 5,800', (await txt(p, '#pts')) === '5,800');
+  await p.click('.chip[data-k="oya"][data-v="ko"]');
+  ok('点数 子に戻すと自風 南', (await txt(p, '#jikaze')).includes('南'));
+  // 押す所の高さ（チップ 14px→36）・はみ出し0・包「なし」なら包の選びを出さない
+  await p.click('#more summary');
+  const lay = await p.evaluate(() => { const o = []; const W = document.documentElement.clientWidth; for (const e of document.querySelectorAll('button, select, summary, a')) { const r = e.getBoundingClientRect(); if (!r.width) continue; if (r.right > W + 0.5) o.push('はみ出し ' + (e.id || e.textContent.trim().slice(0, 6))); if (!e.closest('#kb,#hand,#melds,#dora,#ura') && r.height < (parseFloat(getComputedStyle(e).fontSize) >= 16 ? 44 : 36) - 0.5) o.push('低い ' + (e.id || e.textContent.trim().slice(0, 6)) + ' ' + Math.round(r.height)); } return o; });
+  ok(`点数 高さ・はみ出し（${lay.slice(0, 3).join('・')}）`, lay.length === 0);
+  ok('点数 チップ6つが1段', new Set(await p.$$eval('#chips .chip', (s) => s.map((e) => Math.round(e.getBoundingClientRect().top)))).size === 1);
+  ok('点数 包なしなら包の選びを出さない', !(await p.isVisible('#pao-same')) && !(await p.isVisible('#pao-who')));
+  // 本場1＝払いの箱に 4,200
+  await p.click('button[data-s="honba"][data-d="1"]');
+  ok('点数 1本場 受け取り計 4,200', (await txt(p, '#pay')).includes('4,200'));
+  // ドラの札を2度押すと最後の1枚を外す（1本場のまま＝子ロン 2翻30符 2,000）
+  await p.click('#dora-card'); await p.click('#dora-card');
+  ok('点数 ドラを2度押すと外れる', (await p.$$('#dora .tbtn')).length === 0 && (await txt(p, '#pts')) === '2,000');
+  // 手牌を押すと外れる→残りの字
+  await p.click('#hand .tbtn:last-child');
+  ok('点数 和了牌を外すと「あと 1 枚」', (await txt(p, '#result')).includes('あと 1 枚'));
+  // 端末に覚える（読み直しで手が残る）
+  await p.reload(); await p.waitForSelector('#kb button');
+  ok('点数 読み直しで手が残る（13枚）', (await p.$$('#hand .tbtn')).length === 13);
+  ok(`点数 画面の誤り0（${errs.join(' / ').slice(0, 80)}）`, errs.length === 0);
+  await ctx.close();
+
+  // 和了牌＝最後に入れた牌（任意a）：3p 嵌張＝立直・ドラ1 2翻40符 2,600（最初の 2m を和了牌にすると平和がつき 3,900）
+  {
+    const c = await open(tq(R4));
+    await c.p.click('.chip[data-k="riichi"][data-v="1"]');
+    await c.p.click('#dora-card'); await tap(c.p, ['7s']); await c.p.click('#hand-h');
+    await tap(c.p, split('2m3m4m5m6m7m2p4p6s7s8s9p9p3p'));
+    ok(`点数 和了牌＝最後の 3p 嵌張 2,600（${await txt(c.p, '#pts')}）`, (await txt(c.p, '#pts')) === '2,600' && (await txt(c.p, '#hanfu')).includes('40符'));
+    await c.ctx.close();
+  }
+  // 卓の rules 41鍵まるごと（対局の［点数］の口）＝帯なし・from は ?room= を残す
+  {
+    const full3 = JSON.parse(JSON.stringify((await import('../../lib/rules.mjs')).defaultRules(3)));
+    const c = await open(tq(full3, '/taikyoku.html?room=x1'));
+    ok('点数 41鍵の3人＝帯なし・鍵盤27', await c.p.$eval('#obi', (e) => e.hidden) && (await c.p.$$('#kb button[data-c]')).length === 27);
+    ok('点数 from=/taikyoku.html?room=x1 を残す', (await c.p.getAttribute('#back', 'href')) === '/taikyoku.html?room=x1');
+    await c.ctx.close();
+  }
+  // 点数計算の CSS は body.tensu の時だけ（止め2・対局の .chips 等を変えない）＝配った中身を読む（壊しが効くように）
+  {
+    const css = (await (await fetch(BASE + 'css/app.css')).text()).replace(/\r\n/g, '\n');
+    const k = css.indexOf('/* ── 点数計算（tensu.html');
+    const sels = k < 0 ? [] : css.slice(k).split('\n').slice(1).filter((l) => l.includes('{')).flatMap((l) => l.split('{')[0].split(','));
+    const out = sels.filter((x) => !x.trim().startsWith('body.tensu '));
+    ok(`点数 CSS の選び ${sels.length} 本が全部 body.tensu（外れ ${out.slice(0, 2).join('・')}）`, sels.length >= 20 && out.length === 0);
+  }
+  // 帯：?r= 無し・壊れ・落ちる・欠け
+  for (const [r, want, what] of [[undefined, '既定のルール（4人）', '無し'], ['{oops', '既定のルール（4人）', '壊れ'], [{ players: 5 }, '既定のルール（4人）', '落ちる'], [{ players: 4 }, '一部のルールが既定', '欠け']]) {
+    const c = await open(tq(r));
+    ok(`点数 ?r= ${what}＝帯「${want}」`, !(await c.p.$eval('#obi', (e) => e.hidden)) && (await txt(c.p, '#obi')).includes(want));
+    await c.ctx.close();
+  }
+  // 戻り先：外・壊れ・別の道は ホーム／同じ origin の絶対は組み直す／/r/<token>
+  const okTok = '/r/' + '0123456789abcdef'.repeat(2) + '?x=1';
+  for (const [f, want] of [['//evil.example/taikyoku.html', 'index.html'], ['/\\evil.example/taikyoku.html', 'index.html'], ['%2F%2Fevil.example/taikyoku.html', 'index.html'], ['/\t/evil.example/taikyoku.html', 'index.html'], ['/\ttaikyoku.html', '/taikyoku.html'], ['/index.html?x', 'index.html'], ['/r/ABC', 'index.html'], ['javascript:alert(1)', 'index.html'], [okTok, okTok], ['@SELF/taikyoku.html?t=2', '/taikyoku.html?t=2']]) {
+    const c = await open(tq(R4, f.replace('@SELF/', BASE)));
+    ok(`点数 from=${JSON.stringify(f)} → ${want}`, (await c.p.getAttribute('#back', 'href')) === want);
+    await c.ctx.close();
+  }
+  // 壊れた端末の値：読めない牌・多すぎ・変な鍵は落として動く
+  const bad1 = await open(tq(R4), ['mj.tensu.v1', JSON.stringify({ agari: 'x', riichi: 9, jikaze: '8z', hand: ['1m', '1m', '1m', '1m', '1m', 'zz', 3, '0m', '8sXYZ', ...split('2p3p4p5p6p7p8p9p1s2s3s4s5s')], dora: 'x', melds: [{ kind: 'pon', tiles: ['1m', '1m'] }], aka: 99, pao: 'x' })]);
+  const hn = (await bad1.p.$$('#hand .tbtn')).length;
+  const n1m = (await bad1.p.$$('#hand button[aria-label="1萬を外す"]')).length;
+  ok(`点数 壊れた端末の値を落とす（手 ${hn}・1萬 ${n1m}＝5枚目を落として4）`, hn === 14 && n1m === 4 && (await txt(bad1.p, '#jikaze')).includes('南'));
+  ok('点数 長い牌の字（8sXYZ）は落とす', (await bad1.p.$$('#hand button[aria-label="8索を外す"]')).length === 0);
+  ok(`点数 壊れた端末の値で誤り0（${bad1.errs.join(' / ').slice(0, 80)}）`, bad1.errs.length === 0);
+  await bad1.ctx.close();
+  const bad2 = await open(tq(R4), ['mj.tensu.v1', '{oops']);
+  ok('点数 読めない端末の値でも開く', (await bad2.p.$$('#kb button[data-c]')).length === 34 && bad2.errs.length === 0);
+  await bad2.ctx.close();
+  // 包なしのルール・3人
+  const np = await open(tq({ ...R4, pao: false }));
+  ok('点数 pao=false で包を出さない', await np.p.$eval('#pao-box', (e) => e.hidden));
+  await np.ctx.close();
+  const s3 = await open(tq({ ...R4, players: 3, kita: 'nuki', aka: 2 }), ['mj.tensu.v1', JSON.stringify({ melds: [{ kind: 'chi', tiles: ['1p', '2p', '3p'] }, { kind: 'pon', tiles: ['5p', '5p', '5p'] }] })]);
+  ok('点数 3人で覚えたチーは落とす・ポンは残す', (await s3.p.$$('#melds .tbtn')).length === 1);
+  ok('点数 3人の牌の選びは27（2〜8萬なし）', (await s3.p.$$('#kb button[data-c]')).length === 27);
+  await s3.p.click('#more summary');
+  ok('点数 3人はチーを出さない・北抜きを出す', !(await s3.p.isVisible('#meld-kinds [data-t="chi"]')) && !!(await s3.p.$('#v-kita')));
+  await s3.p.click('#jikaze'); await s3.p.click('#jikaze');
+  ok('点数 3人の自風は北を飛ばす（南→西→東）', (await txt(s3.p, '#jikaze')).includes('東'));
+  await s3.ctx.close();
+}
+
 async function run() {
   bad.length = 0; n = 0;
-  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi]]) {
+  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi], ['点数計算', tensu]]) {
     try { await fn(); } catch (e) {
       if (e === STOP) break;
       bad.push(`${nm} の途中で止まった（${String(e.message).split(String.fromCharCode(10))[0]}）`);
@@ -198,13 +314,33 @@ const BREAKS = [
   ['js/machi.js', 'else st.seen.push(c);', 'else st.hand.push(c);', '見えている牌に入らない'],
   ['js/machi.js', 'localStorage.setItem(KEY,', "localStorage.setItem('x' + KEY,", '端末に覚えない'],
   ['js/machi.js', 'if (k === \'mode\' && st.hand.length > max()) st.hand = st.hand.slice(0, max());', '', '13枚に戻しても切らない'],
+  ["js/tensu.js","tsumo: st.agari === 'tsumo',","tsumo: false,","ツモを式に繋がない"],
+  ["js/tensu.js","if (v === 'oya') st.jikaze = '1z';","if (v === 'oya') st.jikaze = '2z';","親を押しても自風が東にならない"],
+  ["js/tensu.js","if (SCORE_KEYS.some(","if (false && SCORE_KEYS.some(","ルールの欠けで帯を出さない"],
+  ["js/tensu.js","(u.pathname === '/taikyoku.html' || (m && TOKEN_RE.test(m[1])))","true","戻り先の道を見ない"],
+  ["js/tensu.js","$('back').href = u.pathname + u.search;","$('back').href = f;","戻り先を組み直さない"],
+  ["js/tensu.js","st.hand = (Array.isArray(st.hand) ? st.hand : []).filter(take).slice(0, 14 - 3 * st.melds.length);","","点数の端末の値の守りを外す"],
+  ["js/tensu.js","if (target === t && st[t].length) st[t].pop(); else target = t;","target = t;","ドラを2度押しても外れない"],
+  ["js/tensu.js","if (st.honba || st.kyotaku || input().pao)","if (st.kyotaku || input().pao)","本場で払いの箱を出さない"],
+  ["js/tensu.js","localStorage.setItem(KEY,","localStorage.setItem('x' + KEY,","点数の手を端末に覚えない"],
+  ["js/tensu.js","if (!exists(i, P)) return '';","if (false) return '';","3人で 2〜8萬を鍵盤から消さない"],
+  ["js/tensu.js","for (const id of ['bakaze', 'jikaze'])","for (const id of ['bakaze'])","自風が回らない"],
+  ["css/app.css","body.tensu .chips[hidden] { display: none; }\n","","包の選びの隠しが効かない"],
+  ["css/app.css","body.tensu .yk2 { grid-template-columns: 1fr auto 1fr auto; column-gap: 16px; }\n","","役を2列にしない"],
+  ["css/app.css","min-height: 36px; padding: 0 12px; font: inherit; font-size: 14px; border: 1px solid var(--c-sen); border-radius: 18px;","min-height: 30px; height: 30px; padding: 0 12px; font: inherit; font-size: 14px; border: 1px solid var(--c-sen); border-radius: 18px;","チップの高さを 30 にする"],
+  ["css/app.css",".chip { position: relative; min-height: 36px; padding: 0 12px;",".chip { position: relative; min-height: 36px; padding: 0 24px;","チップが2段に折れる"],
+  ["js/tensu.js","if (n[i] >= 4) return false; n[i]++;","n[i]++;","端末の値の4枚の上限を外す"],
+  ["js/tensu.js","win: st.hand[st.hand.length - 1],","win: st.hand[0],","和了牌を最後の牌にしない"],
+  ["js/tensu.js","typeof c === 'string' && c.length === 2 ?","typeof c === 'string' ?","長い牌の字を落とさない"],
+  ["js/tensu.js"," && !(P === 3 && m.kind === 'chi')","","3人で覚えたチーを落とさない"],
+  ["css/app.css","body.tensu .chips { display: flex;",".chips { display: flex;","点数の CSS を全部の画面に効かせる"],
   ['lib/shanten.mjs', null, null, '待ちの残り枚数を1枚ずらす'],
 ];
 
 if (!SELF) {
   const b = await run();
   for (const x of b) console.log('  ✗ ' + x);
-  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・webkit 390×844）`);
+  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・webkit 390×844）`);
   await shut();
   process.exit(b.length ? 1 : 0);
 }
