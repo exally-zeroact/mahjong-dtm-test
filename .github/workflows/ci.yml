@@ -14,7 +14,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest は 26.04 を指し playwright 1.60.0 が WebKit を入れられない（11-20 CI 44711741411 赤）・他の repo と同じに固定
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
