@@ -224,11 +224,11 @@ alter table mahjong.cells add column if not exists updated_by_user uuid;
 alter table mahjong.cells drop constraint if exists cells_no_device;
 alter table mahjong.cells add constraint cells_no_device check (updated_by_device is null);
 
--- ── 卓のチップ・祝儀の枚（卓ごと・人ごと） ─────────────────────────────────
+-- ── 卓のチップ・祝儀・自由な項目の枚（卓ごと・人ごと） ─────────────────────────
 create table if not exists mahjong.extras (
   table_id          uuid not null references mahjong.tables(id) on delete cascade,
   member_id         uuid not null references mahjong.members(id) on delete cascade,
-  kind              text not null check (kind in ('chip', 'shugi')),
+  kind              text not null,                   -- 種の check は下の alter（extras_kind_ok・2c-3b で自由な項目 c:<id> を足した）
   value             int not null check (value between -999 and 999),
   version           int not null default 1 check (version >= 1),
   updated_by_device uuid,
@@ -238,6 +238,19 @@ create table if not exists mahjong.extras (
 alter table mahjong.extras add column if not exists updated_by_user uuid;
 alter table mahjong.extras drop constraint if exists extras_no_device;
 alter table mahjong.extras add constraint extras_no_device check (updated_by_device is null);
+-- 種の check（2c-3b・write3_sekkei.md §1・C2）：create の中の古い無名の check（'chip' を含む）は pg_constraint から名を引いて落とす
+--   c:<id>＝ルールの tane_custom の id（^[a-z0-9]{1,8}$）・どの id が在るかは mj_w_kind が卓のルールで見る（表は形だけ）
+do $exck$
+declare r record;
+begin
+  for r in select c.conname from pg_catalog.pg_constraint c
+            where c.conrelid = 'mahjong.extras'::regclass and c.contype = 'c' and c.conname <> 'extras_kind_ok'
+              and pg_catalog.pg_get_constraintdef(c.oid) like '%''chip''%' loop
+    execute pg_catalog.format('alter table mahjong.extras drop constraint %I', r.conname);
+  end loop;
+end $exck$;
+alter table mahjong.extras drop constraint if exists extras_kind_ok;
+alter table mahjong.extras add constraint extras_kind_ok check (kind in ('chip', 'shugi') or kind ~ '^c:[a-z0-9]{1,8}$');
 
 -- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から＝飛んだ人が他の全員に tobi_pt ずつ・分けない＝v15.9） ──
 create table if not exists mahjong.tobi (
@@ -1544,11 +1557,35 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_hstate(uuid) from public, anon, authenticated;
 
--- 卓のチップ・祝儀（種ごと）：使う＝ルールの *_pt10 が JSON の null でない（鍵が無い・数でない値も使う側＝倉庫だけの守り）
+-- 種の確かめ（2c-3b・write3_sekkei.md §3）：卓のルール p_rules で種 p_kind を見て 'sum0'（合計0の種）／'out'（外へ払う種）／null（弾く）
+--   'chip'・'shugi'＝*_pt10 が JSON の null なら null（使わない種）・でなければ 'sum0'（鍵が無いのも使う側＝倉庫だけの守り・今まで通り）
+--   'c:<id>'＝tane_custom が配列で id が一致する物が在る時だけ（★pt10 の鍵の在りで判じない★）・sum0 false＝'out'／それ以外＝'sum0'
+--   それ以外（字でない・形が違う・無い id）＝null
+create or replace function mahjong_private.mj_w_kind(p_rules jsonb, p_kind jsonb) returns text
+language plpgsql immutable set search_path = '' as $fn$
+declare v_k text; v_t jsonb;
+begin
+  if p_kind is null or pg_catalog.jsonb_typeof(p_kind) <> 'string' then return null; end if;
+  v_k := p_kind #>> '{}';
+  if v_k in ('chip', 'shugi') then
+    if p_rules -> (v_k || '_pt10') = 'null'::jsonb then return null; end if;
+    return 'sum0';
+  end if;
+  if v_k !~ '^c:[a-z0-9]{1,8}$' or pg_catalog.jsonb_typeof(p_rules -> 'tane_custom') is distinct from 'array' then return null; end if;
+  select q.e into v_t from pg_catalog.jsonb_array_elements(p_rules -> 'tane_custom') q(e)
+   where q.e ->> 'id' = pg_catalog.substr(v_k, 3) limit 1;
+  if v_t is null then return null; end if;
+  return case when v_t -> 'sum0' = 'false'::jsonb then 'out' else 'sum0' end;
+end $fn$;
+revoke all on function mahjong_private.mj_w_kind(jsonb, jsonb) from public, anon, authenticated;
+
+-- 卓のチップ・祝儀・自由な項目（種ごと）：使う＝ルールの *_pt10 が JSON の null でない（鍵が無い・数でない値も使う側＝倉庫だけの守り）
 --   使う種は extras のその種の合計が0なら ok・でなければ ng（行が無い＝0）。extra_state＝使う種が全部 ok なら ok
+--   自由な項目（2c-3b）：合計0の種（sum0 true）はその種の合計が0でなければ ng・extra_reason＝tane_custom の並びの順の最初の 'c:<id>'
+--     （chip・shugi の ng は今まで通り reason null）・外へ払う種（sum0 false）は合計を見ない・卓のルールに無い c:<id> の行は数えない
 create or replace function mahjong_private.mj_w_tstate(p_tid uuid) returns void
 language plpgsql set search_path = '' as $fn$
-declare rs jsonb; v_c bigint; v_s bigint; v_cs text; v_ss text; v_es text; v_done boolean;
+declare rs jsonb; v_c bigint; v_s bigint; v_cs text; v_ss text; v_es text; v_done boolean; v_why text; v_sum0 text[];
 begin
   select r.rules into rs from mahjong.tables t join mahjong.rule_sets r on r.id = t.rule_set_id and r.version = t.rule_version
    where t.id = p_tid for update of t;
@@ -1557,13 +1594,20 @@ begin
     into v_c, v_s from mahjong.extras e where e.table_id = p_tid;
   v_cs := case when rs -> 'chip_pt10' = 'null'::jsonb then 'unused' when v_c = 0 then 'ok' else 'ng' end;
   v_ss := case when rs -> 'shugi_pt10' = 'null'::jsonb then 'unused' when v_s = 0 then 'ok' else 'ng' end;
-  v_es := case when v_cs = 'ng' or v_ss = 'ng' then 'ng' else 'ok' end;
+  v_sum0 := array(select 'c:' || (q.e ->> 'id') from pg_catalog.jsonb_array_elements(
+                     case when pg_catalog.jsonb_typeof(rs -> 'tane_custom') = 'array' then rs -> 'tane_custom' else '[]'::jsonb end) with ordinality q(e, n)
+                   where q.e -> 'sum0' is distinct from 'false'::jsonb order by q.n);
+  select u.k into v_why from pg_catalog.unnest(v_sum0) with ordinality u(k, n)
+   where coalesce((select pg_catalog.sum(e.value) from mahjong.extras e where e.table_id = p_tid and e.kind = u.k), 0) <> 0
+   order by u.n limit 1;
+  v_es := case when v_cs = 'ng' or v_ss = 'ng' or v_why is not null then 'ng' else 'ok' end;
   -- 一度そろった（2c-2a1）＝ok かつ使う種に0でない行が在る（生まれた卓・入れて戻した卓は行0か全部0＝入らない）
+  --   使う種＝使う chip・shugi・合計0の自由な項目（2c-3b）＝★外へ払う種の行だけでは入らない★（場代だけの卓は「そろった」にしない）
   v_done := v_es = 'ok' and exists (select 1 from mahjong.extras e where e.table_id = p_tid and e.value <> 0
-    and ((e.kind = 'chip' and v_cs <> 'unused') or (e.kind = 'shugi' and v_ss <> 'unused')));
-  update mahjong.tables t set chip_state = v_cs, shugi_state = v_ss, extra_state = v_es, extra_reason = null,
+    and ((e.kind = 'chip' and v_cs <> 'unused') or (e.kind = 'shugi' and v_ss <> 'unused') or e.kind = any (v_sum0)));
+  update mahjong.tables t set chip_state = v_cs, shugi_state = v_ss, extra_state = v_es, extra_reason = v_why,
     first_complete_at = case when v_done and t.first_complete_at is null then pg_catalog.now() else t.first_complete_at end
-   where t.id = p_tid and ((t.chip_state, t.shugi_state, t.extra_state, t.extra_reason) is distinct from (v_cs, v_ss, v_es, null::text)
+   where t.id = p_tid and ((t.chip_state, t.shugi_state, t.extra_state, t.extra_reason) is distinct from (v_cs, v_ss, v_es, v_why)
      or (v_done and t.first_complete_at is null));
 end $fn$;
 revoke all on function mahjong_private.mj_w_tstate(uuid) from public, anon, authenticated;
@@ -1698,7 +1742,7 @@ language plpgsql set search_path = '' as $fn$
 declare
   c_trim constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
   v_op text := p_o ->> 'op';
-  v_id uuid; v_id2 uuid; v_r uuid; v_s text; v_key text; v_n int; v_x int; v_bv int; v_rc int; k int;
+  v_id uuid; v_id2 uuid; v_r uuid; v_s text; v_key text; v_n int; v_x int; v_bv int; v_rc int; k int; v_kd text;
   v_j jsonb; v_j2 jsonb; v_j3 jsonb; v_rules jsonb; v_d date; v_rate int;
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
@@ -1953,13 +1997,9 @@ begin
     -- 確かめの順（2c-2a1・写しとそろえる）：kind → unused（使わない種）→ member（人・取り消した卓と開催日）→ add の range
     --   席にいない人の足しは組の終わりの正味の門（v1510:195①）で見る
     t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
-    if pg_catalog.jsonb_typeof(p_o -> 'kind') is distinct from 'string' or (p_o ->> 'kind') not in ('chip', 'shugi') then
-      perform mahjong_private.mj_w_bad(p_i, 'kind');
-    end if;
-    if exists (select 1 from mahjong.rule_sets r where r.id = t.rule_set_id and r.version = t.rule_version
-                 and r.rules -> ((p_o ->> 'kind') || '_pt10') = 'null'::jsonb) then
-      perform mahjong_private.mj_w_bad(p_i, 'kind');
-    end if;
+    -- 種（2c-3b）：chip・shugi・卓のルールの tane_custom に在る c:<id> だけ・使わない種も bad at kind（mj_w_kind）
+    v_kd := mahjong_private.mj_w_kind((select r.rules from mahjong.rule_sets r where r.id = t.rule_set_id and r.version = t.rule_version), p_o -> 'kind');
+    if v_kd is null then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
     v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
     if not exists (select 1 from mahjong.members m where m.id = v_id and m.room_id = p_room) then
       perform mahjong_private.mj_w_bad(p_i, 'member_id');
@@ -1973,6 +2013,8 @@ begin
     select e.value, e.version into c from mahjong.extras e where e.table_id = t.id and e.member_id = v_id and e.kind = (p_o ->> 'kind') for update;
     if found then
       if c.value + v_x not between -999 and 999 then perform mahjong_private.mj_w_bad(p_i, 'add', 'range'); end if;
+      -- 外へ払う種（2c-3b）は足した後が 0 未満なら bad（0〜999）
+      if v_kd = 'out' and c.value + v_x < 0 then perform mahjong_private.mj_w_bad(p_i, 'add'); end if;
       update mahjong.extras e set value = e.value + v_x, version = e.version + 1, updated_by_user = p_me, updated_at = pg_catalog.now()
        where e.table_id = t.id and e.member_id = v_id and e.kind = (p_o ->> 'kind');
       get diagnostics v_rc = row_count;
@@ -1983,6 +2025,7 @@ begin
       return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', c.version + 1), 'made', 0, 'hist', 1, 't', t.id,
         'ek', pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'));
     end if;
+    if v_kd = 'out' and v_x < 0 then perform mahjong_private.mj_w_bad(p_i, 'add'); end if;
     insert into mahjong.extras (table_id, member_id, kind, value, updated_by_user) values (t.id, v_id, p_o ->> 'kind', v_x, p_me);
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'extras',
       pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'), 'value', null, pg_catalog.to_jsonb(v_x), 1);
@@ -2251,13 +2294,9 @@ begin
   elsif v_op = 'extra_set' then
     -- 確かめの順は extra_add と同じ（kind → unused → member → 取り消した卓・開催日 → value の range）→ base_version
     t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
-    if pg_catalog.jsonb_typeof(p_o -> 'kind') is distinct from 'string' or (p_o ->> 'kind') not in ('chip', 'shugi') then
-      perform mahjong_private.mj_w_bad(p_i, 'kind');
-    end if;
-    if exists (select 1 from mahjong.rule_sets r2 where r2.id = t.rule_set_id and r2.version = t.rule_version
-                 and r2.rules -> ((p_o ->> 'kind') || '_pt10') = 'null'::jsonb) then
-      perform mahjong_private.mj_w_bad(p_i, 'kind');
-    end if;
+    -- 種（2c-3b）：extra_add と同じ（mj_w_kind）
+    v_kd := mahjong_private.mj_w_kind((select r2.rules from mahjong.rule_sets r2 where r2.id = t.rule_set_id and r2.version = t.rule_version), p_o -> 'kind');
+    if v_kd is null then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
     v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
     if not exists (select 1 from mahjong.members x where x.id = v_id and x.room_id = p_room) then
       perform mahjong_private.mj_w_bad(p_i, 'member_id');
@@ -2267,6 +2306,8 @@ begin
     end if;
     v_x := mahjong_private.mj_w_int(p_o, 'value', p_i);
     if v_x not between -999 and 999 then perform mahjong_private.mj_w_bad(p_i, 'value', 'range'); end if;
+    -- 外へ払う種（2c-3b）は 0 未満なら bad（0〜999）
+    if v_kd = 'out' and v_x < 0 then perform mahjong_private.mj_w_bad(p_i, 'value'); end if;
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
     select e.value, e.version into c from mahjong.extras e where e.table_id = t.id and e.member_id = v_id and e.kind = (p_o ->> 'kind') for update;
     if found then

@@ -101,6 +101,11 @@ const MX = U(), HA3 = U(), HA4 = U();
 /* ⑦' 2c-2a1：[卓, 半荘]（部屋 A・開催日 SA・席は MA[0..3]・MA[4] は席にいない人） */
 const PN = [U(), U()], PP = [U(), U()], PQ = [U(), U()], GN = [U(), U()], SV = [U(), U()], SW = [U(), U()];
 const xa = (T, who, add, kind = 'chip') => O('extra_add', { table_id: T[0], member_id: typeof who === 'number' ? MA[who] : who, kind, add });
+/* ⑫ 2c-3b 自由な項目（write3_sekkei.md §3）：ra のルールに tane_custom を塊の中だけ足す（並びは ko・ba・ke＝id の順と違う＝理由が並びの順か見る） */
+const TC = [{ id: 'ko', name: 'コイン', pt10: 5, sum0: true }, { id: 'ba', name: '場代', pt10: 10, sum0: false }, { id: 'ke', name: '景品', pt10: 3, sum0: true }];
+const C3N = [U(), U()], C3P = [U(), U()], C3Q = [U(), U()];
+const TK = (t) => `select jsonb_build_object('c', chip_state, 's', shugi_state, 'e', extra_state, 'why', extra_reason, 'fc', first_complete_at is not null) from mahjong.tables where id = '${t}'`;
+const XSUM = (t, kind) => `select coalesce(sum(value), 0) from mahjong.extras where table_id = '${t}' and kind = '${kind}'`;
 const mkT = (T, cells = C4) => [O('table_add', { table_id: T[0], session_id: SA, label: 'p' }), O('hanchan_start', { hanchan_id: T[1], table_id: T[0], seats: MA.slice(0, 4), cells })];
 const ov = (h) => S(`(select to_jsonb(order_version) from mahjong.hanchans where id = '${h}')`);
 const TON4 = [MA[1], MA[0], MA[3], MA[2]];
@@ -379,6 +384,39 @@ const body = `
     ${W('kf1', 1, 'rf', A(O('extra_add', { table_id: CASES[9][4], member_id: MF[0], kind: 'chip', add: 1 })))}
     ${ROW('kf1_row', TR(CASES[9][4]))}`)}
   ${ROW('c7_x', `select count(*) from mahjong.extras where table_id = '${CASES[10][4]}'`)}
+
+  /* ⑫ 2c-3b 自由な項目 */
+  ${undo('k3', `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify({ tane_custom: TC }))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);
+    ${W('k3a', 1, 'ra', A(...mkT(C3N), ...mkT(C3P), ...mkT(C3Q)))}
+    ${W('k3b', 2, 'ra', A(xa(C3N, 0, 3, 'c:ko')))}
+    ${ROW('k3b_t', TK(C3N[0]))}
+    ${W('k3c', 2, 'ra', A(xa(C3N, 1, -3, 'c:ko')))}
+    ${ROW('k3c_t', TK(C3N[0]))}
+    ${W('k3d', 2, 'ra', A(xa(C3P, 0, 5, 'c:ba')))}
+    ${ROW('k3d_t', TK(C3P[0]))}
+    ${W('k3e', 2, 'ra', A(xa(C3P, 0, -6, 'c:ba')))}
+    ${ROW('k3e_x', XSUM(C3P[0], 'c:ba'))}
+    ${W('k3e2', 2, 'ra', A(xa(C3P, 0, -5, 'c:ba')))}
+    ${ROW('k3e2_x', XSUM(C3P[0], 'c:ba'))}
+    ${W('k3f', 2, 'ra', A(xa(C3Q, 0, -1, 'c:ba')))}
+    ${W('k3g', 2, 'ra', A(O('extra_set', { table_id: C3Q[0], member_id: MA[0], kind: 'c:ba', value: -1, base_version: 0 })))}
+    ${W('k3g2', 2, 'ra', A(O('extra_set', { table_id: C3Q[0], member_id: MA[0], kind: 'c:ba', value: 0, base_version: 0 })))}
+    ${W('k3h', 2, 'ra', A(xa(C3Q, 0, 1, 'c:zz')))}
+    ${W('k3i1', 2, 'ra', A(xa(C3Q, 0, 1, 'c:')))}
+    ${W('k3i2', 2, 'ra', A(xa(C3Q, 0, 1, 'c:ABC')))}
+    ${W('k3i3', 2, 'ra', A(xa(C3Q, 0, 1, 'c:123456789')))}
+    ${ROW('k3i_x', `select count(*) from mahjong.extras where table_id = '${C3Q[0]}'`)}
+    ${W('k3j', 2, 'ra', A(xa(C3Q, 0, 1, 'c:ke'), xa(C3Q, 0, 1, 'c:ko')))}
+    ${ROW('k3j_t', TK(C3Q[0]))}
+    ${W('k3m', 2, 'ra', A(xa(C3Q, 0, 1)))}
+    ${ROW('k3m_t', TK(C3Q[0]))}
+    ${W('k3k', 2, 'ra', A(xa(C3N, 0, 1)))}
+    ${ROW('k3k_t', TK(C3N[0]))}
+    ${W('k3l', 2, 'ra', A(O('extra_set', { table_id: C3P[0], member_id: MA[1], kind: 'c:ko', value: 2, base_version: 0 })))}
+    ${ROW('k3l_t', TK(C3P[0]))}
+    ${ROW('k3l_x', XSUM(C3P[0], 'c:ko'))}`)}
+  ${undo('k4', `${W('k4a', 1, 'ra', A(...mkT(C3N)))}
+    ${W('k4b', 2, 'ra', A(xa(C3N, 0, 1, 'c:ko')))}`)}
 
   /* ⑦' 2c-2a1 卓の一度そろった・卓の印 */
   ${RS}
@@ -852,6 +890,25 @@ function check(out, lib, say) {
   });
   ok('⑦ lib（画面の room-state.mjs）を読めた' + (lib.where ? '（' + lib.where + '）' : ''), !!lib.mod, lib.err || '');
   ok('⑦ 倉庫だけの守り：chip_pt10 の鍵が無い → 使う側（+1 で ng）', isOk('kf1') && out.kf1_row?.c === 'ng', J([R('kf1'), out.kf1_row, out.kf_err]));
+  /* ⑫ 2c-3b 自由な項目（倉庫だけ＝写しは画面が 2c-3b の形を持つまで比べない） */
+  const tk = (k, e, why, fc) => out[k]?.e === e && out[k]?.why === why && out[k]?.fc === fc;
+  ok('⑫ 卓の用意（ルールに tane_custom ko・ba・ke）→ ok', isOk('k3a'), J([R('k3a'), out.k3_err]));
+  ok('⑫ 合計0の種 c:ko に +3 → ok・卓は ng・理由 c:ko・chip は ok のまま', isOk('k3b') && tk('k3b_t', 'ng', 'c:ko', false) && out.k3b_t.c === 'ok', J([R('k3b'), out.k3b_t]));
+  ok('⑫ c:ko の −3 で合計0 → ok・理由 null・一度そろった', isOk('k3c') && tk('k3c_t', 'ok', null, true), J([R('k3c'), out.k3c_t]));
+  ok('⑫ 外へ払う種だけ（c:ba +5）→ ok・卓は ok・★一度そろったにしない★', isOk('k3d') && tk('k3d_t', 'ok', null, false), J([R('k3d'), out.k3d_t]));
+  ok('⑫ 外へ払う種：足して負になる extra_add（5−6）→ bad at add・何も書かない', isErr('k3e', 'bad', { at: 'add' }) && Number(out.k3e_x) === 5, J([R('k3e'), out.k3e_x]));
+  ok('⑫ 外へ払う種：足して0になる extra_add（5−5）→ ok', isOk('k3e2') && Number(out.k3e2_x) === 0, J([R('k3e2'), out.k3e2_x]));
+  ok('⑫ 外へ払う種：行の無い人へ −1 → bad at add', isErr('k3f', 'bad', { at: 'add' }), J(R('k3f')));
+  ok('⑫ 外へ払う種：extra_set の −1 → bad at value', isErr('k3g', 'bad', { at: 'value' }), J(R('k3g')));
+  ok('⑫ 外へ払う種：extra_set の 0（行なし）→ ok', isOk('k3g2'), J(R('k3g2')));
+  ok('⑫ ルールに無い id（c:zz）→ bad at kind', isErr('k3h', 'bad', { at: 'kind' }), J(R('k3h')));
+  ok("⑫ 形の違う種（'c:'・'c:ABC'・'c:123456789'）→ bad at kind・行0", ['k3i1', 'k3i2', 'k3i3'].every((k) => isErr(k, 'bad', { at: 'kind' })) && Number(out.k3i_x) === 0,
+    J([R('k3i1'), R('k3i2'), R('k3i3'), out.k3i_x]));
+  ok('⑫ 合計0の種が2つ ng（c:ke と c:ko）→ 理由は tane_custom の並びの順の最初（c:ko）', isOk('k3j') && tk('k3j_t', 'ng', 'c:ko', false), J([R('k3j'), out.k3j_t]));
+  ok('⑫ chip の ng と合計0の種の ng が重なる → 卓 ng・理由は自由な項目（c:ko）・chip_state は ng（理由が chip を隠さない＝chip は chip_state で見る）', isOk('k3m') && tk('k3m_t', 'ng', 'c:ko', false) && out.k3m_t.c === 'ng', J([R('k3m'), out.k3m_t]));
+  ok('⑫ chip だけ ng → 理由 null（今まで通り）・一度そろったは消えない', isOk('k3k') && tk('k3k_t', 'ng', null, true) && out.k3k_t.c === 'ng', J([R('k3k'), out.k3k_t]));
+  ok('⑫ extra_set で合計0の種 c:ko を 2 → ok・卓は ng 理由 c:ko', isOk('k3l') && tk('k3l_t', 'ng', 'c:ko', false) && Number(out.k3l_x) === 2, J([R('k3l'), out.k3l_t, out.k3l_x]));
+  ok('⑫ tane_custom の無いルール（ra のまま）で c:ko → bad at kind', isOk('k4a') && isErr('k4b', 'bad', { at: 'kind' }), J([R('k4a'), R('k4b'), out.k4_err]));
   /* ⑦' 2c-2a1 */
   const tx = (k, fc, ch, e) => out[k]?.fc === fc && out[k]?.ch === ch && (e === undefined || out[k]?.e === e);
   ok("⑦' 卓の用意 → ok", isOk('p0') && isOk('g0') && isOk('s0'), J([R('p0'), R('g0'), R('s0'), out.p_err, out.g_err, out.s_err]));
@@ -1049,7 +1106,7 @@ const WAZA = [
   ['一度そろったに (b) 0でない行を見ない', 'mahjong_private.mj_w_tstate', "v_done := v_es = 'ok' and exists", "v_done := v_es = 'ok' or exists", null, "⑦' 生まれた卓は first_complete_at 空"],
   ['tstate の where の足しを外す', 'mahjong_private.mj_w_tstate', '\n     or (v_done and t.first_complete_at is null));', ');', null, "⑦' 1組［A +3・B −3］でそろう"],
   ['組の前の first_complete_at を読まない', 'mahjong_private.mj_w_tf0', 'select x.first_complete_at is not null', 'select false', null, "⑦' そろった卓を ng に壊す"],
-  ['使わない種の bad を外す', 'mahjong_private.mj_w_op', "and r.rules -> ((p_o ->> 'kind') || '_pt10') = 'null'::jsonb) then", 'and false) then', null, "⑦' 使わない種（祝儀 null）"],
+  ['使わない種の bad を外す（2c-3b で mj_w_kind へ移した）', 'mahjong_private.mj_w_kind', "if p_rules -> (v_k || '_pt10') = 'null'::jsonb then return null; end if;", 'null;', null, "⑦' 使わない種（祝儀 null）"],
   ['取り消した開催日の bad を外す', 'mahjong_private.mj_w_op', 'if t.voided or exists (select 1 from mahjong.sessions z where z.id = t.session_id and z.voided) then', 'if false then', null, "⑦' 取り消した開催日の卓"],
   ['卓の締めの判じを外す', 'mahjong_private.mj_w_tf0', 'or exists (select 1 from mahjong.settle_snaps z where z.session_id = x.session_id and z.made_at < pg_catalog.now())', 'or false', null, "⑦' 前の組で締めた開催日：そろっていない卓"],
   ['卓の締めの made_at < now() を外す', 'mahjong_private.mj_w_tf0', 'z.session_id = x.session_id and z.made_at < pg_catalog.now()', 'z.session_id = x.session_id', null, "⑦' 同じ取引の締め（made_at = now()）"],
@@ -1083,6 +1140,12 @@ const WAZA = [
   ['rate の範囲を見ない（table_edit を狙う）', 'mahjong_private.mj_w_op', "if v_rate not between 10 and 100000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;", 'null;', null, '⑪ table_edit：num の rate 15'],
   ['hanchan_seats が部屋の人か見ない', 'mahjong_private.mj_w_op', 'where x.room_id = p_room and x.id in (select (q.v', 'where x.id in (select (q.v', null, '⑪ hanchan_seats：長さ・重なり・よその部屋の人'],
   ['extra_set の行なし value 0 で bv を見ない', 'mahjong_private.mj_w_op', 'if v_bv <> 0 then', 'if false then', null, '⑪ extra_set：行が無く value 0'],
+  /* 2c-3b（write3_sekkei.md §3 --waza）。check の正規表現（表）は関数でない＝db-checks.live の行で守る */
+  ['c:<id> を tane_custom の id と照らさない', 'mahjong_private.mj_w_kind', "where q.e ->> 'id' = pg_catalog.substr(v_k, 3) limit 1;", 'limit 1;', null, '⑫ ルールに無い id'],
+  ['外へ払う種の負の門を外す', 'mahjong_private.mj_w_op', "if v_kd = 'out' and", 'if false and', null, '⑫ 外へ払う種：'],
+  ['tstate が合計0の自由な項目を見ない', 'mahjong_private.mj_w_tstate', " or v_why is not null then 'ng'", " then 'ng'", null, '⑫ 合計0の種 c:ko に +3'],
+  ['一度そろったに外へ払う種も数える', 'mahjong_private.mj_w_tstate', 'or e.kind = any (v_sum0)));', "or e.kind like 'c:%'));", null, '⑫ 外へ払う種だけ'],
+  ['理由を id の順にする', 'mahjong_private.mj_w_tstate', '   order by u.n limit 1;', '   order by u.k limit 1;', null, '⑫ 合計0の種が2つ ng'],
 ];
 
 let exit = 0;
