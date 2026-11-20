@@ -101,6 +101,8 @@
 .seg button[aria-checked="true"] { background: var(--c-men); color: var(--c-kon); box-shadow: 0 1px 3px var(--c-kage); }
 .bar-r { position: relative; margin-left: auto; min-height: 36px; padding: 0; font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--c-kon); }
 .bar-r::after { content: ""; position: absolute; inset: -4px -8px; }
+a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
+#barTen:not([hidden]) + .bar-r { margin-left: 20px; }
 .b { font-weight: 700; }
 .kon { color: var(--c-kon); }
 .ng { color: var(--c-aka); font-weight: 700; }

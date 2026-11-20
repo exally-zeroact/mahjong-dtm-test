@@ -183,8 +183,11 @@ async function openRoom(roomId) {
   mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null), bar });
 }
 
-/* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま */
-function bar({ back = 'ホーム', onBack, title = '', right, onRight } = {}) {
+/* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま。ten＝［点数］の行き先（対局のページだけ・設計図§2「右上の［ルール］の隣に［点数］」） */
+function bar({ back = 'ホーム', onBack, title = '', right, onRight, ten } = {}) {
+  const t = $('barTen');
+  t.hidden = !ten;
+  if (ten) t.href = ten; else t.removeAttribute('href');
   const b = $('barBack');
   b.textContent = '‹ ' + back;
   b.onclick = onBack ? (ev) => { ev.preventDefault(); onBack(); } : null;

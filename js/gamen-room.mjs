@@ -4,7 +4,7 @@
  *   対局＝mahjong_nyuryoku4_v122（①表は1回ずつ伸び10回分で止まる・計は下に固定 ②「n回」を押すと直す ③直す画面）
  *   精算＝mahjong_seisan_v153／人を選ぶ＝mahjong_namae_v155／ルール＝mahjong_home_v154 ③
  * mountRoom(el, { me, room, showShare, bar, page })
- *   bar({ back, onBack, title, right, onRight })＝上の帯（‹ 戻る・題・右の字）を変える
+ *   bar({ back, onBack, title, right, onRight, ten })＝上の帯（‹ 戻る・題・右の字・ten＝［点数］の行き先）を変える
  * ★窓に説明の字を置かない★（司さん 11-20「赤丸の説明いらん」）＝窓は名前・大きい数（pt×レートの点）・チップ／祝儀の行だけ。
  *   チップ・祝儀の「1枚＝」と横の数はレートで換えた点（レートなしの卓は pt）。
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
@@ -106,7 +106,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (page === 'pick') return renderPick();
     if (page === 'seisan') return renderSeisan();
     if (page === 'rules') return renderRules();
-    bar({ back: 'ホーム', title: '対局', right: 'ルール', onRight: () => { page = 'rules'; render(); } });
+    // ［点数］＝点数計算（記録しない道具・tensu.html）へ。卓のルールを ?r= に、戻り先を ?from= に渡す（tensu.js の頭の取り決め）
+    const ten = '/tensu.html?r=' + encodeURIComponent(JSON.stringify(room.rules)) + '&from=' + encodeURIComponent(location.pathname + location.search);
+    bar({ back: 'ホーム', title: '対局', right: 'ルール', onRight: () => { page = 'rules'; render(); }, ten });
     const v = tableView(st, table.table_id);
     let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>';
     h += renderTable(v);
