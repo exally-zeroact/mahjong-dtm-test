@@ -1282,6 +1282,12 @@ alter table mahjong.tables drop constraint if exists tables_chip_state_ok;
 alter table mahjong.tables add constraint tables_chip_state_ok check (chip_state in ('ok', 'ng', 'unused'));
 alter table mahjong.tables drop constraint if exists tables_shugi_state_ok;
 alter table mahjong.tables add constraint tables_shugi_state_ok check (shugi_state in ('ok', 'ng', 'unused'));
+-- 卓の「一度そろった」と、そろった後に変えた印（段2c-2a1・hanchans と同じ形＝設計図:139「卓は tables の同じ列」）
+--   first_complete_at＝使う種が全部 合計0 かつ使う種に0でない行が在る時に入る（後で ng に戻っても消さない）
+--   changed_after_complete_at＝最後に変わった時（消さない・帯は画面が最新の締めの made_at と比べる＝別件 D）
+alter table mahjong.tables add column if not exists first_complete_at timestamptz;
+alter table mahjong.tables add column if not exists changed_after_complete_at timestamptz;
+alter table mahjong.tables add column if not exists changed_by_user uuid;
 -- 表 mahjong.tobi は使わない（書く関数が無い・飛び賞は hanchans.tobi_to）。2c-2 で行0を数えてから消す
 --   （その時 tests/db-checks.live.mjs:66-67・tests/sweep.live.mjs:79・mj_sweep の tobi の数えも一緒に直す）。
 
@@ -1486,7 +1492,7 @@ revoke all on function mahjong_private.mj_w_hstate(uuid) from public, anon, auth
 --   使う種は extras のその種の合計が0なら ok・でなければ ng（行が無い＝0）。extra_state＝使う種が全部 ok なら ok
 create or replace function mahjong_private.mj_w_tstate(p_tid uuid) returns void
 language plpgsql set search_path = '' as $fn$
-declare rs jsonb; v_c bigint; v_s bigint; v_cs text; v_ss text; v_es text;
+declare rs jsonb; v_c bigint; v_s bigint; v_cs text; v_ss text; v_es text; v_done boolean;
 begin
   select r.rules into rs from mahjong.tables t join mahjong.rule_sets r on r.id = t.rule_set_id and r.version = t.rule_version
    where t.id = p_tid for update of t;
@@ -1496,19 +1502,39 @@ begin
   v_cs := case when rs -> 'chip_pt10' = 'null'::jsonb then 'unused' when v_c = 0 then 'ok' else 'ng' end;
   v_ss := case when rs -> 'shugi_pt10' = 'null'::jsonb then 'unused' when v_s = 0 then 'ok' else 'ng' end;
   v_es := case when v_cs = 'ng' or v_ss = 'ng' then 'ng' else 'ok' end;
-  update mahjong.tables t set chip_state = v_cs, shugi_state = v_ss, extra_state = v_es, extra_reason = null
-   where t.id = p_tid and (t.chip_state, t.shugi_state, t.extra_state, t.extra_reason) is distinct from (v_cs, v_ss, v_es, null::text);
+  -- 一度そろった（2c-2a1）＝ok かつ使う種に0でない行が在る（生まれた卓・入れて戻した卓は行0か全部0＝入らない）
+  v_done := v_es = 'ok' and exists (select 1 from mahjong.extras e where e.table_id = p_tid and e.value <> 0
+    and ((e.kind = 'chip' and v_cs <> 'unused') or (e.kind = 'shugi' and v_ss <> 'unused')));
+  update mahjong.tables t set chip_state = v_cs, shugi_state = v_ss, extra_state = v_es, extra_reason = null,
+    first_complete_at = case when v_done and t.first_complete_at is null then pg_catalog.now() else t.first_complete_at end
+   where t.id = p_tid and ((t.chip_state, t.shugi_state, t.extra_state, t.extra_reason) is distinct from (v_cs, v_ss, v_es, null::text)
+     or (v_done and t.first_complete_at is null));
 end $fn$;
 revoke all on function mahjong_private.mj_w_tstate(uuid) from public, anon, authenticated;
+-- 流し込み（2c-2a1・何回流しても同じ）：既存の卓の state を出し直し、そろっていれば first_complete_at を入れる
+do $fl$ begin
+  perform mahjong_private.mj_w_tstate(t.id) from mahjong.tables t where t.first_complete_at is null;
+end $fl$;
 
--- そろった後に変えた印（ok になった事のある半荘を変えた時）
+-- そろった後に変えた印（ok になった事のある半荘か、前の組で締めた開催日の半荘を変えた時）
+--   締めの判じは made_at < now()＝同じ組で書いた締めは外れる（made_at は default now()・紙 v3.2 §7）
 create or replace function mahjong_private.mj_w_changed(p_hid uuid, p_me uuid) returns void
 language plpgsql set search_path = '' as $fn$
 begin
   update mahjong.hanchans x set changed_after_complete_at = pg_catalog.now(), changed_by_user = p_me
-   where x.id = p_hid and x.first_complete_at is not null;
+   where x.id = p_hid and (x.first_complete_at is not null
+     or exists (select 1 from mahjong.tables t join mahjong.settle_snaps z on z.session_id = t.session_id
+                 where t.id = x.table_id and z.made_at < pg_catalog.now()));
 end $fn$;
 revoke all on function mahjong_private.mj_w_changed(uuid, uuid) from public, anon, authenticated;
+
+-- 卓の印（2c-2a1）：組の終わりに mj_write が判じて呼ぶ（一度そろったか前の組で締めた卓・正味が変わった行あり）
+create or replace function mahjong_private.mj_w_tchanged(p_tid uuid, p_me uuid) returns void
+language plpgsql set search_path = '' as $fn$
+begin
+  update mahjong.tables t set changed_after_complete_at = pg_catalog.now(), changed_by_user = p_me where t.id = p_tid;
+end $fn$;
+revoke all on function mahjong_private.mj_w_tchanged(uuid, uuid) from public, anon, authenticated;
 
 -- 書き込みの数え（§5）：分の窓＝全員 ur1m・u1m・all1m＋入だけ rn1m（max(1,n)）／24時間（時の窓24本）＝入 rn1d・管と持ち主 uk1d・rk1d・全員 all1d（n だけ）
 --   p_room が null＝段①②の弾き＝u1m だけに1。古い窓は同じ取引で消す。(kind, key) の字の順に upsert
@@ -1830,18 +1856,22 @@ begin
 
   -- ── 版を見ない op ──
   elsif v_op = 'extra_add' then
+    -- 確かめの順（2c-2a1・写しとそろえる）：kind → unused（使わない種）→ member（人・取り消した卓と開催日）→ add の range
+    --   席にいない人の足しは組の終わりの正味の門（v1510:195①）で見る
     t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
+    if pg_catalog.jsonb_typeof(p_o -> 'kind') is distinct from 'string' or (p_o ->> 'kind') not in ('chip', 'shugi') then
+      perform mahjong_private.mj_w_bad(p_i, 'kind');
+    end if;
+    if exists (select 1 from mahjong.rule_sets r where r.id = t.rule_set_id and r.version = t.rule_version
+                 and r.rules -> ((p_o ->> 'kind') || '_pt10') = 'null'::jsonb) then
+      perform mahjong_private.mj_w_bad(p_i, 'kind');
+    end if;
     v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
     if not exists (select 1 from mahjong.members m where m.id = v_id and m.room_id = p_room) then
       perform mahjong_private.mj_w_bad(p_i, 'member_id');
     end if;
-    if not exists (select 1 from mahjong.hanchans x where x.table_id = t.id and not x.voided
-                     and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) e where e.value::uuid = v_id))
-       and not exists (select 1 from mahjong.extras e where e.table_id = t.id and e.member_id = v_id) then
-      perform mahjong_private.mj_w_bad(p_i, 'member_id');
-    end if;
-    if pg_catalog.jsonb_typeof(p_o -> 'kind') is distinct from 'string' or (p_o ->> 'kind') not in ('chip', 'shugi') then
-      perform mahjong_private.mj_w_bad(p_i, 'kind');
+    if t.voided or exists (select 1 from mahjong.sessions z where z.id = t.session_id and z.voided) then
+      perform mahjong_private.mj_w_bad(p_i, 'table_id');
     end if;
     v_x := mahjong_private.mj_w_int(p_o, 'add', p_i);
     if v_x = 0 then perform mahjong_private.mj_w_bad(p_i, 'add'); end if;
@@ -1856,12 +1886,14 @@ begin
       perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'extras',
         pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'), 'value',
         pg_catalog.to_jsonb(c.value), pg_catalog.to_jsonb(c.value + v_x), c.version + 1);
-      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', c.version + 1), 'made', 0, 'hist', 1, 't', t.id);
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', c.version + 1), 'made', 0, 'hist', 1, 't', t.id,
+        'ek', pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'));
     end if;
     insert into mahjong.extras (table_id, member_id, kind, value, updated_by_user) values (t.id, v_id, p_o ->> 'kind', v_x, p_me);
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'extras',
       pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'), 'value', null, pg_catalog.to_jsonb(v_x), 1);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1, 't', t.id);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1, 't', t.id,
+      'ek', pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'));
 
   elsif v_op = 'settle_snap' then
     v_id := mahjong_private.mj_w_uuid(p_o, 'session_id', p_i);
@@ -1923,6 +1955,7 @@ declare
   v_n int := 0; v_made int := 0; v_items jsonb := '[]'::jsonb; v_gid uuid := pg_catalog.gen_random_uuid();
   v_b0 jsonb := '{}'::jsonb; v_hs jsonb := '{}'::jsonb; v_fresh jsonb := '{}'::jsonb; v_ts jsonb := '{}'::jsonb; v_caps jsonb := '{}'::jsonb;
   v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text;
+  v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record;
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -2009,6 +2042,7 @@ begin
       if v_x ? 'h' then v_hs := v_hs || pg_catalog.jsonb_build_object(v_x ->> 'h', true); end if;
       if v_x ? 'fresh' then v_fresh := v_fresh || pg_catalog.jsonb_build_object(v_x ->> 'h', true); end if;
       if v_x ? 't' then v_ts := v_ts || pg_catalog.jsonb_build_object(v_x ->> 't', true); end if;
+      if v_x ? 'ek' then v_ei := v_ei || pg_catalog.jsonb_build_object((v_x -> 'ek')::text, v_i); end if;
       if v_x ? 'cap' then v_caps := v_caps || pg_catalog.jsonb_build_object((v_x -> 'cap' ->> 'tbl') || '|' || (v_x -> 'cap' ->> 'id'), true); end if;
     end loop;
 
@@ -2020,6 +2054,27 @@ begin
       perform mahjong_private.mj_w_hstate(v_k::uuid);
     end loop;
     for v_k in select t.k from pg_catalog.jsonb_object_keys(v_ts) t(k) order by t.k loop
+      -- 2c-2a1：組の前の「一度そろった」（tstate の前に読む）＝first_complete_at か前の組の締め（made_at < now()）
+      select x.first_complete_at is not null
+          or exists (select 1 from mahjong.settle_snaps z where z.session_id = x.session_id and z.made_at < pg_catalog.now())
+        into v_f0 from mahjong.tables x where x.id = v_k::uuid;
+      v_mk := false;
+      -- この組の extras の行ごとに 組の前 b（一番先の行の前の値・null＝行が無かった）と 組の後 a（一番後の行の後の値）＝history.id 順
+      for e in select h.row_key, (pg_catalog.array_agg(h.before_value order by h.id))[1] as b,
+                      (pg_catalog.array_agg(h.after_value order by h.id desc))[1] as a
+                 from mahjong.history h
+                where h.group_id = v_gid and h.room_id = p_room_id and h.kind = 'row' and h.tbl = 'extras'
+                  and h.row_key ->> 'table_id' = v_k
+                group by h.row_key order by h.row_key::text loop
+        -- 正味の門（v1510:195①）：組の後に取り消していない半荘の席にいない人は、0へ近づき0を越えない時だけ（行の無い人への足しは弾く）
+        if not exists (select 1 from mahjong.hanchans x where x.table_id = v_k::uuid and not x.voided
+                         and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) s where s.value = e.row_key ->> 'member_id'))
+           and (e.b is null or pg_catalog.abs((e.a)::int) > pg_catalog.abs((e.b)::int) or (e.a)::int * (e.b)::int < 0) then
+          perform mahjong_private.mj_w_bad(coalesce((v_ei ->> (e.row_key::text))::int, 0), 'member_id');
+        end if;
+        if coalesce((e.b)::int, 0) <> (e.a)::int then v_mk := true; end if;
+      end loop;
+      if v_f0 and v_mk then perform mahjong_private.mj_w_tchanged(v_k::uuid, v_me); end if;
       perform mahjong_private.mj_w_tstate(v_k::uuid);
     end loop;
 

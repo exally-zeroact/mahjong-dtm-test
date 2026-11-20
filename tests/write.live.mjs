@@ -5,12 +5,13 @@
  *  ① 一本道（member_add×4 → session_add → table_add → hanchan_start → cell_set で崩す → 戻す → extra_add ± → settle_snap）
  *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 22個・31個・知らない op）
  *  ③ 範囲 ④ 版 ⑤ 飛び賞 ⑥ そろった後 ⑦ チップ・祝儀（11通り・倉庫と lib〔画面の lib/room-state.mjs の tableView〕に同じ表を通す）
+ *  ⑦' 2c-2a1（紙 write2_sekkei.md v3.3）＝卓の一度そろった（first_complete_at）・卓の印・正味の門（v1510:195①）・使わない種と取り消した開催日・前の組の締め
  *  ⑧ 数え（先見・後見の busy・internal と一時の失敗・古い窓・入と管が別）⑧' 上限 ⑨ 送り直し・部屋・last_seen
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋・trigger も全部戻る）。
  * ★now() が取引の中で止まる＝節ごとに write:* の行を消してから始める（1分の上限の偽の赤を出さない）★
  * ★lib の比べ＝この repo の lib/room-state.mjs（gamen-1 は 5290b84 で main に入った）を読む。MJ_GAMEN_LIB で別の置き場を指せる。無ければ赤（未測定）★
  * 使い方: node tests/write.live.mjs            … 試験
- *         node tests/write.live.mjs --waza     … ★わざと壊して狙った試験が赤になるか★（14か所を1つずつ壊す・先に素の回りが緑か見る・壊した関数は塊と一緒に戻る）
+ *         node tests/write.live.mjs --waza     … ★わざと壊して狙った試験が赤になるか★（26か所を1つずつ壊す・先に素の回りが緑か見る・壊した関数は塊と一緒に戻る）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,6 +67,7 @@ const HR = (h) => `select jsonb_build_object('state', state, 'why', state_reason
   'cb', changed_by_user, 'v', version, 'tobi', tobi_to, 'tv', tobi_version, 'voided', voided, 'seats', seats, 'ov', order_version, 'ton', ton_order, 'lost', lost_kyotaku)
   from mahjong.hanchans where id = '${h}'`;
 const TR = (t) => `select jsonb_build_object('c', chip_state, 's', shugi_state, 'e', extra_state) from mahjong.tables where id = '${t}'`;
+const TX = (t) => `select jsonb_build_object('e', extra_state, 'fc', first_complete_at is not null, 'ch', changed_after_complete_at is not null, 'cb', changed_by_user) from mahjong.tables where id = '${t}'`;
 /* 塊の中だけで書いて戻す */
 const undo = (key, body) => `
   begin
@@ -93,6 +95,10 @@ const OP_M4 = U(), OPX = U();
 const C4 = [25000, 25000, 25000, 25000];
 /* ①' 並び：MX＝部屋の active な人だが席にいない（顔ぶれの比べ p_set だけが弾く）・HA3＝並び無しの同点・HA4＝ton_order つきで始める */
 const MX = U(), HA3 = U(), HA4 = U();
+/* ⑦' 2c-2a1：[卓, 半荘]（部屋 A・開催日 SA・席は MA[0..3]・MA[4] は席にいない人） */
+const PN = [U(), U()], PP = [U(), U()], PQ = [U(), U()], GN = [U(), U()], SV = [U(), U()], SW = [U(), U()];
+const xa = (T, who, add, kind = 'chip') => O('extra_add', { table_id: T[0], member_id: typeof who === 'number' ? MA[who] : who, kind, add });
+const mkT = (T, cells = C4) => [O('table_add', { table_id: T[0], session_id: SA, label: 'p' }), O('hanchan_start', { hanchan_id: T[1], table_id: T[0], seats: MA.slice(0, 4), cells })];
 const ov = (h) => S(`(select to_jsonb(order_version) from mahjong.hanchans where id = '${h}')`);
 const TON4 = [MA[1], MA[0], MA[3], MA[2]];
 /* ⑧' op_results の消す順：Q1 は op_id が一番小さく、Q2 は一番大きいが at が一番古い＝at の順なら Q2 が消え、op_id の順なら Q1 が消える */
@@ -335,6 +341,61 @@ const body = `
   ${undo('kf', `update mahjong.rule_sets set rules = rules - 'chip_pt10' where id = (select rule_set_id from mahjong.rooms where id = rf);
     ${W('kf1', 1, 'rf', A(O('extra_add', { table_id: CASES[9][4], member_id: MF[0], kind: 'chip', add: 1 })))}
     ${ROW('kf1_row', TR(CASES[9][4]))}`)}
+  ${ROW('c7_x', `select count(*) from mahjong.extras where table_id = '${CASES[10][4]}'`)}
+
+  /* ⑦' 2c-2a1 卓の一度そろった・卓の印 */
+  ${RS}
+  ${undo('p', `${W('p0', 1, 'ra', A(...mkT(PN), ...mkT(PP), ...mkT(PQ)))}
+    ${ROW('p0_n', TX(PN[0]))}
+    ${W('p1', 2, 'ra', A(xa(PN, 0, 3)))}
+    ${ROW('p1_n', TX(PN[0]))}
+    ${W('p2', 2, 'ra', A(xa(PN, 1, -3)))}
+    ${ROW('p2_n', TX(PN[0]))}
+    ${W('p3', 2, 'ra', A(xa(PN, 0, 2)))}
+    ${ROW('p3_n', TX(PN[0]))}
+    ${W('p4', 2, 'ra', A(xa(PP, 0, 3), xa(PP, 1, -3)))}
+    ${ROW('p4_p', TX(PP[0]))}
+    ${W('p5', 2, 'ra', A(xa(PQ, 0, 3)))}
+    ${W('p6', 2, 'ra', A(xa(PQ, 0, -3)))}
+    ${ROW('p6_q', TX(PQ[0]))}
+    ${W('p7', 2, 'ra', A(xa(PP, 0, 1), xa(PP, 0, -1)))}
+    ${ROW('p7_p', TX(PP[0]))}
+    ${W('p8', 2, 'ra', A(xa(PP, 2, 1)))}
+    ${ROW('p8_p', TX(PP[0]))}`)}
+  /* ⑦' 正味の門（MA[4]＝席にいない人・行は直に入れる） */
+  ${RS}
+  ${undo('g', `${W('g0', 1, 'ra', A(...mkT(GN)))}
+    insert into mahjong.extras (table_id, member_id, kind, value) values ('${GN[0]}', '${MA[4]}', 'chip', 3);
+    ${W('g1', 2, 'ra', A(xa(GN, 4, -3)))}
+    ${W('g2', 2, 'ra', A(xa(GN, 4, -1)))}
+    update mahjong.extras set value = 3 where table_id = '${GN[0]}' and member_id = '${MA[4]}';
+    ${W('g3', 2, 'ra', A(xa(GN, 4, -5)))}
+    ${W('g4', 2, 'ra', A(xa(GN, 4, 1)))}
+    ${W('g5', 2, 'ra', A(xa(GN, 4, -1), xa(GN, 4, 1)))}
+    ${W('g6', 2, 'ra', A(xa(GN, 0, 1), xa(GN, 4, 1)))}
+    ${W('g7', 2, 'ra', A(xa(GN, 4, -2)))}
+    ${ROW('g7_v', `select value from mahjong.extras where table_id = '${GN[0]}' and member_id = '${MA[4]}'`)}`)}
+  /* ⑦' 使わない種・取り消した開催日（確かめの順 kind → unused → member → range） */
+  ${RS}
+  ${undo('u', `${W('u1', 2, 'ra', A(xa([TA], 0, 1, 'shugi')))}
+    ${W('u2', 2, 'ra', A(xa([TA], U(), 1, 'shugi')))}
+    ${W('u5', 2, 'ra', A(xa([TA], U(), 1000)))}
+    update mahjong.sessions set voided = true where id = '${SA}';
+    ${W('u3', 2, 'ra', A(xa([TA], 0, 1)))}
+    ${W('u4', 2, 'ra', A(xa([TA], 0, 1, 'shugi')))}`)}
+  /* ⑦' 前の組の締め（made_at < now()・この塊は1つの取引＝ここまでの締めは made_at = now()＝同じ組と同じ） */
+  ${RS}
+  ${undo('s', `${W('s0', 1, 'ra', A(...mkT(SW), ...mkT(SV, [25000, 25000, 25000, 24000])))}
+    ${W('s1', 2, 'ra', A(xa(SW, 0, 1)))}
+    ${ROW('s1_w', TX(SW[0]))}
+    ${W('s1h', 2, 'ra', A(cs(SV[1], 3, 24500)))}
+    ${ROW('s1h_v', HR(SV[1]))}
+    insert into mahjong.settle_snaps (room_id, session_id, rev, content, used, missing, made_at)
+      values (ra, '${SA}', (select coalesce(max(rev), 0) + 1 from mahjong.settle_snaps where session_id = '${SA}'), '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, now() - interval '1 minute');
+    ${W('s2', 2, 'ra', A(xa(SV, 0, 1)))}
+    ${ROW('s2_v', TX(SV[0]))}
+    ${W('s2h', 2, 'ra', A(cs(SV[1], 3, 24600)))}
+    ${ROW('s2h_v', HR(SV[1]))}`)}
 
   /* ⑧ 数え */
   ${RS}
@@ -584,7 +645,8 @@ function check(out, lib, say) {
   ok('⑥ 同値の void は書かない', isOk('vo2') && has('vo2', none), J([R('vo2'), d('vo2')]));
   ok('⑥ unvoid → 戻る・そろったを出し直す', isOk('vo3') && out.vo3_row?.voided === false && out.vo3_row.state === 'ok', J([R('vo3'), out.vo3_row]));
   /* ⑦ */
-  ok('⑦ 4部屋の用意と extras → ok', ['k_a', 'k_c', 'k_e', 'k_f', 'kx_ra', 'kx_rc', 'kx_re', 'kx_rf'].every((k) => isOk(k)), J(['k_a', 'k_c', 'k_e', 'k_f', 'kx_ra', 'kx_rc', 'kx_re', 'kx_rf'].map(R)));
+  ok('⑦ 4部屋の用意と extras → ok', ['k_a', 'k_c', 'k_e', 'k_f', 'kx_ra', 'kx_rc', 'kx_re'].every((k) => isOk(k)), J(['k_a', 'k_c', 'k_e', 'k_f', 'kx_ra', 'kx_rc', 'kx_re'].map(R)));
+  ok('⑦ c7 使わない種（チップ null）への extra_add → bad at kind・行0（2c-2a1）', isErr('kx_rf', 'bad', { at: 'kind' }) && Number(out.c7_x) === 0, J([R('kx_rf'), out.c7_x]));
   CASES.forEach((c, i) => {
     const db = out['case' + i] ? [out['case' + i].c, out['case' + i].s, out['case' + i].e] : null;
     ok(`⑦ ${c[0]}：倉庫 ${J(db)} ＝ 手の答え ${J(c[8])}`, J(db) === J(c[8]));
@@ -592,6 +654,33 @@ function check(out, lib, say) {
   });
   ok('⑦ lib（画面の room-state.mjs）を読めた' + (lib.where ? '（' + lib.where + '）' : ''), !!lib.mod, lib.err || '');
   ok('⑦ 倉庫だけの守り：chip_pt10 の鍵が無い → 使う側（+1 で ng）', isOk('kf1') && out.kf1_row?.c === 'ng', J([R('kf1'), out.kf1_row, out.kf_err]));
+  /* ⑦' 2c-2a1 */
+  const tx = (k, fc, ch, e) => out[k]?.fc === fc && out[k]?.ch === ch && (e === undefined || out[k]?.e === e);
+  ok("⑦' 卓の用意 → ok", isOk('p0') && isOk('g0') && isOk('s0'), J([R('p0'), R('g0'), R('s0'), out.p_err, out.g_err, out.s_err]));
+  ok("⑦' 生まれた卓は first_complete_at 空（行0で合計0でも）", tx('p0_n', false, false, 'ok'), J(out.p0_n));
+  ok("⑦' 最初の extra_add（A +3）は印なし・空のまま", isOk('p1') && tx('p1_n', false, false, 'ng'), J([R('p1'), out.p1_n]));
+  ok("⑦' A +3 → B −3 でそろう・その組は印なし", isOk('p2') && tx('p2_n', true, false, 'ok'), J([R('p2'), out.p2_n]));
+  ok("⑦' そろった卓を ng に壊す extra_add → 卓の印・first_complete_at は消えない", isOk('p3') && tx('p3_n', true, true, 'ng') && !!out.p3_n?.cb, J([R('p3'), out.p3_n]));
+  ok("⑦' 1組［A +3・B −3］でそろう（state は ok のまま変わらない書き）・印なし", isOk('p4') && tx('p4_p', true, false, 'ok'), J([R('p4'), out.p4_p]));
+  ok("⑦' A +3 → A −3（行は在るが0）は空のまま", isOk('p6') && tx('p6_q', false, false, 'ok'), J([R('p6'), out.p6_q]));
+  ok("⑦' 同じ組で +1 と −1（正味が同じ）→ 印なし", isOk('p7') && tx('p7_p', true, false, 'ok'), J([R('p7'), out.p7_p]));
+  ok("⑦' そろった卓に extra_add（ok→ng）→ 卓の印", isOk('p8') && tx('p8_p', true, true, 'ng'), J([R('p8'), out.p8_p]));
+  ok("⑦' 正味の門：席にいない人の 3 → 0 は ok", isOk('g1'), J([R('g1'), out.g_err]));
+  ok("⑦' 正味の門：0 → −1（0から離れる）は bad at member_id", isErr('g2', 'bad', { at: 'member_id', i: 0 }) && has('g2', rejNyu), J([R('g2'), d('g2')]));
+  ok("⑦' 正味の門：3 → −2（0を越える）は bad", isErr('g3', 'bad', { at: 'member_id' }), J(R('g3')));
+  ok("⑦' 正味の門：3 → 4（離れる）は bad", isErr('g4', 'bad', { at: 'member_id' }), J(R('g4')));
+  ok("⑦' 正味の門：1組で −1・+1（正味が同じ）は ok", isOk('g5'), J(R('g5')));
+  ok("⑦' 正味の門：弾きの i は最後にその行を触った op（席の人 +1・席にいない人 +1 → i 1）", isErr('g6', 'bad', { at: 'member_id', i: 1 }), J(R('g6')));
+  ok("⑦' 正味の門：3 → 1 は ok（行は 1）", isOk('g7') && Number(out.g7_v) === 1, J([R('g7'), out.g7_v]));
+  ok("⑦' 使わない種（祝儀 null）への extra_add → bad at kind", isErr('u1', 'bad', { at: 'kind' }), J([R('u1'), out.u_err]));
+  ok("⑦' 確かめの順：使わない種で部屋にいない人 → kind が先", isErr('u2', 'bad', { at: 'kind' }), J(R('u2')));
+  ok("⑦' 確かめの順：部屋にいない人に add 1000 → member が先（range でない）", isErr('u5', 'bad', { at: 'member_id' }), J(R('u5')));
+  ok("⑦' 取り消した開催日の卓への extra_add → bad at table_id", isErr('u3', 'bad', { at: 'table_id' }), J(R('u3')));
+  ok("⑦' 取り消した開催日でも使わない種なら kind が先", isErr('u4', 'bad', { at: 'kind' }), J(R('u4')));
+  ok("⑦' 同じ取引の締め（made_at = now()）だけの開催日：そろっていない卓に extra_add → 卓の印なし", isOk('s1') && tx('s1_w', false, false), J([R('s1'), out.s1_w, out.s_err]));
+  ok("⑦' 同じ取引の締めだけ：そろっていない半荘に cell_set → 半荘の印なし", isOk('s1h') && out.s1h_v?.ch === false && out.s1h_v?.fc === false, J([R('s1h'), out.s1h_v]));
+  ok("⑦' 前の組で締めた開催日：そろっていない卓に extra_add → 卓の印", isOk('s2') && tx('s2_v', false, true), J([R('s2'), out.s2_v]));
+  ok("⑦' 前の組で締めた開催日：そろっていない半荘に cell_set → 半荘の印", isOk('s2h') && out.s2h_v?.ch === true && out.s2h_v?.fc === false, J([R('s2h'), out.s2h_v]));
   /* ⑧ */
   const busyD = { ...none, ur: 1, u: 1, rn1m: 1, all1m: 1, rn: 0, all1d: 0 };
   ok('⑧ 先見の busy（ur1m 120）→ busy・何も書かない・ur1m は +1・rn1d は 0', isErr('b1', 'busy', { what: 'write:ur1m' }) && has('b1', busyD), J([R('b1'), d('b1')]));
@@ -656,9 +745,21 @@ const WAZA = [
   ['一時の失敗を busy にしない', 'public.mj_write', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'lock'); v_n := 0;", "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '⑧ 一時の失敗（55P03）'],
   ['並びの顔ぶれを比べない（p_set）', 'mahjong_private.mj_w_people', '  elsif (select pg_catalog.array_agg((t.v', '  elsif false and (select pg_catalog.array_agg((t.v', null, "①' hanchan_order に席にいない人"],
   ['op_results を op_id の順で消す', 'public.mj_write', 'order by o.at, o.op_id limit v_c - v_cap', 'order by o.op_id limit v_c - v_cap', null, "⑧' op_results は at の古い物から消す"],
-  ['extra_add が席を見ない', 'mahjong_private.mj_w_op', '    if not exists (select 1 from mahjong.hanchans x where x.table_id = t.id and not x.voided', '    if false and not exists (select 1 from mahjong.hanchans x where x.table_id = t.id and not x.voided', null, "①' extra_add：部屋の人だがその卓の席にも行にもいない"],
+  ['正味の門が行の無い人を見ない', 'public.mj_write', 'and (e.b is null or pg_catalog.abs', 'and (false or pg_catalog.abs', null, "①' extra_add：部屋の人だがその卓の席にも行にもいない"],
   ['取り消した開催日を見ない', 'mahjong_private.mj_w_op', 'if s.voided then', 'if false then', null, "③' 取り消した開催日に table_add"],
   ['リーグの日を見ない（卓から）', 'mahjong_private.mj_w_t', 's.league_id is not null) then', 'false) then', null, "③' リーグの日"],
+  ['正味の門の |a| ≤ |b| を外す', 'public.mj_write', 'pg_catalog.abs((e.a)::int) > pg_catalog.abs((e.b)::int)', 'false', null, "⑦' 正味の門：3 → 4"],
+  ['正味の門の符号の比べを外す', 'public.mj_write', ' or (e.a)::int * (e.b)::int < 0', '', null, "⑦' 正味の門：3 → −2"],
+  ['卓の印を書かない', 'public.mj_write', 'if v_f0 and v_mk then perform mahjong_private.mj_w_tchanged', 'if false then perform mahjong_private.mj_w_tchanged', null, "⑦' そろった卓を ng に壊す"],
+  ['一度そろったに (b) 0でない行を見ない', 'mahjong_private.mj_w_tstate', "v_done := v_es = 'ok' and exists", "v_done := v_es = 'ok' or exists", null, "⑦' 生まれた卓は first_complete_at 空"],
+  ['tstate の where の足しを外す', 'mahjong_private.mj_w_tstate', '\n     or (v_done and t.first_complete_at is null));', ');', null, "⑦' 1組［A +3・B −3］でそろう"],
+  ['組の前の first_complete_at を読まない', 'public.mj_write', 'select x.first_complete_at is not null', 'select false', null, "⑦' そろった卓を ng に壊す"],
+  ['使わない種の bad を外す', 'mahjong_private.mj_w_op', "and r.rules -> ((p_o ->> 'kind') || '_pt10') = 'null'::jsonb) then", 'and false) then', null, "⑦' 使わない種（祝儀 null）"],
+  ['取り消した開催日の bad を外す', 'mahjong_private.mj_w_op', 'if t.voided or exists (select 1 from mahjong.sessions z where z.id = t.session_id and z.voided) then', 'if false then', null, "⑦' 取り消した開催日の卓"],
+  ['卓の締めの判じを外す', 'public.mj_write', 'or exists (select 1 from mahjong.settle_snaps z where z.session_id = x.session_id and z.made_at < pg_catalog.now())', 'or false', null, "⑦' 前の組で締めた開催日：そろっていない卓"],
+  ['卓の締めの made_at < now() を外す', 'public.mj_write', 'z.session_id = x.session_id and z.made_at < pg_catalog.now()', 'z.session_id = x.session_id', null, "⑦' 同じ取引の締め（made_at = now()）"],
+  ['半荘の締めの判じを外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where false', null, "⑦' 前の組で締めた開催日：そろっていない半荘"],
+  ['半荘の締めの made_at < now() を外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where t.id = x.table_id', null, "⑦' 同じ取引の締めだけ：そろっていない半荘"],
   ['履歴の上限（F）を見ない', 'public.mj_write', 'if v_cap is null or r.history_count + v_n > v_cap then', 'if false then', null, "⑧' history（F）が上限"],
 ];
 
