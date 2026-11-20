@@ -10,7 +10,8 @@
  *   ③ ★窓口(view)の security_invoker が抜ける★（今は窓を作らない・作った日に効く）
  *   ④ ★関数の外に DML が裸で置かれる★ … 例外は決まりの表の種（mj_ops・mj_caps・totals の1行）だけ
  *   ⑤ ★部屋 mahjong / mahjong_private を anon・authenticated に開ける★（設計図 §3.1 の権限）
- *      … 客は public.mj_* の5本だけを呼ぶ。表と補助へ USAGE・権限を付けたら中止。
+ *      … 客は public.mj_* の入口だけを呼ぶ。表と補助へ USAGE・権限を付けたら中止。
+ *      ★入口の関数は authenticated だけ★（v18＝全員ログイン）＝anon・public に execute を付けたら中止。
  *
  * 使い方: node scripts/sql-guard.mjs supabase/schema.sql
  *         node scripts/sql-guard.mjs --self-test   ★わざと危ない物を食わせて止まるか★
@@ -56,7 +57,9 @@ export function check(sql) {
   const flat = outer.replace(/\s+/g, ' ').toLowerCase();
 
   /* ① 消す系 — policy / function / constraint / trigger / index の drop だけは許す（作り直しに要る・行は消えない） */
-  const drops = flat.match(/\bdrop\s+(\w+)/g) || [];
+  /* ＋ 列の alter column … drop not null／drop default も許す（決まりを緩めるだけ・行も列も消えない＝v18 で使わない列を空にする） */
+  const flatD = flat.replace(/\balter\s+column\s+[a-z_][a-z0-9_]*\s+drop\s+(not\s+null|default)\b/g, 'alter column _ keep');
+  const drops = flatD.match(/\bdrop\s+(\w+)/g) || [];
   const DROPPABLE = ['policy', 'function', 'constraint', 'trigger', 'index'];
   for (const d of drops) {
     const what = d.split(/\s+/)[1];
@@ -123,6 +126,9 @@ export function check(sql) {
     const toOpen = /\bto\b[^;]*\b(anon|authenticated|public)\b/.test(st);
     if (toOpen && /\b(mahjong|mahjong_private)\b/.test(st)) bad.push(`部屋を客に開けている: ${st.trim().slice(0, 120)}`);
     if (toOpen && /\bon\s+(all\s+)?(tables|table|sequences)\b/.test(st)) bad.push(`表の権限を客に付けている: ${st.trim().slice(0, 120)}`);
+    /* ★入口（関数）は authenticated だけ★（v18＝全員ログイン・anon と public には開けない） */
+    const to = /\bto\s+([^;]*)$/.exec(st);
+    if (/\bon\s+(all\s+)?functions?\b/.test(st) && to && /(^|[\s,])(anon|public)(?![.\w])/.test(to[1])) bad.push(`入口を anon／public に開けている: ${st.trim().slice(0, 120)}`);
   }
 
   /* 関数の中身は仕事なので通すが、他の部屋・消す系だけは同じ目で見る */
@@ -147,7 +153,7 @@ insert into mahjong.mj_ops(name) values ('a') on conflict (name) do update set n
 create or replace function public.mj_read(t text) returns jsonb language plpgsql security definer set search_path = '' as $$
 begin update mahjong.rooms set id = id; return null; end $$;
 revoke all on function public.mj_read(text) from public, anon, authenticated;
-grant execute on function public.mj_read(text) to anon, authenticated;`;
+grant execute on function public.mj_read(text) to authenticated;`;
   let p = 0, f = 0;
   const T = (n, fn) => { try { fn(); p++; console.log('  ✓ ' + n); } catch (e) { f++; console.log('  ✗ ' + n + ' — ' + e.message); } };
   const must = (sql, why) => { const b = check(sql); if (!b.length) throw new Error('止まらなかった: ' + why); };
@@ -182,6 +188,14 @@ grant execute on function public.mj_read(text) to anon, authenticated;`;
   T('★部屋の表の権限を authenticated に付けたら止まる', () => must(OK + '\ngrant select on all tables in schema mahjong to authenticated;', '表の権限'));
   T('★補助の関数を anon に開けたら止まる', () =>
     must(OK + '\ngrant execute on function mahjong_private.mj_x() to anon;', '補助'));
+  T('★列の drop not null／drop default は通る', () =>
+    pass(OK + '\nalter table mahjong.rooms alter column id drop not null;\nalter table mahjong.rooms alter column id drop default;'));
+  T('★drop not null と並べても drop table は止まる', () =>
+    must(OK + '\nalter table mahjong.rooms alter column id drop not null;\ndrop table mahjong.rooms;', 'drop table を並べた'));
+  T('★入口を anon に開けたら止まる', () =>
+    must(OK + '\ngrant execute on function public.mj_read(text) to anon;', '入口を anon'));
+  T('★入口を public に開けたら止まる', () =>
+    must(OK + '\ngrant execute on function public.mj_read(text) to authenticated, public;', '入口を public'));
   console.log('\n' + p + ' passed, ' + f + ' failed');
   console.log('自己確認: ' + p + '/' + (p + f));
   process.exit(f ? 1 : 0);

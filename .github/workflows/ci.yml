@@ -50,14 +50,14 @@ jobs:
         shell: bash
         run: |
           node scripts/sql-guard.mjs --self-test | tee guard-self.out
-          sh scripts/ci-yuka.sh guard-self.out 23
-      - name: 操作の表 mj_ops が設計図の通りか（28行・管だけ・合言葉・履歴なし・消した部屋・版つき・戻し方）
+          sh scripts/ci-yuka.sh guard-self.out 27
+      - name: 操作の表 mj_ops が設計図の通りか（K-1 の34行×7列＝押せる人〔リーグでない日・リーグの日〕・消した部屋・履歴・戻し方・版つき・入り直し）
         run: node tests/mj-ops.test.mjs
       - name: 操作の表の見張りの自己確認
         shell: bash
         run: |
           node tests/mj-ops.test.mjs --self-test | tee ops-self.out
-          sh scripts/ci-yuka.sh ops-self.out 9
+          sh scripts/ci-yuka.sh ops-self.out 15
       - name: 名前のそろえた字（lib/name-key.mjs）が手で決めた答えを出すか（倉庫の関数と同じかは name-key.live.mjs＝手元）
         run: node tests/name-key.test.mjs
       - name: ルールの鍵の表（schema.sql の種）と lib/rules.mjs が同じか・鍵41の名を字で固定・確かめの答え（倉庫と同じかは rules.live.mjs＝手元）

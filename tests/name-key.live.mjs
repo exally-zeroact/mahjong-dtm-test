@@ -15,6 +15,8 @@ import { nameKey, SPACES } from '../lib/name-key.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = stripJsComments(fs.readFileSync(path.join(ROOT, 'js/supa-config.js'), 'utf8'));
 const ref = /https:\/\/([a-z0-9]+)\.supabase\.co/.exec(src)[1];
+/* ★倉庫の門（設計 I-6）★ env の字だけでなく ref を直に見る（字は supa-config.js だけが持つ＝ここは sha256 の頭16字の指紋で照らす）＝khaw（全アプリ共有のテスト倉庫）でなければ1行も呼ばずに止める（本番 auth に試しのアカウントを作らない） */
+if ((await import('node:crypto')).createHash('sha256').update(ref).digest('hex').slice(0, 16) !== '3f9e1d8e0f1061e2') { console.log('★中止★ 倉庫が khaw でない（' + ref.slice(0, 4) + '…）＝1行も呼ばない'); process.exit(1); }
 if (!/env:\s*'test'/.test(src)) { console.log('★中止★ test の倉庫でない'); process.exit(1); }
 const raw = fs.readFileSync(path.join(os.homedir(), '.supabase-token'), 'utf8').trim();
 let token = raw; try { token = JSON.parse(raw).token; } catch (_) { /* 素の字 */ }

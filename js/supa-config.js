@@ -7,7 +7,7 @@
  *   本番の supa-config.js は 本番倉庫を指し env:'prod'。だから本番に帯は出ない。
  * env = この配信がどの環境か（'test' | 'prod'）＝js/env-badge.js の帯はこれ1つで決まる。
  * 倉庫: DB-test（全アプリ共有のテスト倉庫）。部屋(schema): mahjong。
- *   ★ログインは使わない★。画面は public.mj_* の関数（RPC）だけを呼ぶ（表は直接読まない）。
+ *   全員アドレスでログイン（共有の Supabase Auth・v18）。画面は public.mj_* の関数（RPC）だけを呼ぶ（表は直接読まない）。
  */
 window.SUPA = {
   url: 'https://khawdrnvssdenumbiwfg.supabase.co',

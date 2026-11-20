@@ -1,13 +1,16 @@
 -- =============================================================================
 -- 麻雀〜do the math〜 倉庫の設計図（部屋 mahjong・mahjong_private）
--- 正本＝設計図 v15.8 §3・§3.1・§3.2（project_mahjong_sekkeizu_2026-11-20.md）
+-- 正本＝設計図 v18.3 §3.0（全員アドレスでログイン・人ごと管理＝project_mahjong_sekkeizu_2026-11-20.md・
+--   案 mahjong_tataki_2026-11-20/v18_login_sekkei.md の C・E・F・G・K-1）＋ v15.8 §3・§3.1・§3.2（表・上限）
 --
 -- ★何度当てても同じ結果になる書き方だけ★（if not exists・on conflict・add column if not exists）
--- ★消す系は書かない★（scripts/sql-guard.mjs が止める）
--- ★客（anon・authenticated）は部屋に1歩も入れない★＝外から呼べるのは public.mj_* の5本だけ（段2で足す）
+-- ★消す系は書かない★（scripts/sql-guard.mjs が止める）＝使わなくなった列・表は残して「空だけ」の check で閉じる
+-- ★客は部屋に1歩も入れない★＝外から呼べるのは public.mj_* だけ・★ログインした人（authenticated）だけ★（anon は revoke）
 --   表・補助には USAGE も権限も付けない。RLS も全部の表で入にする（決まり書きは0本＝誰も読めない）。
--- 段1（この版）＝表・表の CHECK・決まりの表（mj_ops 28行・mj_caps）・totals の1行・権限。
---   関数（mj_room_create／mj_room_join／mj_room_import／mj_read／mj_write と補助）は段2で足す（2a＝mj_room_create 済み）。
+-- ★人＝共有の auth のアカウント★（mahjong_private.mj_me が呼んだ人を確かめる）。端末の秘密・管理の合言葉はやめた（v18）。
+-- ★無料の名簿は麻雀に作らない★＝全アプリ共通の権利の表（管理アプリ・public.app_is_free('mahjong')）を読む（v18.4 で入れる）。
+-- 段1'（この版）＝表・表の CHECK・決まりの表（mj_ops 34行・mj_caps）・totals の1行・権限・入口1本目 mj_room_create。
+--   残りの入口（mj_room_join／mj_room_import／mj_read／mj_write／mj_account）は段2b 以降。
 -- 点は整数（点棒そのまま）・pt は 0.1pt 単位の整数（pt10）・レートは10の倍数（1pt＝N点）。
 -- =============================================================================
 
@@ -23,8 +26,9 @@ create table if not exists mahjong.rooms (
   room_no           text not null unique check (room_no ~ '^[0-9]{8}$'),
   pass_hash         text not null,                       -- bf（倉庫が作る）
   url_token_hash    text not null unique,                -- sha256（端末が送る）
-  admin_secret_hash text not null,                       -- sha256（合言葉は端末の乱数16字）
-  channel_key       text not null unique,                -- 合図の名前（入った端末にだけ渡す）
+  owner_user_id     uuid,                                -- 部屋の持ち主（auth.users.id・外部キーにしない＝K-3 で継ぐ・rooms_owner_ok）
+  admin_secret_hash text,                                -- ★使わない（v18 で合言葉をやめた）★＝空だけ（rooms_no_admin_secret）
+  channel_key       text not null unique,                -- 合図の名前（入った人にだけ渡す）
   fail_count        int not null default 0 check (fail_count >= 0),
   locked_until      timestamptz,
   rule_set_id       uuid,                                -- 部屋のルール（リーグでない対局）
@@ -43,6 +47,14 @@ create table if not exists mahjong.rooms (
   last_secret_at    timestamptz,                         -- 最後の room_secret（入の24時間の切れ目）
   check ((rule_set_id is null) = (rule_version is null))
 );
+-- v18：持ち主の列を足し、合言葉の列は空だけにする（前の版の倉庫にも同じ形を当てる）
+alter table mahjong.rooms add column if not exists owner_user_id uuid;
+alter table mahjong.rooms alter column admin_secret_hash drop not null;
+alter table mahjong.rooms drop constraint if exists rooms_owner_ok;
+alter table mahjong.rooms add constraint rooms_owner_ok check (owner_user_id is not null);
+alter table mahjong.rooms drop constraint if exists rooms_no_admin_secret;
+alter table mahjong.rooms add constraint rooms_no_admin_secret check (admin_secret_hash is null);
+create index if not exists rooms_owner on mahjong.rooms(owner_user_id);
 
 -- ── ルールの1組（版ごとの行・変えると版を足す・卓が指す行は消さない） ──────
 create table if not exists mahjong.rule_sets (
@@ -91,6 +103,10 @@ create table if not exists mahjong.members (
 );
 create unique index if not exists members_name_key on mahjong.members(room_id, name_key) where active;
 create index if not exists members_room on mahjong.members(room_id);
+-- v18 F：名簿の人とアカウントのつなぎ（［これは私］・アカウントが消えたら名前だけの人に戻る＝半荘は残る）
+alter table mahjong.members add column if not exists user_id uuid references auth.users(id) on delete set null;
+create unique index if not exists members_user on mahjong.members(room_id, user_id) where user_id is not null;
+create index if not exists members_user_all on mahjong.members(user_id) where user_id is not null;   -- my_stats が全部の部屋から集める
 
 -- ── リーグ ─────────────────────────────────────────────────────────────
 create table if not exists mahjong.leagues (
@@ -110,6 +126,11 @@ create table if not exists mahjong.leagues (
   check (rule_set_id_alt is null or rule_set_id_alt <> rule_set_id)
 );
 create index if not exists leagues_room on mahjong.leagues(room_id);
+-- v18 E：リーグの持ち主 L（作った人・外部キーにしない＝K-3 で継ぐ）と取り消し印（league_create の戻し）
+alter table mahjong.leagues add column if not exists owner_user_id uuid;
+alter table mahjong.leagues add column if not exists voided boolean not null default false;
+alter table mahjong.leagues drop constraint if exists leagues_owner_ok;
+alter table mahjong.leagues add constraint leagues_owner_ok check (owner_user_id is not null);
 
 -- ── 開催日 ─────────────────────────────────────────────────────────────
 create table if not exists mahjong.sessions (
@@ -182,6 +203,11 @@ create table if not exists mahjong.hanchans (
 );
 create index if not exists hanchans_table on mahjong.hanchans(table_id, created_at, id);
 create index if not exists hanchans_room on mahjong.hanchans(room_id);
+-- v18：書いた人は端末でなくアカウント（auth.users.id・外部キーにしない）＝端末の列は空だけ
+alter table mahjong.hanchans add column if not exists created_by_user uuid;
+alter table mahjong.hanchans add column if not exists changed_by_user uuid;
+alter table mahjong.hanchans drop constraint if exists hanchans_no_device;
+alter table mahjong.hanchans add constraint hanchans_no_device check (created_by_device is null and changed_by_device is null);
 
 -- ── 半荘の最後の点のマス（席で持つ） ─────────────────────────────────────
 create table if not exists mahjong.cells (
@@ -193,6 +219,9 @@ create table if not exists mahjong.cells (
   updated_at        timestamptz not null default now(),
   primary key (hanchan_id, seat)
 );
+alter table mahjong.cells add column if not exists updated_by_user uuid;
+alter table mahjong.cells drop constraint if exists cells_no_device;
+alter table mahjong.cells add constraint cells_no_device check (updated_by_device is null);
 
 -- ── 卓のチップ・祝儀の枚（卓ごと・人ごと） ─────────────────────────────────
 create table if not exists mahjong.extras (
@@ -205,6 +234,9 @@ create table if not exists mahjong.extras (
   updated_at        timestamptz not null default now(),
   primary key (table_id, member_id, kind)
 );
+alter table mahjong.extras add column if not exists updated_by_user uuid;
+alter table mahjong.extras drop constraint if exists extras_no_device;
+alter table mahjong.extras add constraint extras_no_device check (updated_by_device is null);
 
 -- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から＝飛んだ人が他の全員に tobi_pt ずつ・分けない＝v15.9） ──
 create table if not exists mahjong.tobi (
@@ -233,8 +265,41 @@ create table if not exists mahjong.devices (
   created_at   timestamptz not null default now()
 );
 create index if not exists devices_room on mahjong.devices(room_id, last_seen);
+-- ★v18 で使わない★（端末の秘密をやめ、人×部屋の room_accounts にした）＝行は1つも入らない
+alter table mahjong.devices drop constraint if exists devices_unused;
+alter table mahjong.devices add constraint devices_unused check (false);
 
--- ── 送り直しの答え（部屋ごと7日・10,000件まで・4KB まで・行を書いた組だけ） ──
+-- ── アカウント（共有の auth の人・初めて呼んだ時に mj_me が作る・auth.users に trigger は付けない＝v18 C） ──
+create table if not exists mahjong.accounts (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  display_name text check (display_name is null or char_length(display_name) between 1 and 20),
+  name_key     text check (name_key is null or char_length(name_key) between 1 and 40),
+  free_once    boolean not null default false,       -- 一度無料で呼んだ（画面の案内だけ・門には使わない）
+  created_at   timestamptz not null default now(),
+  last_seen    timestamptz not null default now(),
+  check ((display_name is null) = (name_key is null))
+);
+
+-- ── 部屋の人（人×部屋・devices の代わり＝v18 C）・持ち主は rooms.owner_user_id（行が無くても段1を通る） ──
+create table if not exists mahjong.room_accounts (
+  room_id      uuid not null references mahjong.rooms(id) on delete cascade,
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  role         text not null check (role in ('kan', 'nyu')),
+  member_id    uuid references mahjong.members(id) on delete set null,
+  joined_via   text not null check (joined_via in ('pass', 'url', 'create', 'import')),
+  joined_at    timestamptz not null default now(),
+  last_seen    timestamptz not null default now(),
+  win_start    timestamptz,                                         -- 人×部屋の1分
+  win_count    int not null default 0 check (win_count >= 0),
+  export_start timestamptz,                                         -- 人×部屋の書き出しの1時間
+  export_count int not null default 0 check (export_count >= 0),
+  primary key (room_id, user_id)
+);
+create unique index if not exists room_accounts_member on mahjong.room_accounts(room_id, member_id) where member_id is not null;
+create index if not exists room_accounts_user on mahjong.room_accounts(user_id);
+create index if not exists room_accounts_seen on mahjong.room_accounts(room_id, last_seen);
+
+-- ── 送り直しの答え（部屋ごと7日・10,000件まで・4KB まで・行を書いた組だけ・同じ op_id で別の人には返さない＝K-7） ──
 create table if not exists mahjong.op_results (
   room_id uuid not null references mahjong.rooms(id) on delete cascade,
   op_id   uuid not null,
@@ -243,6 +308,9 @@ create table if not exists mahjong.op_results (
   primary key (room_id, op_id)
 );
 create index if not exists op_results_at on mahjong.op_results(room_id, at);
+alter table mahjong.op_results add column if not exists user_id uuid;
+alter table mahjong.op_results drop constraint if exists op_results_user_ok;
+alter table mahjong.op_results add constraint op_results_user_ok check (user_id is not null);
 
 -- ── 全部の書き込みの履歴（1取引＝1組・F＝10,000 行を超えたら組ごとに要約へたたむ） ──
 create table if not exists mahjong.history (
@@ -258,18 +326,28 @@ create table if not exists mahjong.history (
   before_value  jsonb,
   after_value   jsonb,
   after_version int,
-  device_id     uuid,
-  actor         text check (actor in ('nyu', 'kan')),  -- 押した時の端末の役（入／管）
+  device_id     uuid,                                  -- ★使わない（v18）★＝空だけ（history_old_empty）
+  actor         text check (actor in ('nyu', 'kan')),  -- ★使わない（v18）★＝空だけ（actor_user_id・actor_role に替えた）
   member_name   text,
   fold          jsonb,                                 -- 要約の中身（kind=fold の時だけ）
   at            timestamptz not null default now(),
-  check ((kind = 'fold') = (fold is not null)),
-  check (kind = 'fold' or actor is not null)
+  check ((kind = 'fold') = (fold is not null))
 );
 create index if not exists history_room on mahjong.history(room_id, id);
 create index if not exists history_group on mahjong.history(group_id);
-create index if not exists history_actor_at on mahjong.history(room_id, actor, at) where kind = 'row';
-create index if not exists history_device_at on mahjong.history(device_id, at) where kind = 'row';
+-- v18：押した人はアカウントと押した時の役（入／管／持ち主／L）。前の版の「actor 必須」の決まりと端末の索引は外す（行は消えない）
+alter table mahjong.history add column if not exists actor_user_id uuid;
+alter table mahjong.history add column if not exists actor_role text;
+alter table mahjong.history drop constraint if exists history_check1;
+alter table mahjong.history drop constraint if exists history_actor_role_ok;
+alter table mahjong.history add constraint history_actor_role_ok check (actor_role is null or actor_role in ('nyu', 'kan', 'owner', 'league'));
+alter table mahjong.history drop constraint if exists history_actor_ok;
+alter table mahjong.history add constraint history_actor_ok check (kind = 'fold' or (actor_user_id is not null and actor_role is not null));
+alter table mahjong.history drop constraint if exists history_old_empty;
+alter table mahjong.history add constraint history_old_empty check (actor is null and device_id is null);
+drop index if exists mahjong.history_actor_at;
+drop index if exists mahjong.history_device_at;
+create index if not exists history_user_at on mahjong.history(room_id, actor_user_id, at) where kind = 'row';
 
 -- ── 精算の締め ───────────────────────────────────────────────────────────
 create table if not exists mahjong.settle_snaps (
@@ -284,6 +362,9 @@ create table if not exists mahjong.settle_snaps (
   made_at        timestamptz not null default now(),
   unique (session_id, rev)
 );
+alter table mahjong.settle_snaps add column if not exists made_by_user uuid;
+alter table mahjong.settle_snaps drop constraint if exists settle_snaps_no_device;
+alter table mahjong.settle_snaps add constraint settle_snaps_no_device check (made_by_device is null);
 
 -- ── 上限の数え（全体／部屋・端末の鍵は持たない）・外からは見えない ─────────
 create table if not exists mahjong.limits (
@@ -307,81 +388,132 @@ create table if not exists mahjong.creates (
   room_id uuid not null,
   at      timestamptz not null default now()
 );
+-- v18：作った人（外部キーにしない）＝同じ op_id で別の人の送り直しは弾く（mj_op_other_user）
+alter table mahjong.creates add column if not exists user_id uuid;
+alter table mahjong.creates drop constraint if exists creates_user_ok;
+alter table mahjong.creates add constraint creates_user_ok check (user_id is not null);
 
--- ── 操作の表（★正本★・mj_write はここに無い名を弾く・試験もここから引く） ──
+-- ── 操作の表（★正本★＝案 v18_login_sekkei.md K-1 の全34行・全列・mj_write はここに無い名を弾く・試験もここから引く） ──
+--   who_plain＝リーグでない日の押せる人／who_league＝リーグの日（対象の sessions.league_id が在る）の押せる人（K-2）
+--     self＝本人だけ／nyu＝入った人（管・持ち主も）／self_or_kan＝本人か管／kan＝管か持ち主／owner＝部屋の持ち主だけ／
+--     owner_or_kan＝持ち主か管／revert_rule＝history_revert の決まり（K-2）／none＝押せない（league_save はリーグの行が対象＝常に who_league）／
+--     same＝リーグの日でも who_plain と同じ／L＝そのリーグの持ち主／owner_or_sole_L＝部屋の持ち主か、その人が出たリーグの L が全部同じ1人ならその人
+--   re＝入り直して10分以内が要るか：no／yes／owner（持ち主が押す時だけ）／grant（管を付ける時だけ）
+--   ★既定の値は置かない★（新しい op は全列を書かないと入らない）。kan・nyu・needs_secret は v15 の列＝使わない（空だけ）
 create table if not exists mahjong.mj_ops (
   name           text primary key check (name ~ '^[a-z_]+$'),
-  kan            boolean not null,          -- 管が押せる
-  nyu            boolean not null,          -- 入が押せる
-  on_deleted     boolean not null default false,  -- 消した部屋で通る
-  needs_secret   boolean not null default false,  -- 合言葉の打ち直し
-  writes_history boolean not null default true,   -- 履歴と op_results に残す（× は書き込みの数にも入らない）
-  revert         text not null check (revert in ('prev', 'void', 'unvoid', 'inactive', 'rules_version', 'none')),
-  versioned      boolean not null default false   -- base_version つき
+  kan            boolean,                  -- ★使わない（v18）★
+  nyu            boolean,                  -- ★使わない（v18）★
+  on_deleted     boolean not null,         -- 消した部屋で通る
+  needs_secret   boolean,                  -- ★使わない（v18）★
+  writes_history boolean not null,         -- 履歴と op_results に残す（× は書き込みの数にも入らない）
+  revert         text not null,            -- 戻し方（mj_ops_revert_ok）
+  versioned      boolean not null,         -- base_version つき
+  who_plain      text,
+  who_league     text,
+  re             text
 );
+-- 前の版の倉庫を同じ形に（列は消さない・空にする）
+alter table mahjong.mj_ops alter column kan drop not null;
+alter table mahjong.mj_ops alter column nyu drop not null;
+alter table mahjong.mj_ops alter column needs_secret drop not null;
+alter table mahjong.mj_ops alter column kan drop default;            -- 前の版の既定（needs_secret false 等）が新しい行に入ると mj_ops_old_empty で止まる（11-20 khaw で測った）
+alter table mahjong.mj_ops alter column nyu drop default;
+alter table mahjong.mj_ops alter column needs_secret drop default;
+alter table mahjong.mj_ops alter column on_deleted drop default;
+alter table mahjong.mj_ops alter column writes_history drop default;
+alter table mahjong.mj_ops alter column versioned drop default;
+alter table mahjong.mj_ops add column if not exists who_plain text;
+alter table mahjong.mj_ops add column if not exists who_league text;
+alter table mahjong.mj_ops add column if not exists re text;
+alter table mahjong.mj_ops drop constraint if exists mj_ops_revert_check;
+alter table mahjong.mj_ops drop constraint if exists mj_ops_revert_ok;
+alter table mahjong.mj_ops add constraint mj_ops_revert_ok check (revert in ('prev', 'void', 'unvoid', 'inactive', 'neg', 'rules_version', 'none'));
+alter table mahjong.mj_ops drop constraint if exists mj_ops_old_empty;
+alter table mahjong.mj_ops drop constraint if exists mj_ops_who_ok;
 -- ★種に無い行は消す★（種から外した op が倉庫に残って通り続けない・N4）＝送り込みと消しを1つの文で
 do $opsdo$ begin
 with up as (
-insert into mahjong.mj_ops (name, kan, nyu, on_deleted, needs_secret, writes_history, revert, versioned) values
-  ('device_leave',   true, true,  true,  false, false, 'none',          false),
-  ('member_pick',    true, true,  false, false, true,  'prev',          false),
-  ('member_add',     true, true,  false, false, true,  'inactive',      false),
-  ('member_rename',  true, true,  false, false, true,  'prev',          false),
-  ('member_active',  true, true,  false, false, true,  'prev',          false),
-  ('session_add',    true, true,  false, false, true,  'void',          false),
-  ('session_edit',   true, true,  false, false, true,  'prev',          false),
-  ('table_add',      true, true,  false, false, true,  'void',          false),
-  ('table_edit',     true, true,  false, false, true,  'prev',          false),
-  ('hanchan_start',  true, true,  false, false, true,  'void',          false),
-  ('hanchan_seats',  true, true,  false, false, true,  'prev',          false),
-  ('hanchan_void',   true, true,  false, false, true,  'unvoid',        false),
-  ('hanchan_unvoid', true, true,  false, false, true,  'void',          false),
-  ('cell_set',       true, true,  false, false, true,  'prev',          true),
-  ('tobi_set',       true, true,  false, false, true,  'prev',          true),
-  ('kyotaku_set',    true, true,  false, false, true,  'prev',          true),
-  ('hanchan_order',  true, true,  false, false, true,  'prev',          true),
-  ('extra_set',      true, true,  false, false, true,  'prev',          true),
-  ('extra_add',      true, true,  false, false, true,  'prev',          false),
-  ('history_revert', true, true,  false, false, true,  'prev',          false),
-  ('settle_snap',    true, true,  false, false, true,  'none',          false),
-  ('league_save',    true, false, false, false, true,  'rules_version', false),
-  ('room_export',    true, true,  true,  false, false, 'none',          false),
-  ('rules_save',     true, false, false, false, true,  'rules_version', false),
-  ('rerev_ok',       true, false, false, false, true,  'none',          false),
-  ('room_secret',    true, false, false, true,  true,  'none',          false),
-  ('room_delete',    true, false, false, true,  true,  'none',          false),
-  ('room_undelete',  true, false, true,  false, true,  'none',          false)
+insert into mahjong.mj_ops (name, who_plain, who_league, on_deleted, writes_history, revert, versioned, re) values
+  ('room_leave',       'self',         'same',            true,  true,  'none',          false, 'owner'),
+  ('member_add',       'nyu',          'same',            false, true,  'inactive',      false, 'no'),
+  ('member_rename',    'nyu',          'owner_or_sole_L', false, true,  'prev',          false, 'no'),
+  ('member_active',    'nyu',          'owner_or_sole_L', false, true,  'prev',          false, 'no'),
+  ('member_link',      'self',         'same',            false, true,  'prev',          false, 'no'),
+  ('member_unlink',    'self_or_kan',  'same',            false, true,  'prev',          false, 'no'),
+  ('member_relink',    'kan',          'same',            false, true,  'prev',          false, 'no'),
+  ('session_add',      'nyu',          'L',               false, true,  'void',          false, 'no'),
+  ('session_edit',     'nyu',          'L',               false, true,  'prev',          false, 'no'),
+  ('table_add',        'nyu',          'L',               false, true,  'void',          false, 'no'),
+  ('table_edit',       'nyu',          'L',               false, true,  'prev',          false, 'no'),
+  ('hanchan_start',    'nyu',          'nyu',             false, true,  'void',          false, 'no'),
+  ('hanchan_seats',    'nyu',          'L',               false, true,  'prev',          false, 'no'),
+  ('hanchan_void',     'nyu',          'nyu',             false, true,  'unvoid',        false, 'no'),
+  ('hanchan_unvoid',   'nyu',          'nyu',             false, true,  'void',          false, 'no'),
+  ('cell_set',         'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
+  ('tobi_set',         'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
+  ('kyotaku_set',      'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
+  ('hanchan_order',    'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
+  ('extra_set',        'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
+  ('extra_add',        'nyu',          'nyu',             false, true,  'neg',           false, 'no'),
+  ('history_revert',   'revert_rule',  'revert_rule',     false, true,  'prev',          false, 'no'),
+  ('settle_snap',      'nyu',          'nyu',             false, true,  'none',          false, 'no'),
+  ('league_create',    'kan',          'same',            false, true,  'void',          false, 'no'),
+  ('league_save',      'none',         'L',               false, true,  'rules_version', false, 'no'),
+  ('room_export',      'nyu',          'same',            true,  false, 'none',          false, 'no'),
+  ('rules_save',       'kan',          'same',            false, true,  'rules_version', false, 'no'),
+  ('rerev_ok',         'kan',          'L',               false, true,  'none',          false, 'no'),
+  ('room_secret',      'kan',          'same',            false, true,  'none',          false, 'yes'),
+  ('room_delete',      'owner',        'same',            false, true,  'none',          false, 'yes'),
+  ('room_undelete',    'owner_or_kan', 'same',            true,  true,  'none',          false, 'no'),
+  ('role_set',         'owner',        'same',            false, true,  'prev',          false, 'grant'),
+  ('account_remove',   'kan',          'same',            false, true,  'none',          false, 'no'),
+  ('league_owner_set', 'owner',        'owner',           false, true,  'prev',          false, 'yes')
 on conflict (name) do update set
-  kan = excluded.kan, nyu = excluded.nyu, on_deleted = excluded.on_deleted,
-  needs_secret = excluded.needs_secret, writes_history = excluded.writes_history,
-  revert = excluded.revert, versioned = excluded.versioned
+  kan = null, nyu = null, needs_secret = null,
+  who_plain = excluded.who_plain, who_league = excluded.who_league, on_deleted = excluded.on_deleted,
+  writes_history = excluded.writes_history, revert = excluded.revert, versioned = excluded.versioned, re = excluded.re
   returning name)
 delete from mahjong.mj_ops o where o.name not in (select up.name from up);
 end $opsdo$;
+alter table mahjong.mj_ops alter column who_plain set not null;
+alter table mahjong.mj_ops alter column who_league set not null;
+alter table mahjong.mj_ops alter column re set not null;
+alter table mahjong.mj_ops add constraint mj_ops_old_empty check (kan is null and nyu is null and needs_secret is null);
+alter table mahjong.mj_ops add constraint mj_ops_who_ok check (
+  who_plain in ('self', 'nyu', 'self_or_kan', 'kan', 'owner', 'owner_or_kan', 'revert_rule', 'none')
+  and who_league in ('same', 'L', 'nyu', 'owner_or_sole_L', 'revert_rule', 'owner')
+  and re in ('no', 'yes', 'owner', 'grant'));
 
 -- ── 表ごとの行の上限（段6＝当てた後に実の数で見る・§3.2） ──────────────────
 --   scope: room＝部屋ごと／session＝開催日ごと／table＝卓ごと
---   '*' の room＝P（履歴と端末以外の全部の行）・history の room＝F（要約の行も数える）
+--   '*' の room＝P（履歴と room_accounts 以外の全部の行）・history の room＝F（要約の行も数える）
 create table if not exists mahjong.mj_caps (
   tbl   text not null,
   scope text not null check (scope in ('room', 'session', 'table', 'all')),
   cap   int  not null check (cap > 0),
   primary key (tbl, scope)
 );
+-- ★種に無い行は消す★（v18 で devices の行を room_accounts に替えた＝古い行を残さない）
+do $capsdo$ begin
+with up as (
 insert into mahjong.mj_caps (tbl, scope, cap) values
-  ('*',         'room',    30000),   -- P
-  ('history',   'room',    10000),   -- F
-  ('members',   'room',    300),
-  ('sessions',  'room',    3000),
-  ('tables',    'session', 10),
-  ('hanchans',  'table',   60),
-  ('leagues',   'room',    50),
-  ('rule_sets', 'room',    500),
-  ('devices',   'room',    200),     -- 1部屋の端末（admin は超えても入り、管でない1台を出す）
-  ('admins',    'room',    5),       -- 管の端末
-  ('op_results','room',    10000),
-  ('rooms',     'all',     200)      -- R（消した取り消し待ちも数える）
-on conflict (tbl, scope) do update set cap = excluded.cap;
+  ('*',             'room',    30000),   -- P
+  ('history',       'room',    10000),   -- F
+  ('members',       'room',    300),
+  ('sessions',      'room',    3000),
+  ('tables',        'session', 10),
+  ('hanchans',      'table',   60),
+  ('leagues',       'room',    50),
+  ('rule_sets',     'room',    500),
+  ('room_accounts', 'room',    200),     -- 1部屋の人（人×部屋の行）
+  ('admins',        'room',    5),       -- 管の人（持ち主も数える）
+  ('op_results',    'room',    10000),
+  ('rooms',         'all',     200)      -- R（消した取り消し待ちも数える）
+on conflict (tbl, scope) do update set cap = excluded.cap
+  returning tbl, scope)
+delete from mahjong.mj_caps m where (m.tbl, m.scope) not in (select up.tbl, up.scope from up);
+end $capsdo$;
 
 -- ── 名前のそろえた字（v15.8 N1・版1）＝lib/name-key.mjs と1字も違わない手順 ───────
 --   ① NFKC ② カタカナ（ァ〜ヶ・ヽ ヾ）→ひらがな ③ 空白の字（下の13字を字で固定・s は場所の設定で変わるので使わない）を消す
@@ -583,29 +715,67 @@ begin
    where c.key not in (select e #>> '{}' from pg_catalog.jsonb_array_elements(seed) e);
 end $cpdo$;
 
--- ── 入口1本目：部屋を作る（設計図 §2・§3.1・§3.2・案 room_create_sekkei.md＋叩き room_create_tome.txt 止め2直し5）──
--- p_secrets＝{url_token_hash, admin_secret, device_token_hash} の3つだけ（url・端末は 128bit 乱数の sha256＝小文字 hex 64字・
---   admin_secret は英数62種16字の平文＝倉庫が sha256 にする）。channel_key は倉庫が作る（16 byte の乱数の hex）。
--- 返し：{ok:true, room_id, room_no, device_id, channel_key} ／ {ok:false, err:'bad', what}｜'range', key｜'common'｜'gone'｜
---   'mismatch'｜'dup', what｜'full'｜'busy'。★ok でない返しは creates・limits・totals・部屋に何も残さない★（S1・N2）
--- 順（S1）：形 → ルール → よくあるパス → totals を for update（作るを全体で1列に並べる＝同じ op_id の2本目はここで待つ）
---   → creates に在れば送り直しの返し（N1）→ 一意の当たりを bf の前に見る → full（R−20）→ busy（足す前に cap を見る）
---   → 部屋番号 → 書く（S2 の順・unique_violation は塊ごと戻して dup）。
+-- ── 呼んだ人（v18 C・K-10）＝全部の入口の頭で呼ぶ・null＝弾く（{ok:false, err:'mj_session'}） ─────────────
+--   auth.uid() の人が auth.users に在り（匿名でない・止められていない・消されていない）、かつ jwt の session_id が
+--   auth.sessions に在る（signOut 済みの古い access token を最大1時間生かさない・not_after 切れも弾く）時だけ uid を返す。
+--   uuid に直せない字・claim が無い時も null（閉じる側）。初めての人は accounts を作る・last_seen は1分に1回だけ書く。
+--   ★関数の持ち主（postgres）は auth.users・auth.sessions を読める＝I-7①（khaw 11-20 測り）★
+create or replace function mahjong_private.mj_me() returns uuid
+language plpgsql volatile set search_path = '' as $fn$
+declare
+  v_uid uuid; v_sid uuid;
+begin
+  begin
+    v_uid := auth.uid();
+    v_sid := (auth.jwt() ->> 'session_id')::uuid;
+  exception when others then
+    return null;
+  end;
+  if v_uid is null or v_sid is null then return null; end if;
+  if not exists (select 1 from auth.users u
+                  where u.id = v_uid and u.is_anonymous is false and u.deleted_at is null
+                    and (u.banned_until is null or u.banned_until <= pg_catalog.now())) then
+    return null;
+  end if;
+  if not exists (select 1 from auth.sessions s
+                  where s.id = v_sid and s.user_id = v_uid and (s.not_after is null or s.not_after > pg_catalog.now())) then
+    return null;
+  end if;
+  insert into mahjong.accounts as a (user_id) values (v_uid)
+    on conflict (user_id) do update set last_seen = pg_catalog.now()
+    where a.last_seen < pg_catalog.now() - interval '1 minute';
+  return v_uid;
+end $fn$;
+revoke all on function mahjong_private.mj_me() from public, anon, authenticated;
+
+-- ── 入口1本目：部屋を作る（設計図 §2・§3.0・§3.1・§3.2・案 v18_login_sekkei.md G＋前の叩き room_create_tome.txt 止め2直し5）──
+-- ⓪ 呼んだ人＝mj_me（null なら {ok:false, err:'mj_session'}＝画面は「ログインが切れました」・K-10）。作った人が持ち主で管。
+-- p_secrets＝{url_token_hash} の1つだけ（128bit 乱数の sha256＝小文字 hex 64字）。channel_key は倉庫が作る（16 byte の乱数の hex）。
+-- 返し：{ok:true, room_id, room_no, channel_key} ／ {ok:false, err:'mj_session'｜'mj_op_other_user'｜'bad', what｜'range', key｜
+--   'common'｜'gone'｜'mismatch'｜'dup', what｜'full'｜'busy', what(all｜user｜room_no)}。
+--   ★ok でない返しは creates・limits・totals・部屋に何も残さない★（S1・N2）＝残るのは mj_me の accounts の行だけ（人の印・数えではない）
+-- 順（S1）：人 → 形 → ルール → よくあるパス → totals を for update（作るを全体で1列に並べる＝同じ op_id の2本目はここで待つ）
+--   → creates に在れば送り直しの返し（N1・別の人なら mj_op_other_user＝K-7）→ 一意の当たりを bf の前に見る → full（R−20）
+--   → busy（全体 1分20・24時間200 → 人ごと24時間5部屋＝足す前に cap を見る）→ 部屋番号 → 書く（unique_violation は塊ごと戻して dup）。
 -- 押さえる順：作るは totals を先に押さえ、新しい行しか書かない（今の部屋の行は押さえない）＝§3.2 の rooms→totals の例外。
--- 「1日」は直近24時間の転がし（v15.2）＝limits の create:1d は1時間ごとの窓を24本まで持って足す。create:1m は分の窓1本。
--- ★平文のパス・合言葉は どの表にも・raise の字にも入れない★（引数で受けるだけ）
+-- 「1日」は直近24時間の転がし（v15.2）＝limits の create:1d（全体）・create:u1d（key＝user_id）は1時間ごとの窓を24本まで持って足す。
+-- ★平文のパスは どの表にも・raise の字にも入れない★（引数で受けるだけ）
 create or replace function public.mj_room_create(p_op_id uuid, p_name text, p_pass text, p_rules jsonb, p_secrets jsonb)
 returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
   c_trim  constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
-  v_name  text; v_key text; v_rules jsonb; v_url text; v_adm text; v_dev text;
-  v_all   int; v_cap int; v_room uuid; v_rs uuid; v_devid uuid; v_no text; v_ch text;
-  v_n     bigint; v_i int; v_m1 int; v_d1 int; v_err text; v_cons text;
+  v_me    uuid; v_name text; v_key text; v_rules jsonb; v_url text;
+  v_all   int; v_cap int; v_room uuid; v_cuser uuid; v_rs uuid; v_no text; v_ch text;
+  v_n     bigint; v_i int; v_m1 int; v_d1 int; v_u1 int; v_err text; v_cons text;
   v_min   timestamptz := pg_catalog.date_trunc('minute', pg_catalog.now());
   v_hour  timestamptz := pg_catalog.date_trunc('hour', pg_catalog.now());
   r       record;
 begin
+  -- ⓪ 人（K-10）
+  v_me := mahjong_private.mj_me();
+  if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+
   -- ① 形（数えに入れない）
   if p_op_id is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'op_id'); end if;
   v_name := pg_catalog.btrim(coalesce(p_name, ''), c_trim);
@@ -620,16 +790,11 @@ begin
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
   end if;
   if p_secrets is null or pg_catalog.jsonb_typeof(p_secrets) <> 'object'
-     or (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_secrets)) <> 3 then
+     or (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_secrets)) <> 1 then
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'secrets');
   end if;
   v_url := case when pg_catalog.jsonb_typeof(p_secrets -> 'url_token_hash') = 'string' then p_secrets ->> 'url_token_hash' end;
-  v_adm := case when pg_catalog.jsonb_typeof(p_secrets -> 'admin_secret') = 'string' then p_secrets ->> 'admin_secret' end;
-  v_dev := case when pg_catalog.jsonb_typeof(p_secrets -> 'device_token_hash') = 'string' then p_secrets ->> 'device_token_hash' end;
   if v_url is null or v_url !~ '^[0-9a-f]{64}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'url_token_hash'); end if;
-  if v_dev is null or v_dev !~ '^[0-9a-f]{64}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'device_token_hash'); end if;
-  if v_adm is null or v_adm !~ '^[A-Za-z0-9]{16}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'admin_secret'); end if;
-  if v_url = v_dev then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'device_token_hash'); end if;
 
   -- ② ルール（弾く時は mj_range:<鍵>）
   begin
@@ -650,36 +815,34 @@ begin
   -- ④ 作るを全体で1列に並べる
   select t.rooms_all into v_all from mahjong.totals t where t.id = 1 for update;
 
-  -- ⑤ 送り直し（N1）＝同じ op_id は作らずに同じ返し（数えに入れない）
-  select c.room_id into v_room from mahjong.creates c where c.op_id = p_op_id;
+  -- ⑤ 送り直し（N1）＝同じ op_id は作らずに同じ返し（数えに入れない）・別の人の op_id は返さない（K-7）
+  select c.room_id, c.user_id into v_room, v_cuser from mahjong.creates c where c.op_id = p_op_id;
   if found then
+    if v_cuser is distinct from v_me then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_op_other_user'); end if;
     select x.id, x.room_no, x.channel_key, x.url_token_hash, x.deleted_at into r from mahjong.rooms x where x.id = v_room;
     if not found or r.deleted_at is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
-    select d.id into v_devid from mahjong.devices d where d.token_hash = v_dev and d.room_id = r.id;
-    if r.url_token_hash <> v_url or v_devid is null then
-      return pg_catalog.jsonb_build_object('ok', false, 'err', 'mismatch');
-    end if;
-    return pg_catalog.jsonb_build_object('ok', true, 'room_id', r.id, 'room_no', r.room_no, 'device_id', v_devid, 'channel_key', r.channel_key);
+    if r.url_token_hash <> v_url then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mismatch'); end if;
+    return pg_catalog.jsonb_build_object('ok', true, 'room_id', r.id, 'room_no', r.room_no, 'channel_key', r.channel_key);
   end if;
 
   -- ⑥ 一意の当たりを bf の前に（S1）
   if exists (select 1 from mahjong.rooms x where x.url_token_hash = v_url) then
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what', 'url_token_hash');
   end if;
-  if exists (select 1 from mahjong.devices d where d.token_hash = v_dev) then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what', 'device_token_hash');
-  end if;
 
   -- ⑦ 物理の部屋の数が R−20 に達したら作らない
   select m.cap into v_cap from mahjong.mj_caps m where m.tbl = 'rooms' and m.scope = 'all';
   if v_cap is null or v_all >= v_cap - 20 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'full'); end if;
 
-  -- ⑧ 全体の作るの数え（足す前に見る＝busy の時は何も足さない・N2）
+  -- ⑧ 作るの数え（足す前に見る＝busy の時は何も足さない・N2）＝全体 → 人ごと（v18 G）
   select coalesce(pg_catalog.sum(l.count), 0) into v_m1 from mahjong.limits l
    where l.kind = 'create:1m' and l.key = 'all' and l.window_start = v_min;
   select coalesce(pg_catalog.sum(l.count), 0) into v_d1 from mahjong.limits l
    where l.kind = 'create:1d' and l.key = 'all' and l.window_start > pg_catalog.now() - interval '24 hours';
-  if v_m1 + 1 > 20 or v_d1 + 1 > 200 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy'); end if;
+  if v_m1 + 1 > 20 or v_d1 + 1 > 200 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'all'); end if;
+  select coalesce(pg_catalog.sum(l.count), 0) into v_u1 from mahjong.limits l
+   where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start > pg_catalog.now() - interval '24 hours';
+  if v_u1 + 1 > 5 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'user'); end if;
 
   -- ⑨ 部屋番号＝4 byte の乱数（4,200,000,000 以上は引き直し＝偏りなし）の 1e8 の余りを8桁前0・最大8回
   for v_i in 1 .. 8 loop
@@ -689,39 +852,40 @@ begin
     exit when not exists (select 1 from mahjong.rooms x where x.room_no = v_no);
     v_no := null;
   end loop;
-  if v_no is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy'); end if;
+  if v_no is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'room_no'); end if;
 
   -- ⑩ 書く（S2 の順）。一意の当たりは塊ごと戻して dup（塊の中は全部戻る）
   v_room := pg_catalog.gen_random_uuid();
   v_rs   := pg_catalog.gen_random_uuid();
   v_ch   := pg_catalog.encode(extensions.gen_random_bytes(16), 'hex');
   begin
-    insert into mahjong.rooms (id, name, room_no, pass_hash, url_token_hash, admin_secret_hash, channel_key,
+    insert into mahjong.rooms (id, name, room_no, pass_hash, url_token_hash, owner_user_id, channel_key,
                                rule_set_id, rule_version, row_count)
-    values (v_room, v_name, v_no, extensions.crypt(v_key, extensions.gen_salt('bf', 10)), v_url,
-            pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(v_adm, 'UTF8')), 'hex'), v_ch, v_rs, 1, 1);
+    values (v_room, v_name, v_no, extensions.crypt(v_key, extensions.gen_salt('bf', 10)), v_url, v_me, v_ch, v_rs, 1, 1);
     insert into mahjong.rule_sets (id, version, room_id, rules) values (v_rs, 1, v_room, v_rules);
-    insert into mahjong.devices (room_id, token_hash, is_admin, entered_by) values (v_room, v_dev, true, 'create')
-      returning id into v_devid;
-    insert into mahjong.creates (op_id, room_id) values (p_op_id, v_room);
+    insert into mahjong.room_accounts (room_id, user_id, role, joined_via) values (v_room, v_me, 'kan', 'create');
+    insert into mahjong.creates (op_id, room_id, user_id) values (p_op_id, v_room, v_me);
     update mahjong.totals set rooms_all = rooms_all + 1 where id = 1;
     delete from mahjong.limits l where l.kind = 'create:1m' and l.key = 'all' and l.window_start < v_min;
     delete from mahjong.limits l where l.kind = 'create:1d' and l.key = 'all' and l.window_start <= pg_catalog.now() - interval '24 hours';
+    delete from mahjong.limits l where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start <= pg_catalog.now() - interval '24 hours';
     insert into mahjong.limits (kind, key, window_start, count) values ('create:1m', 'all', v_min, 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
     insert into mahjong.limits (kind, key, window_start, count) values ('create:1d', 'all', v_hour, 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:u1d', v_me::text, v_hour, 1)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
   exception when unique_violation then
     get stacked diagnostics v_cons = constraint_name;
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what',
-      case v_cons when 'rooms_url_token_hash_key' then 'url_token_hash' when 'devices_token_hash_key' then 'device_token_hash'
+      case v_cons when 'rooms_url_token_hash_key' then 'url_token_hash'
                   when 'rooms_room_no_key' then 'room_no' when 'rooms_channel_key_key' then 'channel_key'
                   when 'creates_pkey' then 'op_id' else 'other' end);
   end;
-  return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'device_id', v_devid, 'channel_key', v_ch);
+  return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'channel_key', v_ch);
 end $fn$;
 revoke all on function public.mj_room_create(uuid, text, text, jsonb, jsonb) from public, anon, authenticated;
-grant execute on function public.mj_room_create(uuid, text, text, jsonb, jsonb) to anon, authenticated;
+grant execute on function public.mj_room_create(uuid, text, text, jsonb, jsonb) to authenticated;
 
 -- ── 権限：部屋は誰にも開けない（RLS も入・決まり書き0本） ─────────────────
 do $$

@@ -1,9 +1,10 @@
-/* db-checks.live.mjs — ★テスト倉庫の表の CHECK が本当に弾くか★（設計図 §3 の頭・v13「数の範囲は表の CHECK に置く」）
+/* db-checks.live.mjs — ★テスト倉庫の表の CHECK が本当に弾くか★（設計図 §3 の頭・v13「数の範囲は表の CHECK に置く」＋v18 の人の列）
  * =============================================================================
  * 本物のテスト倉庫に当てる（鍵 ~/.supabase-token が要る＝CI では走らない・tests-no-ci.json）。
- * ★1つの取引の中で作って、最後に必ず rollback★＝倉庫に1行も残さない。
- *   各ケースは savepoint で囲み「弾かれた／通った」を表に書いて、最後にその表を読んでから rollback。
+ * ★1つの取引の中で作って、最後に必ず戻す★＝倉庫に1行も残さない（auth.users の仮の人も同じ塊の中で作って戻す）。
+ *   各ケースは savepoint で囲み「弾かれた／通った」を表に書いて、最後にその表を読んでから戻す。
  * 範囲の外を1つずつ入れて ★弾かれる★・範囲の端は ★通る★（弾きすぎも赤）。
+ * ★4つ目の字＝弾いた決まりの名か sqlstate★（v18 で足した物）＝「別の訳で弾かれて緑」を赤にする。
  *
  * 使い方: node tests/db-checks.live.mjs
  */
@@ -16,11 +17,21 @@ import { stripJsComments } from '../scripts/apply-schema.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = stripJsComments(fs.readFileSync(path.join(ROOT, 'js/supa-config.js'), 'utf8'));
 const ref = /https:\/\/([a-z0-9]+)\.supabase\.co/.exec(src)[1];
+/* ★倉庫の門（設計 I-6）★ env の字だけでなく ref を直に見る（字は supa-config.js だけが持つ＝ここは sha256 の頭16字の指紋で照らす）＝khaw（全アプリ共有のテスト倉庫）でなければ1行も呼ばずに止める（本番 auth に試しのアカウントを作らない） */
+if ((await import('node:crypto')).createHash('sha256').update(ref).digest('hex').slice(0, 16) !== '3f9e1d8e0f1061e2') { console.log('★中止★ 倉庫が khaw でない（' + ref.slice(0, 4) + '…）＝1行も呼ばない'); process.exit(1); }
 if (!/env:\s*'test'/.test(src)) { console.log('★中止★ test の倉庫でない'); process.exit(1); }
 const raw = fs.readFileSync(path.join(os.homedir(), '.supabase-token'), 'utf8').trim();
 let token = raw; try { token = JSON.parse(raw).token; } catch (_) { /* 素の字 */ }
 
-/* [名前, 通るべきか, SQL]。前置きで部屋 R・ルール S（4人・トップ取り）・S3（3人・消える）・開催日 D・卓 T・半荘 H・人 M を作る */
+const ROOM = `insert into mahjong.rooms(name,room_no,pass_hash,url_token_hash,owner_user_id,channel_key)`;
+const OPS = `insert into mahjong.mj_ops(name,who_plain,who_league,on_deleted,writes_history,revert,versioned,re)`;
+const HIS = `insert into mahjong.history(room_id,group_id,op,tbl`;
+const ACC = `insert into mahjong.room_accounts(room_id,user_id,role,joined_via)`;
+const ACCM = `insert into mahjong.room_accounts(room_id,user_id,role,joined_via,member_id)`;
+const LEA = `insert into mahjong.leagues(room_id,name,rule_set_id,owner_user_id)`;
+
+/* [名前, 通るべきか, SQL, 弾く決まり（名か sqlstate）]。前置きで仮の人 U・U2（auth.users）・部屋 R（持ち主 U）・
+   ルール S（4人・トップ取り）・S3（3人・消える）・開催日 D・卓 T・半荘 H・人 M を作る */
 const CASES = [
   ['cells.value 200000 は通る', true, `insert into mahjong.cells(hanchan_id,seat,value) values (:H,0,200000)`],
   ['cells.value 200001 は弾く', false, `insert into mahjong.cells(hanchan_id,seat,value) values (:H,1,200001)`],
@@ -51,20 +62,68 @@ const CASES = [
   ['rule_sets の rate 100000 は通る', true, `insert into mahjong.rule_sets(id,version,room_id,rules) values (gen_random_uuid(),1,:R,'{"players":4,"rate":100000}')`],
   ['同じ部屋に使っている同じ name_key は弾く', false, `insert into mahjong.members(room_id,name,name_key) values (:R,'甲2','こう')`],
   ['使わない印の人と同じ name_key は通る', true, `insert into mahjong.members(room_id,name,name_key,active) values (:R,'甲3','こう',false)`],
-  ['op_results の result 4KB 超えは弾く', false, `insert into mahjong.op_results(room_id,op_id,result) values (:R,gen_random_uuid(),jsonb_build_object('x',repeat('a',5000)))`],
+  ['op_results の result 4KB 超えは弾く', false, `insert into mahjong.op_results(room_id,op_id,result,user_id) values (:R,gen_random_uuid(),jsonb_build_object('x',repeat('a',5000)),:U)`, '23514'],
   ['飛び賞の受け取りが飛んだ席と同じは弾く', false, `insert into mahjong.tobi(hanchan_id,busted_seat,receiver) values (:H,2,2)`],
   ['飛び賞の「全員から」(-1) は通る', true, `insert into mahjong.tobi(hanchan_id,busted_seat,receiver) values (:H,3,-1)`],
   ['totals の2行目は弾く', false, `insert into mahjong.totals(id) values (2)`],
-  ['部屋番号が8桁でないと弾く', false, `insert into mahjong.rooms(name,room_no,pass_hash,url_token_hash,admin_secret_hash,channel_key) values ('x','1234567','p',md5(random()::text),'a',md5(random()::text))`],
-  ['mj_ops に大文字の名は弾く', false, `insert into mahjong.mj_ops(name,kan,nyu,revert) values ('Bad',true,true,'none')`],
+  ['部屋番号が8桁でないと弾く', false, `${ROOM} values ('x','1234567','p',md5(random()::text),:U,md5(random()::text))`, '23514'],
+  /* ── v18：部屋の持ち主・合言葉・端末 ── */
+  ['部屋は持ち主ありで通る（合言葉なし）', true, `${ROOM} values ('x','12345678','p',md5(random()::text),:U,md5(random()::text))`],
+  ['部屋の持ち主が空は弾く', false, `${ROOM} values ('x','12345679','p',md5(random()::text),null,md5(random()::text))`, 'rooms_owner_ok'],
+  ['部屋に合言葉を書いたら弾く', false, `insert into mahjong.rooms(name,room_no,pass_hash,url_token_hash,owner_user_id,channel_key,admin_secret_hash) values ('x','12345670','p',md5(random()::text),:U,md5(random()::text),'a')`, 'rooms_no_admin_secret'],
+  ['端末の表に1行でも弾く（v18 で使わない）', false, `insert into mahjong.devices(room_id,token_hash,entered_by) values (:R,md5(random()::text),'pass')`, 'devices_unused'],
+  /* ── v18：アカウント・部屋の人 ── */
+  ['アカウントは名前なしで通る', true, `insert into mahjong.accounts(user_id) values (:U2)`],
+  ['アカウントの名前20字は通る', true, `insert into mahjong.accounts(user_id,display_name,name_key) values (:U2,repeat('あ',20),'a')`],
+  ['アカウントの名前21字は弾く', false, `insert into mahjong.accounts(user_id,display_name,name_key) values (:U2,repeat('あ',21),'a')`, '23514'],
+  ['アカウントの名前だけで name_key が空は弾く', false, `insert into mahjong.accounts(user_id,display_name) values (:U2,'甲')`, '23514'],
+  ['auth に居ない人のアカウントは弾く', false, `insert into mahjong.accounts(user_id) values (gen_random_uuid())`, '23503'],
+  ['部屋の人 管・作った は通る', true, `${ACC} values (:R,:U,'kan','create')`],
+  ['部屋の人 入・パス は通る', true, `${ACC} values (:R,:U2,'nyu','pass')`],
+  ['部屋の人の役 owner は弾く（持ち主は rooms の列）', false, `${ACC} values (:R,:U,'owner','create')`, '23514'],
+  ['部屋の人の入り方 admin は弾く（合言葉はやめた）', false, `${ACC} values (:R,:U,'kan','admin')`, '23514'],
+  ['auth に居ない人は部屋の人にできない', false, `${ACC} values (:R,gen_random_uuid(),'nyu','pass')`, '23503'],
+  ['同じ部屋の2人を同じ名簿の人につなぐと弾く', false, `${ACCM} values (:R,:U,'kan','create',:M); ${ACCM} values (:R,:U2,'nyu','pass',:M)`, 'room_accounts_member'],
+  ['名簿の人に同じ部屋で同じアカウントを2回つなぐと弾く', false, `insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'乙','おつ',:U); insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'丙','へい',:U)`, 'members_user'],
+  ['auth に居ない人を名簿の人につなぐと弾く', false, `insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'乙','おつ',gen_random_uuid())`, '23503'],
+  /* ── v18：リーグ・書いた人の列 ── */
+  ['リーグは持ち主ありで通る', true, `${LEA} values (:R,'リーグ',:S,:U)`],
+  ['リーグの持ち主が空は弾く', false, `${LEA} values (:R,'リーグ',:S,null)`, 'leagues_owner_ok'],
+  ['送り直しの答えに人が空は弾く', false, `insert into mahjong.op_results(room_id,op_id,result) values (:R,gen_random_uuid(),'{}')`, 'op_results_user_ok'],
+  ['作るの控えに人が空は弾く', false, `insert into mahjong.creates(op_id,room_id) values (gen_random_uuid(),:R)`, 'creates_user_ok'],
+  ['マスに端末を書いたら弾く', false, `insert into mahjong.cells(hanchan_id,seat,value,updated_by_device) values (:H,2,0,gen_random_uuid())`, 'cells_no_device'],
+  ['マスに人を書くのは通る', true, `insert into mahjong.cells(hanchan_id,seat,value,updated_by_user) values (:H,2,0,:U)`],
+  ['チップに端末を書いたら弾く', false, `insert into mahjong.extras(table_id,member_id,kind,value,updated_by_device) values (:T,:M,'chip',1,gen_random_uuid())`, 'extras_no_device'],
+  ['半荘に端末を書いたら弾く', false, `insert into mahjong.hanchans(id,room_id,table_id,players,seats,rule_set_id,rule_version,rules_snapshot,created_by_device) values (gen_random_uuid(),:R,:T,4,'{}',:S,1,'{"players":4}',gen_random_uuid())`, 'hanchans_no_device'],
+  ['精算の締めに端末を書いたら弾く', false, `insert into mahjong.settle_snaps(room_id,session_id,rev,content,used,missing,made_by_device) values (:R,:D,1,'{}','{}','{}',gen_random_uuid())`, 'settle_snaps_no_device'],
+  /* ── v18：履歴の押した人 ── */
+  ['履歴の行は押した人と役で通る', true, `${HIS},actor_user_id,actor_role) values (:R,gen_random_uuid(),'cell_set','cells',:U,'nyu')`],
+  ['履歴の行に押した人が空は弾く', false, `${HIS},actor_role) values (:R,gen_random_uuid(),'cell_set','cells','nyu')`, 'history_actor_ok'],
+  ['履歴の行に役が空は弾く', false, `${HIS},actor_user_id) values (:R,gen_random_uuid(),'cell_set','cells',:U)`, 'history_actor_ok'],
+  ['履歴の役 x は弾く', false, `${HIS},actor_user_id,actor_role) values (:R,gen_random_uuid(),'cell_set','cells',:U,'x')`, 'history_actor_role_ok'],
+  ['履歴の役 league（L）は通る', true, `${HIS},actor_user_id,actor_role) values (:R,gen_random_uuid(),'league_save','leagues',:U,'league')`],
+  ['履歴に v15 の actor を書いたら弾く', false, `${HIS},actor_user_id,actor_role,actor) values (:R,gen_random_uuid(),'cell_set','cells',:U,'nyu','nyu')`, 'history_old_empty'],
+  ['履歴に端末を書いたら弾く', false, `${HIS},actor_user_id,actor_role,device_id) values (:R,gen_random_uuid(),'cell_set','cells',:U,'nyu',gen_random_uuid())`, 'history_old_empty'],
+  ['要約の行は押した人なしで通る', true, `insert into mahjong.history(room_id,group_id,kind,op,fold) values (:R,gen_random_uuid(),'fold','fold','{}')`],
+  /* ── v18：操作の表（K-1）＝既定なし・v15 の列は空だけ ── */
+  ['mj_ops に大文字の名は弾く', false, `${OPS} values ('Bad','nyu','same',false,true,'none',false,'no')`, '23514'],
+  ['mj_ops の戻し neg は通る', true, `${OPS} values ('zz_check','nyu','same',false,true,'neg',false,'no')`],
+  ['mj_ops に v15 の kan を書いたら弾く', false, `insert into mahjong.mj_ops(name,who_plain,who_league,on_deleted,writes_history,revert,versioned,re,kan) values ('zz_check','nyu','same',false,true,'none',false,'no',true)`, 'mj_ops_old_empty'],
+  ['mj_ops の who_plain x は弾く', false, `${OPS} values ('zz_check','x','same',false,true,'none',false,'no')`, 'mj_ops_who_ok'],
+  ['mj_ops の who_league に kan は弾く', false, `${OPS} values ('zz_check','nyu','kan',false,true,'none',false,'no')`, 'mj_ops_who_ok'],
+  ['mj_ops の re x は弾く', false, `${OPS} values ('zz_check','nyu','same',false,true,'none',false,'x')`, 'mj_ops_who_ok'],
+  ['mj_ops の re 抜けは弾く（既定なし）', false, `insert into mahjong.mj_ops(name,who_plain,who_league,on_deleted,writes_history,revert,versioned) values ('zz_check','nyu','same',false,true,'none',false)`, '23502'],
+  ['mj_ops の on_deleted 抜けは弾く（既定なし）', false, `insert into mahjong.mj_ops(name,who_plain,who_league,writes_history,revert,versioned,re) values ('zz_check','nyu','same',true,'none',false,'no')`, '23502'],
+  ['mj_ops の versioned 抜けは弾く（既定なし）', false, `insert into mahjong.mj_ops(name,who_plain,who_league,on_deleted,writes_history,revert,re) values ('zz_check','nyu','same',false,true,'none','no')`, '23502'],
 ];
 
 /* ★全部を1つの do の塊で走らせ、最後にわざと例外で結果を返す★
    ＝倉庫は必ず全部を戻す（rollback を最後の文に置くと Management API は結果を返さない＝最後の文の行しか返らない）。
    各ケースは内側の begin … exception（＝savepoint）で囲み、通った時も mj_ok の例外でその insert を戻す。 */
+const MAIL = 'mj-db-checks.invalid';
 function body() {
   const cases = CASES.map(([, , q], i) => {
-    const sub = q.replace(/:(S3|R|S|D|T|H|M)(?![A-Za-z0-9_])/g, (_, k) => 'v_' + k.toLowerCase());
+    const sub = q.replace(/:(S3|U2|R|S|D|T|H|M|U)(?![A-Za-z0-9_])/g, (_, k) => 'v_' + k.toLowerCase());
     return `  begin ${sub}; raise exception 'mj_ok';
   exception when others then
     res := res || jsonb_build_object('${i}', case when sqlerrm = 'mj_ok' then 'ok' else sqlstate || ' ' || coalesce(substring(sqlerrm from 'constraint "([^"]+)"'), left(sqlerrm, 60)) end);
@@ -72,9 +131,12 @@ function body() {
   });
   return `do $t$ declare res jsonb := '{}'; v_r uuid := gen_random_uuid(); v_s uuid := gen_random_uuid(); v_s3 uuid := gen_random_uuid();
   v_d uuid := gen_random_uuid(); v_t uuid := gen_random_uuid(); v_h uuid := gen_random_uuid(); v_m uuid := gen_random_uuid();
+  v_u uuid := gen_random_uuid(); v_u2 uuid := gen_random_uuid();
 begin
-  insert into mahjong.rooms(id,name,room_no,pass_hash,url_token_hash,admin_secret_hash,channel_key)
-    values (v_r,'試験の部屋',lpad((floor(random()*1e8))::bigint::text,8,'0'),'p',md5(random()::text),'a',md5(random()::text));
+  insert into auth.users(id,email,aud,role,is_anonymous) values (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false),
+    (v_u2, v_u2::text || '@${MAIL}', 'authenticated', 'authenticated', false);
+  insert into mahjong.rooms(id,name,room_no,pass_hash,url_token_hash,owner_user_id,channel_key)
+    values (v_r,'試験の部屋',lpad((floor(random()*1e8))::bigint::text,8,'0'),'p',md5(random()::text),v_u,md5(random()::text));
   insert into mahjong.rule_sets(id,version,room_id,rules) values (v_s,1,v_r,'{"players":4,"kyotaku_end":"top"}');
   insert into mahjong.rule_sets(id,version,room_id,rules) values (v_s3,1,v_r,'{"players":3,"kyotaku_end":"kieru"}');
   update mahjong.rooms set rule_set_id=v_s, rule_version=1 where id=v_r;
@@ -106,15 +168,18 @@ try { await q(body()); } catch (e) {
 }
 if (!res) { console.log('★失敗★ 結果の例外が来なかった（=戻っていない恐れ）'); process.exitCode = 1; throw new Error('結果なし'); }
 const rows = Object.entries(res).map(([i, v]) => ({ i: Number(i), ok: v === 'ok', err: v === 'ok' ? null : v }));
-const left = await q(`select count(*)::int as n from mahjong.rooms where name='試験の部屋'`);
+const left = await q(`select (select count(*)::int from mahjong.rooms where name='試験の部屋') as n,
+  (select count(*)::int from auth.users where email like '%@${MAIL}') as u, (select count(*)::int from mahjong.mj_ops where name='zz_check') as o`);
 let p = 0, f = 0;
-for (const [i, [name, want]] of CASES.entries()) {
+for (const [i, [name, want, , cons]] of CASES.entries()) {
   const r = rows.find((x) => x.i === i);
   const got = r ? r.ok : null;
-  if (got === want) { p++; console.log(`  ✓ ${name}${got ? '' : '（' + (r.err || '').split(' ')[0] + '）'}`); }
+  const consOk = got !== false || !cons || (r.err || '').split(' ').includes(cons);
+  if (got === want && consOk) { p++; console.log(`  ✓ ${name}${got ? '' : '（' + r.err + '）'}`); }
+  else if (got === want) { f++; console.log(`  ✗ ${name} — 別の訳で弾かれた: ${r.err}（${cons} のはず）`); }
   else { f++; console.log(`  ✗ ${name} — ${got === null ? '結果が無い' : got ? '通ってしまった' : '弾かれた: ' + r.err}`); }
 }
-if (left[0].n !== 0) { f++; console.log(`  ✗ 試験の部屋が倉庫に ${left[0].n} 行残った（rollback されていない）`); }
-else { p++; console.log('  ✓ 試験の行は倉庫に1行も残っていない（rollback）'); }
+if (left[0].n !== 0 || left[0].u !== 0 || left[0].o !== 0) { f++; console.log(`  ✗ 試験の行が倉庫に残った（部屋 ${left[0].n}・仮の人 ${left[0].u}・操作 ${left[0].o}）＝戻っていない`); }
+else { p++; console.log('  ✓ 試験の行（部屋・仮の人・操作）は倉庫に1行も残っていない'); }
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

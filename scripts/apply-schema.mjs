@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 21, ops: 28, caps: 12, rule_keys: 41, common_pass: 100, public_funcs: 1 };
+export const EXPECT = { tables: 23, ops: 34, caps: 12, rule_keys: 41, common_pass: 100, public_funcs: 1 };
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {
@@ -68,7 +68,7 @@ select
  (select count(*) from pg_proc p join pg_namespace s on s.oid=p.pronamespace where s.nspname='public' and p.proname like 'mj\\_%') as public_funcs,
  (select count(*) from pg_proc p join pg_namespace s on s.oid=p.pronamespace where s.nspname='public' and p.proname like 'mj\\_%'
     and p.prosecdef and p.proconfig @> array['search_path=""']
-    and has_function_privilege('anon', p.oid, 'EXECUTE') and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    and not has_function_privilege('anon', p.oid, 'EXECUTE') and has_function_privilege('authenticated', p.oid, 'EXECUTE')
     and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x where x.grantee = 0)) as public_funcs_ok,
  (select count(*) from n where has_schema_privilege('anon', n.oid, 'USAGE') or has_schema_privilege('authenticated', n.oid, 'USAGE')) as client_usage,
  (select count(*) from pg_class c join n on n.oid=c.relnamespace where c.relkind in ('r','v','S')
@@ -124,7 +124,7 @@ async function main() {
   console.log(`\nAPPLY RESULT: ${ok ? 'OK' : 'NG'}`
     + `  表=${a.tables}/${EXPECT.tables} RLS=${a.rls_on} 決まり書き=${a.policies} 操作=${s.ops}/${EXPECT.ops}`
     + ` 上限=${s.caps}/${EXPECT.caps} ルールの鍵=${s.rule_keys}/${EXPECT.rule_keys} よくあるパス=${s.common_pass}/${EXPECT.common_pass}`
-    + ` public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}（definer・search_path 空・anon と authenticated に EXECUTE・PUBLIC 無し=${a.public_funcs_ok}）`);
+    + ` public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}（definer・search_path 空・authenticated だけに EXECUTE〔anon に無い〕・PUBLIC 無し=${a.public_funcs_ok}）`);
   console.log(`  客（anon・authenticated）… 部屋の USAGE=${a.client_usage} 表の権限=${a.client_table_priv} 部屋の関数=${a.client_private_funcs}`
     + `（★全部0★）${clientOk ? '' : ' ← ★ここが NG★'}`);
   process.exit(ok ? 0 : 1);
