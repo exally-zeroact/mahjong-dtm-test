@@ -510,20 +510,20 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   ok('卓の rules が null → rules_bad', tw((x) => { x.tables[0].rules = null; }).mode === 'rules_bad');
   ok('卓の rules が配列 → rules_bad', tw((x) => { x.tables[0].rules = []; }).mode === 'rules_bad');
   ok('卓の rules に知らない鍵 → newer（v:2 の写し＝早い返しの道も門を通る）', (() => { const g = tw((x) => { x.tables[0].rules.zzz = 1; }); return g.mode === 'newer' && g.why === 'zzz'; })());
-  ok('③-0 では yakitori_to は知らない鍵 → newer（③-1 から43鍵）', tw((x) => { x.tables[0].rules.yakitori_to = 'each'; }).mode === 'newer');
-  ok('41鍵の範囲の外 → rules_bad（鍵名を返す）', (() => { const g = tw((x) => { x.tables[0].rules.aka = 99; }); return g.mode === 'rules_bad' && g.why === 'aka'; })());
+  ok('2c-3a から yakitori_to・yakitori_top_tie・tane_custom は知っている鍵（44鍵）→ ok・壊れた値は rules_bad', tw((x) => { Object.assign(x.tables[0].rules, { yakitori_to: 'top', yakitori_top_tie: 'all', tane_custom: [{ id: 'a', name: '一発', pt10: 5, sum0: true }] }); }).mode === 'ok' && (() => { const g = tw((x) => { x.tables[0].rules.tane_custom = [{ id: 'A', name: '一発', pt10: 5, sum0: true }]; }); return g.mode === 'rules_bad' && g.why === 'tane_custom'; })());
+  ok('44鍵の範囲の外 → rules_bad（鍵名を返す）', (() => { const g = tw((x) => { x.tables[0].rules.aka = 99; }); return g.mode === 'rules_bad' && g.why === 'aka'; })());
   ok('extras の知らない kind（c:x）→ newer', tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: 'c:x', value: 1, version: 1 }); }).mode === 'newer');
   ok('半荘の知らない欄（yakitori）→ newer', tw((x) => { x.hanchans[0].yakitori = []; }).mode === 'newer');
-  ok('部屋の rules（roomRules）に知らない鍵 → newer・roomRules を渡さなければ部屋の判じは飛ばす', migrateState(clone(st), { ...rules, yakitori_to: 'each' }).gate.mode === 'newer' && migrateState(clone(st)).gate.mode === 'ok');
+  ok('部屋の rules（roomRules）に知らない鍵 → newer・roomRules を渡さなければ部屋の判じは飛ばす', migrateState(clone(st), { ...rules, zzz: 1 }).gate.mode === 'newer' && migrateState(clone(st)).gate.mode === 'ok');
   ok('帯の字', gateText({ mode: 'newer' }) === NEWER_TEXT && gateText({ mode: 'rules_bad', why: 'aka' }) === 'この部屋のルールが読めません（aka）');
   const part = clone(st); part.tables[0].rules = { players: 4, rate: 100 }; const keepP = J(part);
   const mp = migrateState(part);
-  ok('足りない卓の rules は41鍵に埋める・元の写しは触らない・埋めは migrated を立てない', mp.gate.mode === 'ok' && Object.keys(mp.st.tables[0].rules).length === 41 && J(part) === keepP && !mp.migrated);
+  ok('足りない卓の rules は44鍵に埋める・元の写しは触らない・埋めは migrated を立てない', mp.gate.mode === 'ok' && Object.keys(mp.st.tables[0].rules).length === 44 && J(part) === keepP && !mp.migrated);
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
   ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 18);
-  ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, yakitori_to: 'each' } }).res.err === 'newer');
+  ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
 }

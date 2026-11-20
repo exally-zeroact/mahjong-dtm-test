@@ -28,9 +28,9 @@ ok('種と lib の RULE_KEYS が深く同じ', JSON.stringify(seed) === JSON.str
 /* ② 鍵の数と名の組を字で固定 */
 const NAMES = 'aka atozuke chip_pt10 chombo chombo_pt double_ron double_ron_kyotaku double_yakuman hakoshita honba kazoe '
   + 'kiriage kita kuitan kyotaku_end nagashi oorasu_stop pao players rate renpu_fu return_pts round shugi_pt10 start_pts '
-  + 'tenpai_ryo tie tobi tobi_from tobi_pt tobi_zero tochu_kyushu tochu_sucha tochu_sufu tochu_sukan triple_ron tsumo3 uma '
-  + 'west yakitori yakitori_pt';
-ok('鍵は41個', RULE_KEYS.length === 41, `${RULE_KEYS.length} 個`);
+  + 'tane_custom tenpai_ryo tie tobi tobi_from tobi_pt tobi_zero tochu_kyushu tochu_sucha tochu_sufu tochu_sukan triple_ron tsumo3 uma '
+  + 'west yakitori yakitori_pt yakitori_to yakitori_top_tie';
+ok('鍵は44個', RULE_KEYS.length === 44, `${RULE_KEYS.length} 個`);
 ok('鍵の名の組と並び（ASCII 順）が字の通り', RULE_KEYS.map((k) => k.key).join(' ') === NAMES);
 ok('null を通す鍵は rate・chip_pt10・shugi_pt10 だけ', RULE_KEYS.filter((k) => k.nullable).map((k) => k.key).join(',') === 'chip_pt10,rate,shugi_pt10');
 ok('無いと弾く鍵は players だけ', RULE_KEYS.filter((k) => k.need).map((k) => k.key).join(',') === 'players');
@@ -78,6 +78,20 @@ ok('3人の既定＝35000/40000・ウマ 15/0/−15・赤2・北抜き', d3.star
   && JSON.stringify(d3.uma) === '[15,0,-15]' && d3.aka === 2 && d3.kita === 'nuki');
 const d4 = rulesOk({ players: 4, kyotaku_end: 'kieru' }).rules;
 ok('4人の既定で埋め、在る鍵はそのまま（kyotaku_end kieru）', d4.start_pts === 25000 && d4.return_pts === 30000
-  && JSON.stringify(d4.uma) === '[20,10,-10,-20]' && d4.kyotaku_end === 'kieru' && Object.keys(d4).length === 41);
+  && JSON.stringify(d4.uma) === '[20,10,-10,-20]' && d4.kyotaku_end === 'kieru' && Object.keys(d4).length === 44);
+
+/* ④ 2c-3a の3鍵（yakitori_to・yakitori_top_tie・tane_custom）＝表 tests/fixtures/rules-tane-cases.json（倉庫も rules.live が同じ表を通す） */
+ok('既定 yakitori_to each・yakitori_top_tie others・tane_custom []', d4.yakitori_to === 'each' && d4.yakitori_top_tie === 'others' && JSON.stringify(d4.tane_custom) === '[]'
+  && d3.yakitori_to === 'each' && d3.yakitori_top_tie === 'others' && JSON.stringify(d3.tane_custom) === '[]');
+for (const [v, good] of [['each', 1], ['split', 1], ['top', 1], ['x', 0], [null, 0], [1, 0]]) { const r = rulesOk({ players: 4, yakitori_to: v }); ok('yakitori_to ' + JSON.stringify(v) + (good ? ' 通る' : ' 弾く'), good ? r.ok : !r.ok && r.err === 'yakitori_to'); }
+for (const [v, good] of [['others', 1], ['all', 1], ['each', 0], [null, 0]]) { const r = rulesOk({ players: 4, yakitori_top_tie: v }); ok('yakitori_top_tie ' + JSON.stringify(v) + (good ? ' 通る' : ' 弾く'), good ? r.ok : !r.ok && r.err === 'yakitori_top_tie'); }
+const TANE = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/rules-tane-cases.json'), 'utf8')).cases;
+ok('tane の表は40行より多い', TANE.length > 40, String(TANE.length));
+for (const c of TANE) {
+  const src = { players: 4, tane_custom: c.in }; const keep = JSON.stringify(src);
+  const r = rulesOk(src);
+  if (c.want) ok('tane ' + c.id, r.ok && JSON.stringify(r.rules.tane_custom) === JSON.stringify(c.want) && JSON.stringify(src) === keep, JSON.stringify(r.ok ? r.rules.tane_custom : r));
+  else ok('tane ' + c.id + '（弾く）', !r.ok && r.err === 'tane_custom', JSON.stringify(r.ok ? r.rules.tane_custom : r));
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

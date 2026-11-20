@@ -543,7 +543,7 @@ revoke all on function mahjong_private.mj_name_key(text) from public, anon, auth
 -- ★鍵を後から足す日は、新しい鍵の既定を「足す前の振る舞い」と同じ値に限る（古い rules_snapshot の pt を変えない）★
 create table if not exists mahjong.mj_rule_keys (
   key      text primary key check (key ~ '^[a-z][a-z0-9_]*$'),
-  kind     text not null check (kind in ('int', 'enum', 'bool', 'uma')),
+  kind     text not null,                   -- 種の check は下の alter（mj_rule_keys_kind_ok・2c-3a で list を足した）
   min      numeric,
   max      numeric,
   step     numeric check (step is null or step > 0),
@@ -555,6 +555,18 @@ create table if not exists mahjong.mj_rule_keys (
   check ((kind = 'enum') = (vals is not null)),
   check ((kind in ('int', 'uma')) = (min is not null and max is not null and step is not null))
 );
+-- 種の check（2c-3a・write3_sekkei.md v1.1 C2）：create の中の古い無名の check（'bool' を含み 'list' を含まない）は pg_constraint から名を引いて落とす
+do $rkck$
+declare r record;
+begin
+  for r in select c.conname from pg_catalog.pg_constraint c
+            where c.conrelid = 'mahjong.mj_rule_keys'::regclass and c.contype = 'c' and c.conname <> 'mj_rule_keys_kind_ok'
+              and pg_catalog.pg_get_constraintdef(c.oid) like '%''bool''%' loop
+    execute pg_catalog.format('alter table mahjong.mj_rule_keys drop constraint %I', r.conname);
+  end loop;
+end $rkck$;
+alter table mahjong.mj_rule_keys drop constraint if exists mj_rule_keys_kind_ok;
+alter table mahjong.mj_rule_keys add constraint mj_rule_keys_kind_ok check (kind in ('int', 'enum', 'bool', 'uma', 'list'));
 do $rkdo$
 declare seed jsonb := $rk$[
   {"key":"aka","kind":"int","min":0,"max":4,"step":1,"vals":null,"nullable":false,"def4":3,"def3":2,"need":false},
@@ -582,6 +594,7 @@ declare seed jsonb := $rk$[
   {"key":"round","kind":"enum","min":null,"max":null,"step":null,"vals":["gosha","shisha","kirisute","none"],"nullable":false,"def4":"gosha","def3":"gosha","need":false},
   {"key":"shugi_pt10","kind":"int","min":1,"max":9999,"step":1,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
   {"key":"start_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":25000,"def3":35000,"need":false},
+  {"key":"tane_custom","kind":"list","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":[],"def3":[],"need":false},
   {"key":"tenpai_ryo","kind":"int","min":0,"max":30000,"step":1000,"vals":null,"nullable":false,"def4":3000,"def3":3000,"need":false},
   {"key":"tie","kind":"enum","min":null,"max":null,"step":null,"vals":["kamicha","split"],"nullable":false,"def4":"kamicha","def3":"kamicha","need":false},
   {"key":"tobi","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
@@ -597,7 +610,9 @@ declare seed jsonb := $rk$[
   {"key":"uma","kind":"uma","min":-999,"max":999,"step":1,"vals":null,"nullable":false,"def4":[20,10,-10,-20],"def3":[15,0,-15],"need":false},
   {"key":"west","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"yakitori","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
-  {"key":"yakitori_pt","kind":"int","min":0,"max":999,"step":1,"vals":null,"nullable":false,"def4":0,"def3":0,"need":false}
+  {"key":"yakitori_pt","kind":"int","min":0,"max":999,"step":1,"vals":null,"nullable":false,"def4":0,"def3":0,"need":false},
+  {"key":"yakitori_to","kind":"enum","min":null,"max":null,"step":null,"vals":["each","split","top"],"nullable":false,"def4":"each","def3":"each","need":false},
+  {"key":"yakitori_top_tie","kind":"enum","min":null,"max":null,"step":null,"vals":["others","all"],"nullable":false,"def4":"others","def3":"others","need":false}
 ]$rk$;
 begin
   with up as (
@@ -611,6 +626,39 @@ begin
     returning key)
   delete from mahjong.mj_rule_keys r where r.key not in (select up.key from up);
 end $rkdo$;
+
+-- ── 自由な項目の並び tane_custom の確かめ（2c-3a・lib/rules.mjs の okTane と1字も違わない手順・write3_sekkei.md §2 と v1.3）──
+-- 通れば作り直した並び（落とした name・整数の pt10・鍵は id, name, pt10, sum0）を返す／だめなら null（呼ぶ側が mj_range:tane_custom）。
+--   並び 0〜5 物・各物はちょうど4鍵・id ^[a-z0-9]{1,8}$ で一意・name は c_trim の5字を前後から落として 1〜10 符号点・
+--   mj_name_key が空でない・mj_name_key で重ならない・「チップ」「祝儀」「やきとり」と mj_name_key で同じでない・pt10 整数 1〜9999・sum0 bool
+create or replace function mahjong_private.mj_rules_tane(p jsonb) returns jsonb
+language plpgsql immutable set search_path = '' as $fn$
+declare
+  c_trim constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
+  c_res  text[] := array[mahjong_private.mj_name_key('チップ'), mahjong_private.mj_name_key('祝儀'), mahjong_private.mj_name_key('やきとり')];
+  e jsonb; o jsonb := '[]'::jsonb; v_nm text; v_key text; v_ids text[] := '{}'; v_keys text[] := '{}'; x numeric;
+begin
+  if p is null or pg_catalog.jsonb_typeof(p) <> 'array' or pg_catalog.jsonb_array_length(p) > 5 then return null; end if;
+  for e in select t.x from pg_catalog.jsonb_array_elements(p) with ordinality t(x, i) order by t.i loop
+    if pg_catalog.jsonb_typeof(e) <> 'object'
+       or (select count(*) from pg_catalog.jsonb_object_keys(e)) <> 4
+       or not (e ?& array['id', 'name', 'pt10', 'sum0']) then return null; end if;
+    if pg_catalog.jsonb_typeof(e -> 'id') <> 'string' or not ((e ->> 'id') ~ '^[a-z0-9]{1,8}$') or (e ->> 'id') = any (v_ids) then return null; end if;
+    if pg_catalog.jsonb_typeof(e -> 'name') <> 'string' then return null; end if;
+    v_nm := pg_catalog.btrim(e ->> 'name', c_trim);
+    if pg_catalog.char_length(v_nm) < 1 or pg_catalog.char_length(v_nm) > 10 then return null; end if;
+    v_key := mahjong_private.mj_name_key(v_nm);
+    if v_key = '' or v_key = any (v_keys) or v_key = any (c_res) then return null; end if;
+    if pg_catalog.jsonb_typeof(e -> 'pt10') <> 'number' then return null; end if;
+    x := (e -> 'pt10')::numeric;
+    if x % 1 <> 0 or x < 1 or x > 9999 then return null; end if;
+    if pg_catalog.jsonb_typeof(e -> 'sum0') <> 'boolean' then return null; end if;
+    v_ids := v_ids || (e ->> 'id'); v_keys := v_keys || v_key;
+    o := o || pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('id', e ->> 'id', 'name', v_nm, 'pt10', x::bigint, 'sum0', e -> 'sum0'));
+  end loop;
+  return o;
+end $fn$;
+revoke all on function mahjong_private.mj_rules_tane(jsonb) from public, anon, authenticated;
 
 -- ── ルールの確かめ（rules_save・league_save・mj_room_create・mj_room_import が同じ物を呼ぶ＝設計図 §3）──
 -- 確かめて、足りない鍵を players の既定で埋めた jsonb を返す。弾く時は例外 'mj_range:<鍵>'（呼ぶ側が「範囲」の値に換える）。
@@ -649,6 +697,9 @@ begin
         x := v::numeric;
         if x % 1 = 0 and x >= k.min and x <= k.max and x % k.step = 0 then ok := true; v := pg_catalog.to_jsonb(x::bigint); end if;
       end if;
+    elsif k.kind = 'list' then
+      e := mahjong_private.mj_rules_tane(v);
+      if e is not null then ok := true; v := e; end if;
     elsif k.kind = 'uma' then
       if pg_catalog.jsonb_typeof(v) = 'array' and pg_catalog.jsonb_array_length(v) = n then
         ok := true; s := 0; prev := null; arr := '[]'::jsonb;

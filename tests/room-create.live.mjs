@@ -6,7 +6,7 @@
  *  ① 作れて rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits は 1m・1d・u1d に1ずつ（+3）
  *     持ち主＝作った人・room_accounts は kan・create・admin_secret_hash 空・creates.user_id・返しの鍵は ok・room_id・room_no・channel_key の4つ
  *  ② 同じ op_id で送り直し＝同じ返し ／ url が違う＝mismatch ／ 消した部屋＝gone ／ 別の人の同じ op_id＝mj_op_other_user
- *  ③ 形の違い（secrets は url_token_hash の1つだけ・2つ3つは bad:secrets）・ルールの範囲の外・よくあるパスを弾く ④ 既定のルール（41鍵）
+ *  ③ 形の違い（secrets は url_token_hash の1つだけ・2つ3つは bad:secrets）・ルールの範囲の外・よくあるパスを弾く ④ 既定のルール（44鍵）
  *  ⑤ pass_hash は $2a$10$・そろえた字で照らせる・平文のパスは部屋の行のどこにも無い
  *  ⑥ 一意の当たり＝dup ⑦ R−20 で full ⑧ 全体 1分20・24時間200 で busy:all・人ごと24時間5部屋で busy:user（4なら作れる・別の人は作れる）
  *  ★ok でない返しの後は creates・limits・totals・部屋の数が1つも増えていない★（S1・N2）
@@ -272,7 +272,7 @@ if (out) {
   ok('① creates に op_id・部屋・作った人', out.cr && out.cr.room_id === r1.room_id && out.cr.user_id === out.u, JSON.stringify(out.cr));
   ok('① url_token_hash は送った物', out.room.url_token_hash === U1);
   /* ④ */
-  ok('④ 既定のルールが埋まった（41鍵・players 4）', out.rs[0].nkeys === 41 && out.rs[0].players === 4, JSON.stringify(out.rs[0]));
+  ok('④ 既定のルールが埋まった（44鍵・players 4）', out.rs[0].nkeys === 44 && out.rs[0].players === 4, JSON.stringify(out.rs[0]));
   /* ⑤ */
   ok('⑤ pass_hash は $2a$10$', out.pass_prefix === '$2a$10$', out.pass_prefix);
   ok('⑤ そろえた字で照らせる（大文字・全角で打っても同じ）', out.crypt_key === true && out.crypt_wide === true && out.crypt_raw === false);

@@ -233,11 +233,11 @@ async function tensu() {
     ok(`点数 和了牌＝最後の 3p 嵌張 2,600（${await txt(c.p, '#pts')}）`, (await txt(c.p, '#pts')) === '2,600' && (await txt(c.p, '#hanfu')).includes('40符'));
     await c.ctx.close();
   }
-  // 卓の rules 41鍵まるごと（対局の［点数］の口）＝帯なし・from は ?room= を残す
+  // 卓の rules 44鍵まるごと（対局の［点数］の口）＝帯なし・from は ?room= を残す
   {
     const full3 = JSON.parse(JSON.stringify((await import('../../lib/rules.mjs')).defaultRules(3)));
     const c = await open(tq(full3, '/taikyoku.html?room=x1'));
-    ok('点数 41鍵の3人＝帯なし・鍵盤27', await c.p.$eval('#obi', (e) => e.hidden) && (await c.p.$$('#kb button[data-c]')).length === 27);
+    ok('点数 44鍵の3人＝帯なし・鍵盤27', await c.p.$eval('#obi', (e) => e.hidden) && (await c.p.$$('#kb button[data-c]')).length === 27);
     ok('点数 from=/taikyoku.html?room=x1 を残す', (await c.p.getAttribute('#back', 'href')) === '/taikyoku.html?room=x1');
     await c.ctx.close();
   }
