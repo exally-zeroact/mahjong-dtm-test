@@ -169,3 +169,47 @@
 .uma-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; padding: 6px 0; }
 .uma-row label { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--c-ji-usui); }
 .uma-row .box { width: 100%; }
+/* ホーム（home_v154 ①） */
+.h-brand { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 12px) 20px 0; }
+.h-n1 { font-size: 30px; font-weight: 800; letter-spacing: .02em; }
+.h-n2 { margin-top: 2px; font-size: 15px; font-weight: 700; color: var(--c-kin); }
+.h-cont { display: flex; flex-direction: column; margin: 0 0 12px; padding: 14px 16px; border-radius: 16px; background: var(--c-kon); color: var(--c-kon-ji); text-decoration: none; }
+.h-l, .h-m { font-size: 13px; opacity: .85; }
+.h-r { margin-top: 2px; font-size: 18px; font-weight: 700; }
+.h-m { margin-top: 4px; }
+.h-go { align-self: flex-start; display: inline-flex; align-items: center; min-height: 36px; margin-top: 10px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 700; background: var(--c-men); color: var(--c-kon); }
+.h-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.h-tile { display: flex; flex-direction: column; gap: 8px; min-height: 120px; padding: 14px; border-radius: 16px; border: 1px solid var(--c-sen); background: var(--c-men); color: var(--c-ji); text-decoration: none; }
+.h-tile > span:last-child { display: flex; flex-direction: column; }
+.h-big { grid-column: 1 / -1; min-height: 96px; flex-direction: row; align-items: center; gap: 14px; }
+.h-ic { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; font-size: 20px; font-weight: 800; }
+.h-ic-kon { background: var(--c-kon); color: var(--c-kon-ji); }
+.h-ic-kin { background: var(--c-man); color: var(--c-kin); }
+.h-ic-midori { background: var(--c-midori-usui); color: var(--c-midori); }
+.h-ic-ao { background: var(--c-kon-usui); color: var(--c-kon); }
+.h-ic-aka { background: var(--c-aka-usui); color: var(--c-aka); }
+.h-lb { font-size: 17px; font-weight: 700; }
+.h-sb { margin-top: 2px; font-size: 12px; color: var(--c-ji-usui); }
+/* 作る／入る（②）・部屋ができた（④） */
+.h-pane { display: flex; flex-direction: column; gap: 12px; }
+.h-pane .sec { margin-bottom: -6px; }
+.h-in { flex: 1; min-width: 0; max-width: 60%; min-height: 36px; padding: 0; font: inherit; font-size: 15px; text-align: right; border: 0; background: transparent; color: var(--c-ji); }
+.h-in::placeholder { color: var(--c-ji-usui); }
+.h-c { text-align: center; }
+.h-made { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; margin: 0; }
+.h-made .r-hint { margin: 0; }
+.h-no { font-size: 30px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+.h-made .qr { width: 150px; margin: 8px 0 0; }
+.h-made .qr.qr-big { width: 100%; max-width: 320px; }
+.h-url { margin: 8px 0 2px; font-size: 13px; color: var(--c-kon); word-break: break-all; }
+.h-kyk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-top: 8px; }
+.h-kyk .btn { min-height: 36px; font-size: 14px; }
+/* 表の見出しは表の箱の中の sticky＝js/env-badge.js がテストの帯の分を足す top を当てない（当てると1回目の行に被る） */
+.r-hyou thead th[data-envbar-top] { top: 0 !important; }
+.r-in input { min-height: 36px; padding: 0; border: 0; background: transparent; }
+.r-in input:focus { outline: 0; }
+.view .btn { width: 100%; }
+.h-kyk .btn { width: auto; }
+.li > span:first-child { flex: none; white-space: nowrap; }
+.li-v { flex-wrap: wrap; justify-content: flex-end; }
+#pCand > .btn { margin-top: 8px; }

@@ -7,13 +7,23 @@
  */
 import { needLogin, showLogin, rpc, errText, rememberRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
+import { mountRules } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
 
-const VIEWS = ['vLogin', 'vChoose', 'vCreate', 'vMade', 'vJoin', 'vUrlJoin', 'vRoom'];
+const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
+let rulesCtl = null; // ⑨ のルール設定（作るたびに同じ物を使う）
+let lastMade = null; // 作った直後に ‹ ルール設定 で戻っても、同じ中身なら2つ目を作らない
 
+const BAR = {
+  vLogin: { back: 'ホーム', title: '対局' },
+  vChoose: { back: 'ホーム', title: '対局' },
+  vUrlJoin: { back: 'ホーム', title: '対局' },
+  vRules: { back: '部屋を作る', onBack: () => show('vChoose'), title: 'ルール設定' },
+};
 export function show(id) {
   for (const v of VIEWS) $(v).hidden = v !== id;
+  if (BAR[id]) bar(BAR[id]);
   window.scrollTo(0, 0);
 }
 function obi(msg, kind) {
@@ -24,40 +34,6 @@ function obi(msg, kind) {
 }
 function busy(btn, on) { btn.disabled = on; btn.setAttribute('aria-busy', on ? 'true' : 'false'); }
 
-/* ── 切り替え（seg）と短い選び（chips） ── */
-function segVal(id) { const b = $(id).querySelector('[aria-checked="true"]'); return b ? b.dataset.v : null; }
-function segInit(id, onChange) {
-  $(id).addEventListener('click', (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    for (const x of $(id).querySelectorAll('button')) x.setAttribute('aria-checked', x === b ? 'true' : 'false');
-    if (onChange) onChange(b.dataset.v);
-  });
-}
-
-/* ── ルールの欄 ── */
-function fillRuleDefaults(players) {
-  const d = defaultRules(players);
-  $('cStart').value = d.start_pts;
-  $('cReturn').value = d.return_pts;
-  $('cTobiPt').value = d.tobi_pt;
-  $('cUma').innerHTML = d.uma.map((u, i) => '<label><span>' + (i + 1) + '位</span><input inputmode="numeric" data-i="' + i + '" value="' + u + '"></label>').join('');
-}
-const toInt = (s) => { const t = String(s).replace(/[,，\s]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^[−ー－]/, '-'); return /^-?\d+$/.test(t) ? Number(t) : NaN; };
-const toPt10 = (s) => { const t = String(s).trim(); if (!/^\d+(\.\d)?$/.test(t)) return NaN; return Math.round(Number(t) * 10); };
-
-export function readRules() {
-  const players = Number(segVal('cPlayers'));
-  const r = { players };
-  const rateS = $('cRate').value.trim();
-  r.rate = rateS === '' ? null : toInt(rateS);
-  r.start_pts = toInt($('cStart').value);
-  r.return_pts = toInt($('cReturn').value);
-  r.uma = Array.from($('cUma').querySelectorAll('input')).map((x) => toInt(x.value));
-  if (segVal('cTobi') === '1') { r.tobi_pt = toInt($('cTobiPt').value); } else { r.tobi_pt = 0; }
-  r.chip_pt10 = segVal('cChip') === '1' ? toPt10($('cChipPt').value) : null;
-  r.shugi_pt10 = segVal('cShugi') === '1' ? toPt10($('cShugiPt').value) : null;
-  return r;
-}
 const RULE_ERR = {
   rate: 'レートは10の倍数で 10〜100,000 か「なし」です。',
   start_pts: '持ち点は 1,000〜200,000 の100の倍数です。',
@@ -70,18 +46,33 @@ const RULE_ERR = {
 
 /* ── 作る ── */
 const PENDING = () => 'mj-pending-create:' + me.id;
+function nameAndPass() {
+  const name = $('cName').value.trim();
+  const pass = $('cPass').value;
+  if (!name) return { err: '部屋の名前を入れてください。' };
+  if (pass.trim().length < 4) return { err: 'パスは4字以上で入れてください。' };
+  return { name, pass };
+}
+function goRules() {
+  $('cErr0').textContent = '';
+  const np = nameAndPass();
+  if (np.err) { $('cErr0').textContent = np.err; return; }
+  if (!rulesCtl) rulesCtl = mountRules($('cRules'), { rules: { ...defaultRules(4), rate: 100 }, readOnly: false });
+  $('cErr').textContent = '';
+  show('vRules');
+}
 async function doCreate() {
   const btn = $('btnCreate');
   $('cErr').textContent = '';
-  const name = $('cName').value.trim();
-  const pass = $('cPass').value;
-  if (!name) { $('cErr').textContent = '部屋の名前を入れてください。'; return; }
-  if (pass.trim().length < 4) { $('cErr').textContent = 'パスは4字以上で入れてください。'; return; }
-  const chk = rulesOk(readRules());
+  const np = nameAndPass();
+  if (np.err) { show('vChoose'); $('cErr0').textContent = np.err; return; }
+  const { name, pass } = np;
+  const rules = rulesCtl.read(); // 倉庫に送るのはルール設定の画面に出ている鍵だけ（残りは倉庫が既定で埋める）
+  const chk = rulesOk(rules);
   if (!chk.ok) { $('cErr').textContent = RULE_ERR[chk.err] || ('ルールの「' + chk.err + '」が入れられません。'); return; }
-  const rules = readRules(); // 倉庫に送るのは客が触った鍵だけ（残りは倉庫が既定で埋める）
   // 送り直しの印：同じ中身なら同じ op_id と token（返事が切れた時に部屋を2つ作らない）
   const body = JSON.stringify({ name, pass, rules });
+  if (lastMade && lastMade.body === body) { showMade(lastMade.room, pass); return; }
   let p = null;
   try { p = JSON.parse(localStorage.getItem(PENDING()) || 'null'); } catch { p = null; }
   if (!p || p.body !== body) { p = { op_id: uuid(), token: newToken(), body }; localStorage.setItem(PENDING(), JSON.stringify(p)); }
@@ -98,22 +89,31 @@ async function doCreate() {
   // rules＝倉庫の既定で埋めた形（倉庫の mj_read が来るまで、作った端末だけが部屋のルールを持つ）
   const room = { room_id: res.room_id, room_no: res.room_no, name, role: 'kan', owner: true, token: p.token, channel_key: res.channel_key, rules: rulesOk(rules).rules };
   rememberRoom(me.id, room);
+  lastMade = { body, room };
   showMade(room, pass);
 }
 function fmtNo(no) { return String(no).replace(/^(\d{4})(\d{4})$/, '$1 $2'); }
+/* pass あり＝作った直後（‹ ルール設定・［この設定で対局を始める］）／pass なし＝対局の［ルール］の下から（‹ 対局・［対局に戻る］） */
 function showMade(room, pass) {
   $('mNo').textContent = fmtNo(room.room_no);
-  $('mPass').textContent = pass || '（作った時に決めたパス）';
+  $('mPass').textContent = pass ? 'パス ' + '●'.repeat(Math.min(pass.length, 12)) + '（作った時に打った物）' : 'パスは作った時に打った物';
   const url = room.token ? roomUrl(room.token) : '';
   $('mUrl').textContent = url;
   $('mQr').innerHTML = url ? qrSvg(url) : '';
-  $('btnCopy').hidden = !url;
+  $('mQr').hidden = !url;
+  $('mQr').classList.remove('qr-big');
+  for (const id of ['btnCopy', 'btnQr']) $(id).hidden = !url;
+  $('btnCopy').textContent = 'URL を写す';
   $('btnCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(url); $('btnCopy').textContent = '写しました'; }
-    catch { $('btnCopy').textContent = '写せませんでした（URL を長押しで写してください）'; }
+    catch { $('btnCopy').textContent = '写せませんでした（URL を長押し）'; }
   };
+  $('btnQr').textContent = 'QR を見せる';
+  $('btnQr').onclick = () => { const big = $('mQr').classList.toggle('qr-big'); $('btnQr').textContent = big ? 'QR を小さく' : 'QR を見せる'; };
+  $('btnToRoom').textContent = pass ? 'この設定で対局を始める' : '対局に戻る';
   $('btnToRoom').onclick = () => openRoom(room.room_id);
   show('vMade');
+  bar(pass ? { back: 'ルール設定', onBack: () => show('vRules'), title: '部屋ができた' } : { back: '対局', onBack: () => openRoom(room.room_id), title: '部屋ができた' });
 }
 export function qrSvg(text) {
   if (!globalThis.qrcode) return '';
@@ -182,6 +182,7 @@ function bar({ back = 'ホーム', onBack, title = '', right, onRight } = {}) {
   const b = $('barBack');
   b.textContent = '‹ ' + back;
   b.onclick = onBack ? (ev) => { ev.preventDefault(); onBack(); } : null;
+  if ($('title').textContent !== title) window.scrollTo(0, 0); // 画面が替わったら上から（同じ画面の描き直しでは動かさない）
   $('title').textContent = title;
   const r = $('barR');
   r.hidden = !right;
@@ -200,16 +201,11 @@ function start(user) {
   show('vChoose');
 }
 
-segInit('cPlayers', (v) => fillRuleDefaults(Number(v)));
-segInit('cTobi', (v) => { $('cTobiPtBox').hidden = v !== '1'; });
-segInit('cChip', (v) => { $('cChipPtBox').hidden = v !== '1'; });
-segInit('cShugi', (v) => { $('cShugiPtBox').hidden = v !== '1'; });
-$('cRateChips').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) $('cRate').value = b.dataset.v; });
-fillRuleDefaults(4);
-$('cRate').value = '100';
-$('goCreate').onclick = () => { $('cErr').textContent = ''; show('vCreate'); };
-$('goJoin').onclick = () => { $('jErr').textContent = ''; show('vJoin'); };
-for (const b of document.querySelectorAll('[data-back]')) b.onclick = () => show('vChoose');
+$('chSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  for (const x of $('chSeg').querySelectorAll('button')) { x.setAttribute('aria-pressed', String(x === b)); $(x.dataset.p).hidden = x !== b; }
+});
+$('goRules').onclick = goRules;
 $('btnCreate').onclick = doCreate;
 $('btnJoin').onclick = doJoin;
 $('btnLogin').onclick = () => showLogin(start);

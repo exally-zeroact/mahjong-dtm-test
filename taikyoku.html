@@ -27,84 +27,51 @@
   <button class="btn btn-main" type="button" id="btnLogin">ログイン・新規登録</button>
 </section>
 
-<!-- 作るか入るか -->
+<!-- ⑧ 作るか入るか（絵 home_v154 ②）＝切り替えで片方だけ出す -->
 <section id="vChoose" class="view" hidden>
-  <button class="btn btn-big" type="button" id="goCreate">部屋を作る</button>
-  <button class="btn" type="button" id="goJoin">部屋に入る（部屋番号とパス）</button>
-  <p class="setsumei">URL をもらった人は、その URL を開くだけで入れます。</p>
+  <div class="seg" id="chSeg">
+    <button type="button" data-p="pMake" aria-pressed="true">部屋を作る</button>
+    <button type="button" data-p="pJoin" aria-pressed="false">部屋に入る</button>
+  </div>
+  <div id="pMake" class="h-pane">
+    <p class="sec">部屋を作る</p>
+    <div class="list">
+      <label class="li"><span>部屋の名前</span><input class="h-in" id="cName" maxlength="40" autocomplete="off" placeholder="金曜の会"></label>
+      <label class="li"><span>パス（4字以上）</span><input class="h-in" id="cPass" type="password" maxlength="64" autocomplete="new-password" autocapitalize="off" spellcheck="false"></label>
+    </div>
+    <div class="err" id="cErr0"></div>
+    <button class="btn btn-main" type="button" id="goRules">次へ（ルールを決める）</button>
+  </div>
+  <div id="pJoin" class="h-pane" hidden>
+    <p class="sec">部屋に入る</p>
+    <div class="list">
+      <label class="li"><span>部屋番号（8桁）</span><input class="h-in" id="jNo" inputmode="numeric" maxlength="9" autocomplete="off" placeholder="4827 1953"></label>
+      <label class="li"><span>パス</span><input class="h-in" id="jPass" type="password" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    </div>
+    <div class="err" id="jErr"></div>
+    <button class="btn btn-line" type="button" id="btnJoin">入る</button>
+    <p class="r-hint h-c">送られた URL か QR からなら、そのまま入れる</p>
+  </div>
 </section>
 
-<!-- 部屋を作る＝名前・パス・ルール（設計図 §2 ルール設定） -->
-<section id="vCreate" class="view" hidden>
-  <h2 class="midashi">部屋を作る</h2>
-  <label class="field"><span>部屋の名前</span><input id="cName" maxlength="40" autocomplete="off" placeholder="例 木曜の会"></label>
-  <label class="field"><span>パス（4字以上・入る人に口で伝える）</span><input id="cPass" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-
-  <h3 class="komidashi">ルール</h3>
-  <div class="field"><span>人数</span>
-    <div class="seg" role="radiogroup" id="cPlayers">
-      <button type="button" role="radio" data-v="4" aria-checked="true">4人</button>
-      <button type="button" role="radio" data-v="3" aria-checked="false">3人</button>
-    </div>
-  </div>
-  <div class="field"><span>レート（1pt＝何点）</span>
-    <div class="chips" id="cRateChips">
-      <button type="button" data-v="">なし</button><button type="button" data-v="50">50</button><button type="button" data-v="100">100</button><button type="button" data-v="200">200</button><button type="button" data-v="500">500</button>
-    </div>
-    <input id="cRate" inputmode="numeric" placeholder="10の倍数（10〜100,000）・空＝なし">
-  </div>
-  <div class="row2">
-    <label class="field"><span>持ち点</span><input id="cStart" inputmode="numeric"></label>
-    <label class="field"><span>返し</span><input id="cReturn" inputmode="numeric"></label>
-  </div>
-  <div class="field"><span>ウマ（1位から）</span><div class="uma" id="cUma"></div></div>
-  <div class="field"><span>飛び賞</span>
-    <div class="seg" role="radiogroup" id="cTobi">
-      <button type="button" role="radio" data-v="1" aria-checked="true">あり</button>
-      <button type="button" role="radio" data-v="0" aria-checked="false">なし</button>
-    </div>
-    <label class="inline" id="cTobiPtBox"><input id="cTobiPt" inputmode="numeric"> pt</label>
-  </div>
-  <div class="field"><span>チップ</span>
-    <div class="seg" role="radiogroup" id="cChip">
-      <button type="button" role="radio" data-v="0" aria-checked="true">いらん</button>
-      <button type="button" role="radio" data-v="1" aria-checked="false">いる</button>
-    </div>
-    <label class="inline" id="cChipPtBox" hidden>1枚＝<input id="cChipPt" inputmode="decimal" value="1"> pt</label>
-  </div>
-  <div class="field"><span>祝儀</span>
-    <div class="seg" role="radiogroup" id="cShugi">
-      <button type="button" role="radio" data-v="0" aria-checked="true">いらん</button>
-      <button type="button" role="radio" data-v="1" aria-checked="false">いる</button>
-    </div>
-    <label class="inline" id="cShugiPtBox" hidden>1枚＝<input id="cShugiPt" inputmode="decimal" value="1"> pt</label>
-  </div>
+<!-- ⑨ ルール設定（絵 home_v154 ③）＝js/gamen-rules.mjs -->
+<section id="vRules" class="view" hidden>
+  <div id="cRules"></div>
   <div class="err" id="cErr"></div>
   <button class="btn btn-main" type="button" id="btnCreate">この設定で部屋を作る</button>
-  <button class="btn btn-sub" type="button" data-back>やめる</button>
 </section>
 
-<!-- 作った＝部屋番号・パス・URL・QR -->
+<!-- ⑩ 部屋ができた（絵 home_v154 ④・管理の合言葉は v18.3 で無し） -->
 <section id="vMade" class="view" hidden>
-  <h2 class="midashi">部屋ができました</h2>
-  <dl class="made">
-    <dt>部屋番号</dt><dd id="mNo" class="big-no"></dd>
-    <dt>パス</dt><dd id="mPass"></dd>
-    <dt>URL</dt><dd><span id="mUrl" class="url"></span></dd>
-  </dl>
-  <div class="qr" id="mQr"></div>
-  <button class="btn" type="button" id="btnCopy">URL を写す（LINE に貼る）</button>
-  <button class="btn btn-main" type="button" id="btnToRoom">対局へ</button>
-</section>
-
-<!-- 部屋に入る（番号＋パス） -->
-<section id="vJoin" class="view" hidden>
-  <h2 class="midashi">部屋に入る</h2>
-  <label class="field"><span>部屋番号（8桁）</span><input id="jNo" inputmode="numeric" maxlength="9" autocomplete="off"></label>
-  <label class="field"><span>パス</span><input id="jPass" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-  <div class="err" id="jErr"></div>
-  <button class="btn btn-main" type="button" id="btnJoin">入る</button>
-  <button class="btn btn-sub" type="button" data-back>やめる</button>
+  <div class="card h-made">
+    <p class="r-hint">部屋番号</p>
+    <div class="h-no" id="mNo"></div>
+    <p class="r-hint" id="mPass"></p>
+    <div class="qr" id="mQr"></div>
+    <div class="h-url" id="mUrl"></div>
+    <div class="h-kyk"><button class="btn btn-line" type="button" id="btnCopy">URL を写す</button><button class="btn btn-line" type="button" id="btnQr">QR を見せる</button></div>
+  </div>
+  <button class="btn btn-main" type="button" id="btnToRoom">この設定で対局を始める</button>
 </section>
 
 <!-- URL で入っている途中 -->
