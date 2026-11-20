@@ -14,7 +14,36 @@
 <body>
 <header class="appbar"><a class="back" href="index.html">‹ ホーム</a><h1>早見表</h1></header>
 <main>
-<p class="soon">準備中</p>
+<div class="seg" id="seg-oya" role="group" aria-label="子か親か">
+  <button type="button" data-v="ko" aria-pressed="true">子</button>
+  <button type="button" data-v="oya" aria-pressed="false">親</button>
+</div>
+<div class="seg" id="seg-agari" role="group" aria-label="ロンかツモか">
+  <button type="button" data-v="ron" aria-pressed="true">ロン</button>
+  <button type="button" data-v="tsumo" aria-pressed="false">ツモ</button>
+</div>
+<section class="card">
+  <table class="hy" id="hy-main" aria-label="符と翻の点"></table>
+  <p class="note" id="hy-note"></p>
+</section>
+<section class="card">
+  <table class="hy" id="hy-limit" aria-label="満貫から上の点"></table>
+</section>
+<details class="card" id="hy-rules">
+  <summary>ルール</summary>
+  <div class="opts">
+    <label for="r-players">人数</label>
+    <select id="r-players"><option value="4">4人</option><option value="3">3人</option></select>
+    <label for="r-tsumo3">3人のツモ</label>
+    <select id="r-tsumo3"><option value="son">ツモ損</option><option value="secchan">折半</option></select>
+    <label for="r-kiriage">切り上げ満貫</label>
+    <select id="r-kiriage"><option value="0">なし</option><option value="1">あり</option></select>
+    <label for="r-kazoe">13翻以上</label>
+    <select id="r-kazoe"><option value="yakuman">数え役満</option><option value="sanbai">三倍満止め</option></select>
+  </div>
+  <p class="note">この端末に覚えます（記録はしません）。</p>
+</details>
 </main>
+<script type="module" src="js/hayami.js"></script>
 </body>
 </html>

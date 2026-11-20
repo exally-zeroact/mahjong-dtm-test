@@ -69,6 +69,15 @@ jobs:
       - name: 部屋の URL の token の形と hash の式（lib/url-token.mjs＝端末と試験が使う1本・倉庫と同じかは room-join.live.mjs＝手元）
         run: node tests/url-token.test.mjs
 
+      # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
+      - name: 早見表（lib/score-table.mjs）が正解表の 600 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）
+        run: node tests/score-table.test.mjs
+      - name: 早見表の見張りの自己確認（正解表を1マスずつ壊して 176 回とも赤になるか）
+        shell: bash
+        run: |
+          node tests/score-table.test.mjs --self-test | tee score-self.out
+          sh scripts/ci-yuka.sh score-self.out 176
+
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
       #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。fork の PR には secret が 渡らない＝飛ばして 緑に しない。
