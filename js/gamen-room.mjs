@@ -10,7 +10,7 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, tobiSetOp, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, tobiSetOp, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
@@ -44,7 +44,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   const uid = me.id, rid = room.room_id;
   // 古い形の写し（st.v が 2 でない）は形だけ直す（値は変えない・needs_upload＝倉庫へ上げるのは 2d）。
   // 直した時は古い並び（古い形の op）を捨て、★並びを先に保存してから写しを保存★（途中で落ちても次に開けば同じ直しになる）
+  // ③-0 の門（yakitori_custom_v1.md v7〜v7.3）：gate が ok でない部屋は帯だけ出して return＝表・入れる所を1つも作らない・並びも積まない・保存しない
   const mig = migrateState(load(KEY(uid, rid), emptyState()));
+  const gateOnly = (g) => {
+    bar({ back: 'ホーム', title: '対局' });
+    el.innerHTML = '<div class="r-red" id="rGate"><b>' + esc(gateText(g)) + '</b></div>';
+  };
+  if (mig.gate.mode !== 'ok') { gateOnly(mig.gate); return; }
   let st = mig.st;
   if (!st.settles) st.settles = [];
   let outbox = mig.migrated ? [] : load(OUT(uid, rid), []);
@@ -63,11 +69,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     el.querySelector('#rShare').onclick = showShare;
     return;
   }
+  const g2 = roomGate(st, room.rules); // room.rules が入った後に部屋の rules も見る
+  if (g2.mode !== 'ok') { gateOnly(g2); return; }
   st.rules = room.rules; // 卓を作る時のルール（op では送らない＝倉庫は開催日のルールを使う・§3 table_add）
 
   function commit(ops) {
     flushMerge(true); // 1秒まとめを先に並べる（並びの順＝押した順）
-    const r = applyOps(st, ops, { now: new Date().toISOString() });
+    const r = applyOps(st, ops, { now: new Date().toISOString(), roomRules: room.rules });
     if (!r.ok) return r.res;
     st = r.state;
     // needs_upload の部屋（古い写しを直した部屋）は写しが唯一の元＝並びに積まない（2d が写しから作る）
@@ -385,7 +393,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       // 飛び：tobi_set を抜いた組を一度当てた後（§4 の鍵消しの後）の tobi_to と比べる＝また飛んで同じ人を選んだ時も消えない
       const want = {};
       for (const b of e.busted) want[String(b)] = e.tobi[b];
-      const ts = tobiSetOp(st, ops, h.hanchan_id, want);
+      const ts = tobiSetOp(st, ops, h.hanchan_id, want, { roomRules: room.rules });
       if (ts) ops.push(ts);
     }
     if (ops.length) {
@@ -505,7 +513,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
 
   function plusMinus(mid, kind, add) {
-    const r = applyOps(st, [{ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }]);
+    const r = applyOps(st, [{ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }], { roomRules: room.rules });
     if (!r.ok) return;
     st = r.state; save(KEY(uid, rid), st);
     const k = mid + '|' + kind;
