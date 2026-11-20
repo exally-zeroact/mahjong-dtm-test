@@ -174,17 +174,22 @@ console.log('■ 締め（settle_snap）');
   ok('中身 32KB 超えは弾く', !r6.ok && r6.res.err === 'range', J(r6.res));
 }
 
+const T = (x) => Date.parse(x);
 console.log('■ 続ける開催（pickSession・taiketsu 止め2＝0時をまたいでも前の半荘を消さない）');
 {
   const h1 = { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: [40000, 30000, 20000, 10000] };
-  ok('開催が無ければ null（新しく作る）', pickSession(emptyState(), '2026-11-21') === null);
+  ok('開催が無ければ null（新しく作る）', pickSession(emptyState(), T('2026-11-21T18:00:00+09:00')) === null);
   const st = applyOps(base(), [h1]).state;
-  ok('同じ日は続ける', pickSession(st, '2026-11-20') === 's1');
-  ok('0時をまたいでも締めていなければ続ける（11/20 の開催を 11/21 に開き直す）', pickSession(st, '2026-11-21') === 's1');
+  ok('同じ日は続ける', pickSession(st, T('2026-11-20T18:00:00+09:00')) === 's1');
+  ok('0時をまたいでも締めていなければ続ける（11/20 の開催を 11/21 に開き直す）', pickSession(st, T('2026-11-21T18:00:00+09:00')) === 's1');
   const ten = sessionSeisan(st, 's1').ten;
   const closed = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [], sig: sessionSig(st, 's1') } }]).state;
   const noSig = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [] } }]).state;
-  ok('印の無い締めは変わったと見て続ける（消さない側）', pickSession(noSig, '2026-11-27') === 's1');
+  // 0時を過ぎて締めて確かめ、開き直してもう1半荘（司さん 11-20「日を跨ぐことはよくある」）
+  const late = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:30:00Z', snap: { ten, pay: [], sig: sessionSig(st, 's1') } }]).state;
+  ok('0:30 に締めて 1:10 に開き直しても同じ開催を続ける', pickSession(late, T('2026-11-21T01:10:00+09:00')) === 's1');
+  ok('締めた時刻が読めなければ続ける', pickSession(applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: 'x', snap: { ten, pay: [], sig: sessionSig(st, 's1') } }]).state, T('2026-12-01T00:00:00Z')) === 's1');
+  ok('印の無い締めは変わったと見て続ける（消さない側）', pickSession(noSig, T('2026-11-27T18:00:00+09:00')) === 's1');
   // レートなしの卓（ten に入らない）で締めた後に半荘を足す＝点では同じ {} に見える（taiketsu-naoshi の再現）
   const nr = { ...rules, rate: null };
   const st0 = applyOps(emptyState(), [
@@ -193,24 +198,24 @@ console.log('■ 続ける開催（pickSession・taiketsu 止め2＝0時をま�
     { op: 'session_add', session_id: 'n1', date: '2026-11-20', rate: null }, { op: 'table_add', table_id: 'nt', session_id: 'n1', rules: nr },
     { ...h1, table_id: 'nt' },
   ]).state;
-  const nClosed = applyOps(st0, [{ op: 'settle_snap', session_id: 'n1', rev: 1, at: 'x', snap: { ten: sessionSeisan(st0, 'n1').ten, pay: [], sig: sessionSig(st0, 'n1') } }]).state;
-  ok('レートなし：締めて変わらなければ別の日は新しく作る', pickSession(nClosed, '2026-11-21') === null);
+  const nClosed = applyOps(st0, [{ op: 'settle_snap', session_id: 'n1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten: sessionSeisan(st0, 'n1').ten, pay: [], sig: sessionSig(st0, 'n1') } }]).state;
+  ok('レートなし：締めて変わらなければ別の日は新しく作る', pickSession(nClosed, T('2026-11-21T18:00:00+09:00')) === null);
   const nMore = applyOps(nClosed, [{ op: 'hanchan_start', hanchan_id: 'h2', table_id: 'nt', seats: ['m1', 'm2', 'm3', 'm4'], cells: [10000, 20000, 30000, 40000] }]).state;
-  ok('レートなし：締めた後に半荘を足せば別の日でも続ける（点は同じ {} でも）', JSON.stringify(sessionSeisan(nMore, 'n1').ten) === JSON.stringify(sessionSeisan(nClosed, 'n1').ten) && pickSession(nMore, '2026-11-21') === 'n1');
+  ok('レートなし：締めた後に半荘を足せば別の日でも続ける（点は同じ {} でも）', JSON.stringify(sessionSeisan(nMore, 'n1').ten) === JSON.stringify(sessionSeisan(nClosed, 'n1').ten) && pickSession(nMore, T('2026-11-21T18:00:00+09:00')) === 'n1');
   const chip = applyOps(closed, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 }]).state;
-  ok('締めた後にチップだけ入れても続ける', pickSession(chip, '2026-11-27') === 's1');
+  ok('締めた後にチップだけ入れても続ける', pickSession(chip, T('2026-11-27T18:00:00+09:00')) === 's1');
   const back = applyOps(chip, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: -1 }]).state;
-  ok('打ち消して同じ数に戻しても続ける（版が進んだ＝中身が変わった）', pickSession(back, '2026-11-27') === 's1');
+  ok('打ち消して同じ数に戻しても続ける（版が進んだ＝中身が変わった）', pickSession(back, T('2026-11-27T18:00:00+09:00')) === 's1');
   const voided = applyOps(closed, [{ op: 'hanchan_void', hanchan_id: 'h1' }]).state;
-  ok('締めた後に取り消しても続ける', pickSession(voided, '2026-11-27') === 's1');
-  ok('締めて何も変わっていない・別の日なら新しく作る', pickSession(closed, '2026-11-27') === null);
-  ok('締めても同じ日なら続ける', pickSession(closed, '2026-11-20') === 's1');
+  ok('締めた後に取り消しても続ける', pickSession(voided, T('2026-11-27T18:00:00+09:00')) === 's1');
+  ok('締めて何も変わっていない・別の日なら新しく作る', pickSession(closed, T('2026-11-27T18:00:00+09:00')) === null);
+  ok('締めて12時間たつまでは続ける（23:59 に開き直す）', pickSession(closed, T('2026-11-20T23:59:00Z')) === 's1');
   const more = applyOps(closed, [{ op: 'hanchan_start', hanchan_id: 'h2', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: [10000, 20000, 30000, 40000] }]).state;
-  ok('締めた後に半荘が増えていれば別の日でも続ける', pickSession(more, '2026-11-21') === 's1');
+  ok('締めた後に半荘が増えていれば別の日でも続ける', pickSession(more, T('2026-11-21T18:00:00+09:00')) === 's1');
   const two = applyOps(closed, [{ op: 'session_add', session_id: 's2', date: '2026-11-27', rate: 100 }, { op: 'table_add', table_id: 't2', session_id: 's2', rules }]).state;
-  ok('一番新しい開催を続ける（日付の字で探さない）', pickSession(two, '2026-11-28') === 's2');
+  ok('一番新しい開催を続ける（日付の字で探さない）', pickSession(two, T('2026-11-28T18:00:00+09:00')) === 's2');
   const nosettles = JSON.parse(JSON.stringify(st)); delete nosettles.settles;
-  ok('settles の無い古い写しでも続ける', pickSession(nosettles, '2026-11-21') === 's1');
+  ok('settles の無い古い写しでも続ける', pickSession(nosettles, T('2026-11-21T18:00:00+09:00')) === 's1');
 }
 
 console.log(`\n${p} passed, ${f} failed`);

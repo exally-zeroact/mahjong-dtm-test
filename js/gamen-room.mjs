@@ -70,7 +70,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
 
   function ensureTable() {
-    const sid0 = pickSession(st, today()); // 暦の日で探さない（0時をまたいでも同じ開催を続ける）
+    const sid0 = pickSession(st, Date.now()); // 暦の日で探さない（0時をまたいでも同じ開催を続ける・新しい開催は締めて12時間後）
     const t0 = sid0 && st.tables.find((t) => t.session_id === sid0);
     if (t0) return t0;
     const sid = uuid(), tid = uuid();
