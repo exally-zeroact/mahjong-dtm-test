@@ -164,10 +164,10 @@
     { "id": "extra_add の add 2000000001（±20億の外）は bad", "rules": "tane", "ops": [{"op": "extra_add", "table_id": "t1", "member_id": "m1", "kind": "chip", "add": 2000000001}], "want": "bad" },
     { "id": "extra_add の add 2000000000（±20億の内・±999 の外）は range", "rules": "tane", "ops": [{"op": "extra_add", "table_id": "t1", "member_id": "m1", "kind": "chip", "add": 2000000000}], "want": "range" },
     { "id": "member_rename：休んだ人を今の名に直すのは、同じ名の active が居ても先に ok", "rules": "top", "ops": [{"op": "member_active", "member_id": "m1", "active": false},{"op": "member_add", "member_id": "m9", "name": "山田"},{"op": "member_rename", "member_id": "m1", "name": "山田"}], "want": "ok" },
-    { "id": "2c-3b：extra_add の c:ko（tane_custom に在る合計0の種）は通る", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ko","add":3}], "want": "bad", "want_db": "ok" },
-    { "id": "2c-3b：extra_add の c:ba（外へ払う種）+999 は通る", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":999}], "want": "bad", "want_db": "ok" },
-    { "id": "2c-3b：extra_add の c:ba +1000 は range", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":1000}], "want": "bad", "want_db": "range" },
-    { "id": "2c-3b：extra_set の c:ko 5（行なし bv 0）は通る", "rules": "cust", "ops": [{"op":"extra_set","table_id":"t1","member_id":"m1","kind":"c:ko","value":5,"base_version":0}], "want": "bad", "want_db": "ok" },
+    { "id": "2c-3b：extra_add の c:ko（tane_custom に在る合計0の種）は通る", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ko","add":3}], "want": "ok" },
+    { "id": "2c-3b：extra_add の c:ba（外へ払う種）+999 は通る", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":999}], "want": "ok" },
+    { "id": "2c-3b：extra_add の c:ba +1000 は range", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":1000}], "want": "range" },
+    { "id": "2c-3b：extra_set の c:ko 5（行なし bv 0）は通る", "rules": "cust", "ops": [{"op":"extra_set","table_id":"t1","member_id":"m1","kind":"c:ko","value":5,"base_version":0}], "want": "ok" },
     { "id": "2c-3b：extra_add の無い id（c:zz）は bad", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:zz","add":1}], "want": "bad" },
     { "id": "2c-3b：tane_custom の無いルールで c:ko は bad", "rules": "tane", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ko","add":1}], "want": "bad" },
     { "id": "2c-3b：外へ払う種（c:ba）へ −1 は bad", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":-1}], "want": "bad" },
@@ -176,7 +176,7 @@
     { "id": "2c-3b：種 'c:' は bad", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:","add":1}], "want": "bad" },
     { "id": "2c-3b：種 c:ABC は bad", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ABC","add":1}], "want": "bad" },
     { "id": "2c-3b：種 c:123456789 は bad", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:123456789","add":1}], "want": "bad" },
-    { "id": "2c-3b 先後：外へ払う種（c:ba）へ −1000（行なし）は負の bad より range が先", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":-1000}], "want": "bad", "want_db": "range" },
+    { "id": "2c-3b 先後：外へ払う種（c:ba）へ −1000（行なし）は負の bad より range が先", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":-1000}], "want": "range" },
     { "id": "2c-3b 先後：外へ払う種（c:ba）の行に古い版で extra_set −1 は conflict より bad が先", "rules": "cust", "ops": [{"op":"extra_add","table_id":"t1","member_id":"m1","kind":"c:ba","add":2},{"op":"extra_set","table_id":"t1","member_id":"m1","kind":"c:ba","value":-1,"base_version":0}], "want": "bad" }
   ]
 }

@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '7f2d825ffd6b';
+const VER = 'a776a0b45bd0';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0ae4a6fb1b6a163b2f4d29948694815e30157b71a6908be442c0991483a5eb3d'],
@@ -20,7 +20,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '74d940aac968df411af4fa575104a2a7beef531c4775437c3b6c8e7e6206492b'],
   ['/js/gamen-home.mjs', 'fd60b18ecd59219c0bf805886ea266f91842e2fd22f0256cc1939a15099d33a1'],
-  ['/js/gamen-room.mjs', '768489e0416507995d5624676afcdcf65dde57fd1fedf39ba3001d7453ddab2b'],
+  ['/js/gamen-room.mjs', '7b548a202c67b6e59f1fc5fe9fa58a668492d16e433344440b5bd17caee6b8ae'],
   ['/js/gamen-rules.mjs', '02aa4f1de283970287fe9266f65af86d046c4acfd5b12eae3074de2f11f68754'],
   ['/js/gamen-taikyoku.mjs', '211284d6d021b7bd3e94c5b378451b66cf664aa3f893dd26ef8ee3491c72afba'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
@@ -33,7 +33,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', '54e4ca25a6efee57b71f1856406f6b33b5808c0f4b07dd162831dc53dee0714c'],
   ['/lib/outbox.mjs', '20e404a82b028fe7041ed8451f601f692e517114b6e400befce502f33788a133'],
-  ['/lib/room-state.mjs', '03afa5461715e5a68d4605782a9c50fbf10ad1c4e376c276522522e288e34b9a'],
+  ['/lib/room-state.mjs', '3a5b2227e035dff157975750c61b1b36b6ab15f71fd58c1cf78b11481c6f3898'],
   ['/lib/rules.mjs', 'ee7108c0b6e150dfb64b97f71fb69c19990726551b8c771d4e688154a729b3ad'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],
   ['/lib/score.mjs', '8bb312dcb210b70cf618df8f3b8bf30a40260f21a3943443cefe0fddb118d824'],

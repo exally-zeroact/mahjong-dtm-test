@@ -165,7 +165,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     for (const w of v.windows) {
       const big = ten ? fmt(w.big) : fmtPt(w.big) + '<small>pt</small>';
       h += '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div>' +
-        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="チップか祝儀の合計が合いません">!</span>' : '') + '</div>';
+        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="' + (v.custWait || (v.cust || []).some((c) => c.ng) ? 'チップ・祝儀・自由な項目のどれかが合わないか数えられません' : 'チップか祝儀の合計が合いません') + '">!</span>' : '') + '</div>';
       for (const kind of ['chip', 'shugi']) {
         if (!v.used[kind]) continue;
         const label = kind === 'chip' ? 'チップ' : '祝儀';
@@ -186,6 +186,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const bad = [];
     if (v.used.chip && v.chipSum !== 0) bad.push('チップの合計が ' + fmtCnt(v.chipSum) + ' 合いません');
     if (v.used.shugi && v.shugiSum !== 0) bad.push('祝儀の合計が ' + fmtCnt(v.shugiSum) + ' 合いません');
+    // 自由な項目（2c-3b）：合わない・この版で数えられない物が在る間は緑の ✓ を出さない
+    for (const c of v.cust || []) {
+      if (c.ng) bad.push(c.name + 'の合計が ' + fmtCnt(c.sum) + ' 合いません');
+      else if (c.wait) bad.push(c.name + 'はこの版では数えられません');
+    }
     if (bad.length) return '<p class="r-check bad">' + esc(bad.join('・')) + '</p>';
     const okParts = [];
     if (v.used.chip) okParts.push('チップの合計 0');
@@ -420,6 +425,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       if (m.why === 'order') return pre + m.no + '回目＝起家からの順がまだ';
       if (m.why === 'tobi') return pre + m.no + '回目＝飛び賞の受け取りがまだ';
       return pre + m.no + '回目＝入れ直しが要ります';
+    }
+    // 自由な項目（2c-3b）：合計が合わない／お金の数え方がこの版に無い（③-2 の前）
+    if (typeof m.what === 'string' && m.what.startsWith('c:')) {
+      const nm = typeof m.name === 'string' ? m.name : m.what;
+      return pre + (m.why === 'not_yet' ? nm + 'はこの版では精算に入れられません' : nm + 'の合計が ' + fmtCnt(m.diff) + ' で合いません');
     }
     return pre + (m.what === 'chip' ? 'チップ' : '祝儀') + 'の合計が ' + fmtCnt(m.diff) + ' で合いません（チップ・祝儀を入れていません）';
   }

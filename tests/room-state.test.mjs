@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
+  kindOf,
 } from '../lib/room-state.mjs';
 import { defaultRules, rulesOk } from '../lib/rules.mjs';
 
@@ -76,6 +77,47 @@ console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫�
   ok('正味の門：順を逆にしても chip の行＝i 0', !n2.ok && n2.res.i === 0 && n2.idx === 0, J(n2.res));
   const n3 = run('tane', [{ op: 'member_add', member_id: 'm0', name: '中村' }, { op: 'extra_add', table_id: 't1', member_id: 'm5', kind: 'chip', add: 1 }, { op: 'extra_add', table_id: 't1', member_id: 'm0', kind: 'chip', add: 1 }]);
   ok('正味の門：同じ kind なら member_id の字順で先＝m0 の i 2', !n3.ok && n3.res.i === 2, J(n3.res));
+
+  // ── 2c-3b 自由な項目 c:<id>（写し）：at は倉庫の write.live ⑫ と同じ字で見る（表は ok／err だけ）
+  const at = (k, ops) => { const r = run(k, ops); return r.ok ? 'ok' : r.res.err + '@' + r.res.at; };
+  ok('2c-3b：無い id（c:zz）は bad at kind', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:zz', add: 1 }]) === 'bad@kind');
+  ok('2c-3b：無い id と部屋に居ない人が両方なら at kind', at('cust', [{ op: 'extra_set', table_id: 't1', member_id: 'zz', kind: 'c:zz', value: 1, base_version: 0 }]) === 'bad@kind');
+  ok('2c-3b：外へ払う種へ −1（行なし）は bad at add', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: -1 }]) === 'bad@add');
+  ok('2c-3b：外へ払う種 +2 → −3 は bad at add', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: 2 }, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: -3 }]) === 'bad@add');
+  ok('2c-3b：外へ払う種 +2 → −2（0 まで）は ok', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: 2 }, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: -2 }]) === 'ok');
+  ok('2c-3b：外へ払う種へ −1000 は負の bad より range が先', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: -1000 }]) === 'range@add');
+  ok('2c-3b：外へ払う種の extra_set −1 は bad at value', at('cust', [{ op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'c:ba', value: -1, base_version: 0 }]) === 'bad@value');
+  ok('2c-3b：外へ払う種の行に古い版で extra_set −1 は conflict より bad at value が先', at('cust', [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: 2 }, { op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'c:ba', value: -1, base_version: 0 }]) === 'bad@value');
+  ok('2c-3b：合計0の種（c:ko）は負も ok', at('cust', [{ op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'c:ko', value: -5, base_version: 0 }]) === 'ok');
+  ok('2c-3b：外へ払う種の extra_set −1000 は range が先', at('cust', [{ op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'c:ba', value: -1000, base_version: 0 }]) === 'range@value');
+  // kindOf＝mj_w_kind（schema.sql:1564）の端：rules が無い・null の項目・配列でない tane_custom でも落ちずに null
+  const TC = [{ id: 'ko', name: 'コイン', pt10: 5, sum0: true }, { id: 'ba', name: '場代', pt10: 10, sum0: false }];
+  const kc = [
+    [kindOf({ chip_pt10: 20 }, 'chip'), 'sum0'], [kindOf({ chip_pt10: null }, 'chip'), null], [kindOf({}, 'shugi'), 'sum0'], [kindOf(null, 'chip'), 'sum0'], [kindOf(undefined, 'shugi'), 'sum0'],
+    [kindOf({ tane_custom: TC }, 'c:ko'), 'sum0'], [kindOf({ tane_custom: TC }, 'c:ba'), 'out'], [kindOf({ tane_custom: TC }, 'c:zz'), null],
+    [kindOf(null, 'c:ko'), null], [kindOf(undefined, 'c:ko'), null], [kindOf({ tane_custom: 'x' }, 'c:ko'), null], [kindOf({ tane_custom: [null, TC[0]] }, 'c:ko'), 'sum0'], [kindOf({}, 'c:ko'), null],
+    [kindOf({ tane_custom: TC }, 'c:'), null], [kindOf({ tane_custom: TC }, 'c:KO'), null], [kindOf({ tane_custom: TC }, 'c:123456789'), null], [kindOf({ tane_custom: TC }, 'ko'), null], [kindOf({ tane_custom: TC }, 1), null], [kindOf({ tane_custom: TC }, null), null],
+  ];
+  ok('2c-3b：kindOf の端 ' + kc.length + ' 通り（mj_w_kind と同じ答え）', kc.every(([g, w]) => g === w), J(kc.map(([g, w], i) => (g === w ? null : i + ':' + g)).filter(Boolean)));
+
+  // tableView：c: の行で落ちない・missing の順と形（1つの種に1件・ng を先）・dim・tane_custom に無い id は数えない
+  const tv = (ops) => { let st2 = base('cust'); if (ops.length) { const s2 = applyOps(st2, ops, { now: '2026-11-20T12:00:00Z' }); if (!s2.ok) return null; st2 = s2.state; } st2.extras.push(...(ops.extraRaw || [])); return tableView(st2, 't1'); };
+  const v0 = tv([]);
+  ok('2c-3b：c: の行が無い卓は今まで通り（missing は半荘だけ・dim なし・cust は2種）', v0 && v0.extrasOk && !v0.custWait && v0.cust.length === 2 && v0.windows.every((w) => !w.dim) && !v0.missing.some((m) => m.what));
+  const v1 = tv([{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ko', add: 3 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'c:ba', add: 2 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'chip', add: 1 }]);
+  ok('2c-3b：c:ko 合計3（ng）と c:ba（外へ払う・行あり）→ missing は chip → c:ko(diff 3) → c:ba(not_yet)・extrasOk false・dim',
+    v1 && !v1.extrasOk && v1.custWait && J(v1.missing.filter((m) => m.what)) === J([{ what: 'chip', diff: 1 }, { what: 'c:ko', name: 'コイン', diff: 3 }, { what: 'c:ba', name: '場代', why: 'not_yet' }]) && v1.windows.every((w) => w.dim), J(v1 && v1.missing));
+  const v1b = tv([{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ko', add: 3 }]);
+  ok('2c-3b：c:ko だけ合わない（chip・shugi は合う）→ extrasOk false（倉庫の extra_state ng）・missing は c:ko の1件', v1b && !v1b.extrasOk && J(v1b.missing.filter((m) => m.what)) === J([{ what: 'c:ko', name: 'コイン', diff: 3 }]), J(v1b && v1b.missing));
+  const v2 = tv([{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ko', add: 3 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'c:ko', add: -3 }]);
+  ok('2c-3b：合計0の種が合っていても 0 でない行が在れば not_yet の1件（ng ではない＝extrasOk true・dim）', v2 && v2.extrasOk && J(v2.missing.filter((m) => m.what)) === J([{ what: 'c:ko', name: 'コイン', why: 'not_yet' }]) && v2.windows.every((w) => w.dim), J(v2 && v2.missing));
+  const v3 = tv(Object.assign([], { extraRaw: [{ table_id: 't1', member_id: 'm5', kind: 'c:qq', value: 4, version: 1 }] }));
+  ok('2c-3b：tane_custom に無い c:qq の行は数えない（missing 無し・人にも入れない・dim なし）', v3 && v3.extrasOk && !v3.missing.some((m) => m.what) && !v3.people.some((p) => p.member_id === 'm5') && v3.windows.every((w) => !w.dim), J(v3 && v3.missing));
+  const v4 = tv(Object.assign([], { extraRaw: [{ table_id: 't1', member_id: 'm5', kind: 'c:ba', value: 1, version: 1 }] }));
+  ok('2c-3b：数える c: の 0 でない行の人（席にいない m5）は人に入る', v4 && v4.people.some((p) => p.member_id === 'm5') && v4.missing.some((m) => m.what === 'c:ba'));
+  const sx = applyOps(base('cust'), [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ba', add: 2 }]).state;
+  const ss = sessionSeisan(sx, 's1');
+  ok('2c-3b：開催の精算の missing に c: の項目が上がる（＝画面は partial で額を出さない）', ss.ok && ss.missing.some((m) => m.what === 'c:ba' && m.why === 'not_yet' && m.table === 1), J(ss.missing));
 }
 
 console.log('■ 名簿');
@@ -512,7 +554,8 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   ok('卓の rules に知らない鍵 → newer（v:2 の写し＝早い返しの道も門を通る）', (() => { const g = tw((x) => { x.tables[0].rules.zzz = 1; }); return g.mode === 'newer' && g.why === 'zzz'; })());
   ok('2c-3a から yakitori_to・yakitori_top_tie・tane_custom は知っている鍵（44鍵）→ ok・壊れた値は rules_bad', tw((x) => { Object.assign(x.tables[0].rules, { yakitori_to: 'top', yakitori_top_tie: 'all', tane_custom: [{ id: 'a', name: '一発', pt10: 5, sum0: true }] }); }).mode === 'ok' && (() => { const g = tw((x) => { x.tables[0].rules.tane_custom = [{ id: 'A', name: '一発', pt10: 5, sum0: true }]; }); return g.mode === 'rules_bad' && g.why === 'tane_custom'; })());
   ok('44鍵の範囲の外 → rules_bad（鍵名を返す）', (() => { const g = tw((x) => { x.tables[0].rules.aka = 99; }); return g.mode === 'rules_bad' && g.why === 'aka'; })());
-  ok('extras の知らない kind（c:x）→ newer', tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: 'c:x', value: 1, version: 1 }); }).mode === 'newer');
+  ok('extras の知らない kind（zz・c:・c:ABC・c:123456789・数）→ newer', ['zz', 'c:', 'c:ABC', 'c:123456789', 1].every((k) => tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: k, value: 1, version: 1 }); }).mode === 'newer'));
+  ok('2c-3b：extras の c:<id> の形（卓の tane_custom に無い id も）→ ok（数えないだけ）', tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: 'c:x', value: 1, version: 1 }); }).mode === 'ok');
   ok('半荘の知らない欄（yakitori）→ newer', tw((x) => { x.hanchans[0].yakitori = []; }).mode === 'newer');
   ok('部屋の rules（roomRules）に知らない鍵 → newer・roomRules を渡さなければ部屋の判じは飛ばす', migrateState(clone(st), { ...rules, zzz: 1 }).gate.mode === 'newer' && migrateState(clone(st)).gate.mode === 'ok');
   ok('帯の字', gateText({ mode: 'newer' }) === NEWER_TEXT && gateText({ mode: 'rules_bad', why: 'aka' }) === 'この部屋のルールが読めません（aka）');
