@@ -108,16 +108,11 @@
 .r-top { justify-content: space-between; }
 .r-live { font-size: 13px; }
 .r-hint { margin: 4px 4px 0; font-size: 12px; color: var(--c-ji-usui); }
-/* 表：n回 に下線（押すと直す）・自分の列・計の上に紺の線 */
+/* 表：n回 に下線（押すと直す）・計の上に紺の線 */
 .r-no { position: relative; min-height: 36px; padding: 0; font: inherit; font-size: 14px; font-weight: 700; border: 0; background: transparent; color: var(--c-kon); text-decoration: underline; text-underline-offset: 3px; }
 .r-no::after { content: ""; position: absolute; inset: -4px -2px; }
-.r-hyou th.me, .r-hyou td.me { background: var(--c-man); }
 .r-hyou tfoot th, .r-hyou tfoot td { border-top: 2px solid var(--c-kon); }
-/* あなたは誰？・新しい人・候補 */
-.r-who { margin: 0 0 4px; }
-.chips .chip-add { border-style: dashed; }
-.r-row-in { display: flex; gap: 8px; margin-top: 8px; }
-.r-row-in input { flex: 1; min-width: 0; }
+/* 新しい人・候補 */
 .r-in { display: grid; grid-template-columns: 70px 1fr; align-items: center; min-height: 52px; padding: 0 12px; font-size: 16px; background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; }
 .r-in input { min-width: 0; text-align: right; font-size: 17px; }
 .r-cand { display: flex; flex-direction: column; background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; overflow: hidden; }

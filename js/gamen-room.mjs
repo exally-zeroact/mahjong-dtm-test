@@ -21,7 +21,6 @@ const WRITE_READY = false; // 倉庫の mj_write が入った日に true（送�
 const KEY = (uid, rid) => 'mj-room:' + uid + ':' + rid;
 const OUT = (uid, rid) => 'mj-outbox:' + uid + ':' + rid;
 const NAMES = (uid) => 'mj-names:' + uid;
-const ME = (uid, rid) => 'mj-me:' + uid + ':' + rid;
 
 const fmt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
 const fmtPt = (pt10) => (pt10 > 0 ? '+' : pt10 < 0 ? '−' : '') + (Math.abs(pt10) / 10).toFixed(1);
@@ -54,7 +53,6 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   let entry = null;
   let picking = null;
   let viewSnap = false;
-  let addMe = false;
   const merge = new Map(); let mergeTimer = null; // extra_add の1秒まとめ
   const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; render(); };
 
@@ -111,7 +109,6 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     bar({ back: 'ホーム', title: '対局', right: 'ルール', onRight: () => { page = 'rules'; render(); } });
     const v = tableView(st, table.table_id);
     let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>';
-    h += renderWho();
     h += renderTable(v);
     h += '<button class="btn btn-main r-add" id="rAdd">＋ ' + v.nextNo + '回目の点を入れる</button>';
     if (v.windows.length) h += renderWindows(v) + renderCheck(v) + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
@@ -121,34 +118,23 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     wireRoom();
   }
 
-  function renderWho() {
-    if (load(ME(uid, rid), null) !== null) return '';
-    const act = st.members.filter((m) => m.active);
-    let h = '<div class="r-who"><p class="sec">あなたは誰？</p><div class="chips">' +
-      act.map((m) => '<button data-me="' + esc(m.member_id) + '">' + esc(m.name) + '</button>').join('') +
-      '<button id="meAdd" class="chip-add">＋ 足す</button><button data-me="-">選ばない</button></div>';
-    if (addMe) h += '<div class="r-row-in"><input id="meName" maxlength="20" autocomplete="off" placeholder="名前" aria-label="あなたの名前"><button class="btn-s" id="meGo">足す</button></div><p class="err" id="meErr"></p>';
-    return h + '</div>';
-  }
-
   function renderTable(v) {
     if (!v.rows.length) return '';
-    const ppl = v.people, mine = load(ME(uid, rid), null);
-    const cls = (m) => (m === mine ? ' class="me"' : '');
-    let h = '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + ppl.map((p) => '<th' + cls(p.member_id) + '>' + esc(p.name) + '</th>').join('') + '</tr></thead><tbody>';
+    const ppl = v.people;
+    let h = '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + ppl.map((p) => '<th>' + esc(p.name) + '</th>').join('') + '</tr></thead><tbody>';
     for (const r of v.rows) {
       h += '<tr class="' + (r.voided ? 'r-void' : '') + '"><th><button class="r-no" data-h="' + esc(r.hanchan_id) + '" aria-label="' + r.no + '回目を直す">' + r.no + '回</button></th>';
       for (const p of ppl) {
         const c = r.by[p.member_id];
-        if (!c) { h += '<td class="r-na' + (p.member_id === mine ? ' me' : '') + '">—</td>'; continue; }
+        if (!c) { h += '<td class="r-na">—</td>'; continue; }
         const big = r.ok && c.pt10 !== null ? '<b class="' + sign(c.pt10) + '">' + fmtPt(c.pt10) + '</b>' : '<b class="zero">—</b>';
         const small = (c.rank !== null ? (c.rank + 1) + '位 ' : '') + c.cell.toLocaleString('ja-JP');
-        h += '<td' + cls(p.member_id) + '>' + big + '<small>' + small + '</small></td>';
+        h += '<td>' + big + '<small>' + small + '</small></td>';
       }
       h += '</tr>';
       if (!r.ok && !r.voided) h += '<tr class="r-why"><td colspan="' + (ppl.length + 1) + '">' + esc(whyText(r)) + '</td></tr>';
     }
-    h += '</tbody><tfoot><tr><th>計</th>' + ppl.map((p) => '<td' + cls(p.member_id) + '><b class="' + sign(v.total10[p.member_id]) + '">' + fmtPt(v.total10[p.member_id]) + '</b></td>').join('') + '</tr></tfoot></table></div>';
+    h += '</tbody><tfoot><tr><th>計</th>' + ppl.map((p) => '<td><b class="' + sign(v.total10[p.member_id]) + '">' + fmtPt(v.total10[p.member_id]) + '</b></td>').join('') + '</tr></tfoot></table></div>';
     if (v.rows.length > 10) h += '<p class="r-hint">↑ 上へなぞると 1回・2回 が出る（計は動かない）</p>';
     return h;
   }
@@ -544,15 +530,6 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; render(); };
     for (const b of el.querySelectorAll('.r-no')) b.onclick = () => startEntry(b.dataset.h);
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
-    for (const b of el.querySelectorAll('[data-me]')) b.onclick = () => { save(ME(uid, rid), b.dataset.me); render(); };
-    if (q('#meAdd')) q('#meAdd').onclick = () => { addMe = !addMe; render(); if (addMe) q('#meName').focus(); };
-    if (q('#meGo')) q('#meGo').onclick = () => {
-      const nm = q('#meName').value.trim(); if (!nm) return;
-      const r = commit([{ op: 'member_add', member_id: uuid(), name: nm }]);
-      if (!r.ok && r.err === 'dup') { save(ME(uid, rid), r.member_id); addMe = false; render(); return; }
-      if (!r.ok) { q('#meErr').textContent = '名前は1〜20字です。'; return; }
-      rememberName(nm); save(ME(uid, rid), st.members[st.members.length - 1].member_id); addMe = false; render();
-    };
   }
   function wirePick() {
     const q = (s) => el.querySelector(s);
