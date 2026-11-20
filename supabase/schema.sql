@@ -2485,7 +2485,7 @@ begin
                  from mahjong.history h
                 where h.group_id = v_gid and h.room_id = p_room_id and h.kind = 'row' and h.tbl = 'extras'
                   and h.row_key ->> 'table_id' = v_k
-                group by h.row_key order by h.row_key::text loop
+                group by h.row_key order by h.row_key::text collate "C" loop   -- 字順は C（写しの JS の < と同じ・既定の照合だと ':' を飛ばして c:ko と chip が入れ替わる＝2c-3b N2）
         -- 正味の門（v1510:195①）：組の後に取り消していない半荘の席にいない人は、0へ近づき0を越えない時だけ（行の無い人への足しは弾く）
         if not exists (select 1 from mahjong.hanchans x where x.table_id = v_k::uuid and not x.voided
                          and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) s where s.value = e.row_key ->> 'member_id'))

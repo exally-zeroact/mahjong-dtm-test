@@ -410,6 +410,8 @@ const body = `
     ${ROW('k3j_t', TK(C3Q[0]))}
     ${W('k3m', 2, 'ra', A(xa(C3Q, 0, 1)))}
     ${ROW('k3m_t', TK(C3Q[0]))}
+    ${W('k3n', 2, 'ra', A(xa(C3P, 4, 1), xa(C3P, 4, 1, 'c:ko')))}
+    ${W('k3o', 2, 'ra', A(xa(C3P, 4, 1, 'c:ko'), xa(C3P, 4, 1)))}
     ${W('k3k', 2, 'ra', A(xa(C3N, 0, 1)))}
     ${ROW('k3k_t', TK(C3N[0]))}
     ${W('k3l', 2, 'ra', A(O('extra_set', { table_id: C3P[0], member_id: MA[1], kind: 'c:ko', value: 2, base_version: 0 })))}
@@ -905,6 +907,8 @@ function check(out, lib, say) {
   ok("⑫ 形の違う種（'c:'・'c:ABC'・'c:123456789'）→ bad at kind・行0", ['k3i1', 'k3i2', 'k3i3'].every((k) => isErr(k, 'bad', { at: 'kind' })) && Number(out.k3i_x) === 0,
     J([R('k3i1'), R('k3i2'), R('k3i3'), out.k3i_x]));
   ok('⑫ 合計0の種が2つ ng（c:ke と c:ko）→ 理由は tane_custom の並びの順の最初（c:ko）', isOk('k3j') && tk('k3j_t', 'ng', 'c:ko', false), J([R('k3j'), out.k3j_t]));
+  ok('⑫ 正味の門で chip と c:ko が両方弾かれる → 字順 C で c:ko が先（i 1）', isErr('k3n', 'bad', { at: 'member_id', i: 1 }), J(R('k3n')));
+  ok('⑫ 正味の門で c:ko と chip（並びを逆に）→ c:ko が先（i 0）', isErr('k3o', 'bad', { at: 'member_id', i: 0 }), J(R('k3o')));
   ok('⑫ chip の ng と合計0の種の ng が重なる → 卓 ng・理由は自由な項目（c:ko）・chip_state は ng（理由が chip を隠さない＝chip は chip_state で見る）', isOk('k3m') && tk('k3m_t', 'ng', 'c:ko', false) && out.k3m_t.c === 'ng', J([R('k3m'), out.k3m_t]));
   ok('⑫ chip だけ ng → 理由 null（今まで通り）・一度そろったは消えない', isOk('k3k') && tk('k3k_t', 'ng', null, true) && out.k3k_t.c === 'ng', J([R('k3k'), out.k3k_t]));
   ok('⑫ extra_set で合計0の種 c:ko を 2 → ok・卓は ng 理由 c:ko', isOk('k3l') && tk('k3l_t', 'ng', 'c:ko', false) && Number(out.k3l_x) === 2, J([R('k3l'), out.k3l_t, out.k3l_x]));
@@ -1145,6 +1149,7 @@ const WAZA = [
   ['外へ払う種の負の門を外す', 'mahjong_private.mj_w_op', "if v_kd = 'out' and", 'if false and', null, '⑫ 外へ払う種：'],
   ['tstate が合計0の自由な項目を見ない', 'mahjong_private.mj_w_tstate', " or v_why is not null then 'ng'", " then 'ng'", null, '⑫ 合計0の種 c:ko に +3'],
   ['一度そろったに外へ払う種も数える', 'mahjong_private.mj_w_tstate', 'or e.kind = any (v_sum0)));', "or e.kind like 'c:%'));", null, '⑫ 外へ払う種だけ'],
+  ['正味の門の字順を C にしない（libc の en_US は : を飛ばす＝khaw の既定 ICU では割れない）', 'public.mj_write', 'order by h.row_key::text collate "C" loop', 'order by h.row_key::text collate "en_US.utf8" loop', null, '⑫ 正味の門で chip と c:ko'],
   ['理由を id の順にする', 'mahjong_private.mj_w_tstate', '   order by u.n limit 1;', '   order by u.k limit 1;', null, '⑫ 合計0の種が2つ ng'],
 ];
 
