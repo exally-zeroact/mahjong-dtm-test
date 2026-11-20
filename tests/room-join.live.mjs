@@ -130,6 +130,9 @@ const sql = `do ${q('rj')} declare res jsonb := '{}'; r jsonb; cx jsonb; rid uui
   t0 timestamptz; a_in float8[] := '{}'; a_gh float8[] := '{}'; a_bf float8[] := '{}'; a_ag float8[] := '{}';
   v_min timestamptz := date_trunc('minute', now());
 begin
+  /* 2b-2：khaw の前から在る古い行を先に掃く（掃除は ok の返しで走る＝表全体の数えが揺れない・塊の最後で全部戻る） */
+  for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
+  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days' or (x.deleted_at is null and x.created_at < now() - interval '7 days' and (x.last_write_at is null or x.last_write_at < now() - interval '7 days') and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id) and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= now() - interval '7 days'))));
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
   insert into auth.users (id, email, aud, role, is_anonymous)
     select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
@@ -295,6 +298,7 @@ const okRet = (k, again, role = 'nyu') => { const r = R(k); return r.ok === true
   && Object.keys(r).sort().join(',') === 'again,channel_key,name,ok,role,room_id,room_no'; };
 
 if (out) {
+  ok('khaw に前から在る古い部屋は先に掃けた（0＝表全体の数えが掃除で揺れない・taiketsu 直し N1）', Number(out.others_left) === 0, String(out.others_left));
   ok('部屋を作れた（URL の hash は lib/url-token.mjs の物）', out.made && out.made.ok === true, JSON.stringify(out.made));
   /* ⓪ */
   SESS.forEach(([name], i) => {

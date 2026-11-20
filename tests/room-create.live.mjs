@@ -123,6 +123,9 @@ const sql = `do ${q('rc')} declare res jsonb := '{}'; r jsonb; c0 jsonb; c1 json
   v_u uuid := gen_random_uuid(); v_u2 uuid := gen_random_uuid(); v_u3 uuid := gen_random_uuid();
   v_s uuid := gen_random_uuid(); v_s2 uuid := gen_random_uuid(); v_s3 uuid := gen_random_uuid();
 begin
+  /* 2b-2：khaw の前から在る古い行を先に掃く（掃除は ok の返しで走る＝表全体の数えが揺れない・塊の最後で全部戻る） */
+  for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
+  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days' or (x.deleted_at is null and x.created_at < now() - interval '7 days' and (x.last_write_at is null or x.last_write_at < now() - interval '7 days') and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id) and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= now() - interval '7 days'))));
   insert into auth.users (id, email, aud, role, is_anonymous) values
     (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false),
     (v_u2, v_u2::text || '@${MAIL}', 'authenticated', 'authenticated', false),
@@ -240,6 +243,7 @@ const d = (a, b) => Object.fromEntries(Object.keys(a).map((k) => [k, Number(b[k]
 const so = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.keys(o).sort().map((k) => k + ":" + JSON.stringify(o[k])).join(",") : JSON.stringify(o));
 const same = (a, b) => so(a) === so(b);
 if (out) {
+  ok('khaw に前から在る古い部屋は先に掃けた（0＝表全体の数えが掃除で揺れない・taiketsu 直し N1）', Number(out.others_left) === 0, String(out.others_left));
   /* ⓪ */
   SESS.forEach(([name], i) => {
     const r = out.sess[i] || {};
