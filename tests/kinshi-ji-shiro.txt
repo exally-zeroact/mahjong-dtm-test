@@ -1,0 +1,5 @@
+# 実在の字の見張り（tests/kinshi-ji.test.mjs）の 白名簿＝道<TAB>種類（未測定N・当たりM か その 片方）<TAB>git の blob の id 頭16字（git hash-object --path）<TAB>訳。
+# 中身か 件数が 変われば 赤＝絵を 目で 見直して 名指しし直す（2026-11-20 3枚とも 目で 見た＝字は「do the math」と 背景の 薄い 式（＋−×÷）だけ）。
+icons/apple-touch-icon.png	未測定1	e07fd68fc0ee51ae	アプリの アイコンの 絵（字は do the math だけ）
+icons/icon-192.png	未測定1	83a077b6db19b664	アプリの アイコンの 絵（字は do the math だけ）
+icons/icon-512.png	未測定1	d0798b1ac0441f9d	アプリの アイコンの 絵（字は do the math だけ）

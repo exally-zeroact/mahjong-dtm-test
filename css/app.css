@@ -1,0 +1,51 @@
+/* 麻雀〜do the math〜 — 殻（土台の段）
+ * 色は :root の変数にだけ書く（禁止色は使わない）。読ませる字は薄い黒・色は押せる物と選ばれている物だけ。
+ * ボタンの高さは字に合わせる：16px の字→44・14px の字→36（押せる広さが足りない時は見えない ::after で足す）。
+ */
+:root {
+  --c-ji: #1F2328;
+  --c-ji-usui: #57606A;
+  --c-haikei: #F6F7F9;
+  --c-men: #FFFFFF;
+  --c-sen: #D0D7DE;
+  --c-kon: #14213D;
+  --c-kon-ji: #FFFFFF;
+  --c-kin: #B8860B;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--c-ji);
+  background: var(--c-haikei);
+}
+.appbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 12px;
+  min-height: 52px;
+  padding: env(safe-area-inset-top) 16px 0;
+  background: var(--c-kon); color: var(--c-kon-ji);
+}
+.appbar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+.back {
+  position: relative;
+  display: inline-flex; align-items: center;
+  min-height: 36px; font-size: 14px;
+  color: var(--c-kon-ji); text-decoration: none;
+}
+.back::after { content: ""; position: absolute; inset: -4px -8px; }
+main { padding: 16px; max-width: 640px; margin: 0 auto; }
+.home { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 16px;
+  font-size: 16px; font-weight: 600;
+  border: 1px solid var(--c-sen); border-radius: 10px;
+  background: var(--c-men); color: var(--c-kon); text-decoration: none;
+}
+.btn-big { grid-column: 1 / -1; min-height: 64px; font-size: 20px; background: var(--c-kon); color: var(--c-kon-ji); border-color: var(--c-kon); }
+.soon { color: var(--c-ji-usui); }
+@media print { .appbar { position: static; } }

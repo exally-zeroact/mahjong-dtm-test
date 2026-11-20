@@ -1,0 +1,84 @@
+name: CI
+
+# 麻雀〜do the math〜（mahjong-dtm）
+#
+# ★1本ずつ並べる★ … 赤くなった時に どれで落ちたか一目で分かるように。
+# ★足した試験は ここに並べるまで1本も走らない★（scripts/tests-registered.mjs が赤にする）
+# ★--self-test（わざと壊して赤になるか）も並べる★ … 空振りしている見張りは、無いのと同じ。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 試験の登録（正本＝rakually-test・1文字も書き直さない） ──────
+      - name: ★試験がCIに登録されているか (登録するまで1本も走らない)
+        run: node scripts/tests-registered.mjs
+      - name: ★その見張りの自己確認 (わざと外して赤になるか)
+        run: node scripts/tests-registered.mjs --self-test
+
+      # ── どちらの線か（テスト倉庫を本番が読む事故を防ぐ） ──────
+      - name: テスト環境の帯（本番では出さない・全画面が読み込む）
+        run: node tests/env-badge.test.mjs
+      - name: テスト環境の帯の自己確認
+        run: node tests/env-badge.test.mjs --self-test
+      - name: 倉庫の向き先を js/supa-config.js 以外に書いていないか
+        run: node tests/no-hardcoded-supa.test.mjs
+      - name: 向き先の直書きの見張りの自己確認
+        run: node tests/no-hardcoded-supa.test.mjs --self-test
+      - name: repoの素性と倉庫の向き先が合っているか
+        run: node tests/supa-config-matches-repo.test.mjs
+      - name: 向き先の見張りの自己確認
+        run: node tests/supa-config-matches-repo.test.mjs --self-test
+
+      # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
+      #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
+      #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。fork の PR には secret が 渡らない＝飛ばして 緑に しない。
+      - name: 実在の字が戻っていないか（一覧は secret）
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          node tests/kinshi-ji.test.mjs | tee kinshi.out
+          grep -q "^✓ 実在の 字 0 件" kinshi.out
+        env:
+          KINSHI_JI: ${{ secrets.KINSHI_JI }}
+          KINSHI_JI_FINGER: ${{ vars.KINSHI_JI_FINGER }}
+      - name: 実在の字の見張りの自己確認
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
+          sh scripts/ci-yuka.sh kinshi-self.out 29 239
+
+      # ── 押す前の門の自己確認（門は手元の push で走る・ここでは門自身が壊れていないかを見る） ──────
+      - name: commit のメールの門の自己確認
+        shell: bash
+        run: |
+          node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
+          sh scripts/ci-yuka.sh mail-self.out 7
+      - name: 押す commit の 中身の 門の自己確認
+        shell: bash
+        run: |
+          node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
+          sh scripts/ci-yuka.sh push-self.out 16 43
+      - name: commit の 文の 門の自己確認
+        shell: bash
+        run: |
+          node scripts/kinshi-commit-msg.mjs --self-test | tee msg-self.out
+          sh scripts/ci-yuka.sh msg-self.out 76
+      - name: 床の物差しの自己確認
+        shell: bash
+        run: |
+          sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
+          sh scripts/ci-yuka.sh yuka-self.out 20

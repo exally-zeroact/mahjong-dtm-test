@@ -1,0 +1,12 @@
+{
+  "name": "mahjong-dtm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "麻雀〜do the math〜 — 点数・待ち・成績・精算を1本で回す麻雀の計算アプリ（ブラウザだけ・ログイン無し）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "kinshi": "node tests/kinshi-ji.test.mjs"
+  }
+}

@@ -1,0 +1,3 @@
+#!/bin/sh
+# commit の 文に 実在の 字を 書かせない（一覧は repo の外 ~/.tsukurimono/kinshi-ji.txt・無ければ 未測定で 止める）
+node scripts/kinshi-commit-msg.mjs --file "$1"
