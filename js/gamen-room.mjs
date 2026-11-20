@@ -10,7 +10,7 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig } from '../lib/room-state.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid } from './gamen-core.mjs';
@@ -462,7 +462,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const q = (x) => el.querySelector(x);
     if (q('#sClose')) q('#sClose').onclick = () => {
       const s = d.s;
-      const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, at: new Date().toISOString(), snap: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, missing: s.missing.length } }]);
+      const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, at: new Date().toISOString(), snap: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, missing: s.missing.length, sig: sessionSig(st, d.sid) } }]);
       if (r.ok) { viewSnap = false; render(); }
     };
     if (q('#sSnap')) q('#sSnap').onclick = () => { viewSnap = true; render(); };

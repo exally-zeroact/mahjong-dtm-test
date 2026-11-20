@@ -2,7 +2,7 @@
  * 例は設計図 §2 の絵（1pt＝100・チップ1枚2.0pt・祝儀1枚1.0pt）に寄せた数。
  * 使い方: node tests/room-state.test.mjs
  */
-import { emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession } from '../lib/room-state.mjs';
+import { emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig } from '../lib/room-state.mjs';
 import { defaultRules } from '../lib/rules.mjs';
 
 let p = 0, f = 0;
@@ -182,7 +182,27 @@ console.log('■ 続ける開催（pickSession・taiketsu 止め2＝0時をま�
   ok('同じ日は続ける', pickSession(st, '2026-11-20') === 's1');
   ok('0時をまたいでも締めていなければ続ける（11/20 の開催を 11/21 に開き直す）', pickSession(st, '2026-11-21') === 's1');
   const ten = sessionSeisan(st, 's1').ten;
-  const closed = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [] } }]).state;
+  const closed = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [], sig: sessionSig(st, 's1') } }]).state;
+  const noSig = applyOps(st, [{ op: 'settle_snap', session_id: 's1', rev: 1, at: '2026-11-20T15:00:00Z', snap: { ten, pay: [] } }]).state;
+  ok('印の無い締めは変わったと見て続ける（消さない側）', pickSession(noSig, '2026-11-27') === 's1');
+  // レートなしの卓（ten に入らない）で締めた後に半荘を足す＝点では同じ {} に見える（taiketsu-naoshi の再現）
+  const nr = { ...rules, rate: null };
+  const st0 = applyOps(emptyState(), [
+    { op: 'member_add', member_id: 'm1', name: '山田' }, { op: 'member_add', member_id: 'm2', name: '鈴木' },
+    { op: 'member_add', member_id: 'm3', name: '佐藤' }, { op: 'member_add', member_id: 'm4', name: '高橋' },
+    { op: 'session_add', session_id: 'n1', date: '2026-11-20', rate: null }, { op: 'table_add', table_id: 'nt', session_id: 'n1', rules: nr },
+    { ...h1, table_id: 'nt' },
+  ]).state;
+  const nClosed = applyOps(st0, [{ op: 'settle_snap', session_id: 'n1', rev: 1, at: 'x', snap: { ten: sessionSeisan(st0, 'n1').ten, pay: [], sig: sessionSig(st0, 'n1') } }]).state;
+  ok('レートなし：締めて変わらなければ別の日は新しく作る', pickSession(nClosed, '2026-11-21') === null);
+  const nMore = applyOps(nClosed, [{ op: 'hanchan_start', hanchan_id: 'h2', table_id: 'nt', seats: ['m1', 'm2', 'm3', 'm4'], cells: [10000, 20000, 30000, 40000] }]).state;
+  ok('レートなし：締めた後に半荘を足せば別の日でも続ける（点は同じ {} でも）', JSON.stringify(sessionSeisan(nMore, 'n1').ten) === JSON.stringify(sessionSeisan(nClosed, 'n1').ten) && pickSession(nMore, '2026-11-21') === 'n1');
+  const chip = applyOps(closed, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 }]).state;
+  ok('締めた後にチップだけ入れても続ける', pickSession(chip, '2026-11-27') === 's1');
+  const back = applyOps(chip, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: -1 }]).state;
+  ok('打ち消して同じ数に戻しても続ける（版が進んだ＝中身が変わった）', pickSession(back, '2026-11-27') === 's1');
+  const voided = applyOps(closed, [{ op: 'hanchan_void', hanchan_id: 'h1' }]).state;
+  ok('締めた後に取り消しても続ける', pickSession(voided, '2026-11-27') === 's1');
   ok('締めて何も変わっていない・別の日なら新しく作る', pickSession(closed, '2026-11-27') === null);
   ok('締めても同じ日なら続ける', pickSession(closed, '2026-11-20') === 's1');
   const more = applyOps(closed, [{ op: 'hanchan_start', hanchan_id: 'h2', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: [10000, 20000, 30000, 40000] }]).state;
