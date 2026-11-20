@@ -10,7 +10,8 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { heldInfo } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid } from './gamen-core.mjs';
@@ -33,12 +34,22 @@ const toInt = (s) => { const t = String(s).replace(/[,，\s]/g, '').replace(/[�
 
 function load(k, def) { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v === null ? def : v; } catch { return def; } }
 function save(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+/* 閉じる時に1秒まとめ（extra_add）を流す＝今開いている部屋の1つだけ（開き直しで古い部屋の物を呼ばない） */
+let flushNow = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => { if (flushNow) flushNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && flushNow) flushNow(); });
+}
 
 export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   const uid = me.id, rid = room.room_id;
-  let st = load(KEY(uid, rid), emptyState());
+  // 古い形の写し（st.v が 2 でない）は形だけ直す（値は変えない・needs_upload＝倉庫へ上げるのは 2d）。
+  // 直した時は古い並び（古い形の op）を捨て、★並びを先に保存してから写しを保存★（途中で落ちても次に開けば同じ直しになる）
+  const mig = migrateState(load(KEY(uid, rid), emptyState()));
+  let st = mig.st;
   if (!st.settles) st.settles = [];
-  let outbox = load(OUT(uid, rid), []);
+  let outbox = mig.migrated ? [] : load(OUT(uid, rid), []);
+  if (mig.migrated) { save(OUT(uid, rid), outbox); save(KEY(uid, rid), st); }
   let page = first || 'room'; // room | edit | pick | seisan | rules
   let entry = null;
   let picking = null;
@@ -54,14 +65,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     el.querySelector('#rShare').onclick = showShare;
     return;
   }
+  st.rules = room.rules; // 卓を作る時のルール（op では送らない＝倉庫は開催日のルールを使う・§3 table_add）
 
   function commit(ops) {
-    const r = applyOps(st, ops);
+    flushMerge(true); // 1秒まとめを先に並べる（並びの順＝押した順）
+    const r = applyOps(st, ops, { now: new Date().toISOString() });
     if (!r.ok) return r.res;
     st = r.state;
-    save(KEY(uid, rid), st);
-    outbox.push({ op_id: uuid(), ops });
-    save(OUT(uid, rid), outbox);
+    // needs_upload の部屋（古い写しを直した部屋）は写しが唯一の元＝並びに積まない（2d が写しから作る）
+    if (!st.needs_upload) { outbox.push({ op_id: uuid(), ops }); save(OUT(uid, rid), outbox); }
+    save(KEY(uid, rid), st); // ★並びを先・写しを後★
     sendOutbox();
     return { ok: true };
   }
@@ -76,7 +89,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const sid = uuid(), tid = uuid();
     commit([
       { op: 'session_add', session_id: sid, date: today(), rate: room.rules.rate },
-      { op: 'table_add', table_id: tid, session_id: sid, rules: room.rules },
+      { op: 'table_add', table_id: tid, session_id: sid, label: '卓1' },
     ]);
     return st.tables.find((t) => t.table_id === tid);
   }
@@ -84,7 +97,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   const R = table.rules, n = R.players;
   const nameOf = (mid) => (st.members.find((m) => m.member_id === mid) || {}).name || '?';
   const rateText = (rate) => (rate === null ? 'レートなし' : '1pt＝' + rate.toLocaleString('ja-JP'));
-  const liveTag = () => (outbox.length ? '<span class="r-live ng">● 未送信 ' + outbox.length + '</span>' : '');
+  const liveTag = () => {
+    if (st.needs_upload) return '<span class="r-live ng">● この端末だけ（まだ送っていない）</span>';
+    if (heldInfo(outbox)) return '<span class="r-live ng">● 未送信 ' + outbox.length + '・止まっています</span>';
+    return outbox.length ? '<span class="r-live ng">● 未送信 ' + outbox.length + '</span>' : '';
+  };
 
   function render() {
     if (page === 'edit') return renderEdit();
@@ -263,7 +280,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function startEntry(hid) {
     if (hid) {
       const x = st.hanchans.find((y) => y.hanchan_id === hid);
-      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map(String), lost: String(x.lost || 0), step: 'cells', order: x.order ? x.order.slice() : [], tobi: { ...x.tobi_to }, voided: x.voided };
+      // 元の点で飛んでいない席の受け取りは entry に持たない（片付け・§6-7）
+      const bs = bustedSeats(R, x.cells), tobi = {};
+      for (const [k, v] of Object.entries(x.tobi_to)) if (bs.includes(Number(k))) tobi[k] = v;
+      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map(String), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
     } else {
       const seats = lastSeats();
       if (!seats) { picking = { seats: [] }; page = 'pick'; render(); return; }
@@ -337,8 +357,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       const cells = e.cells.map(toInt);
       if (cells.some((x) => Number.isNaN(x))) return err('全員の点を数で入れてください。');
       if (cells.some((x) => x % 100 !== 0)) return err('点は100点単位で入れてください。');
+      if (cells.some((x) => Math.abs(x) > CELL_MAX)) return err('点は ±' + CELL_MAX.toLocaleString('ja-JP') + ' までです。');
       const lost = kieru ? toInt(e.lost || '0') : 0;
-      if (Number.isNaN(lost) || lost < 0 || lost % 100 !== 0) return err('消えた供託は0以上の100点単位です。');
+      if (Number.isNaN(lost) || lost < 0 || lost % 1000 !== 0 || lost > LOST_MAX) return err('消えた供託は0〜' + LOST_MAX.toLocaleString('ja-JP') + 'の1000点単位です。');
       const c = checkEntry(R, cells, lost);
       if (!c.ok && c.why === 'sum') return err('素点の合計が ' + fmt(c.diff) + ' 合いません。');
       if (!c.ok) return err('入れられません（' + c.why + '）。');
@@ -362,16 +383,23 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     let ops;
     if (!e.hanchan_id) {
       const tobi_to = {};
-      for (const b of e.busted) tobi_to[b] = e.tobi[b];
-      ops = [{ op: 'hanchan_start', hanchan_id: uuid(), table_id: table.table_id, seats: e.seats, cells: e.num, order: e.order.length ? e.order : undefined, lost: e.lostNum, tobi_to }];
+      for (const b of e.busted) tobi_to[String(b)] = e.tobi[b];
+      const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: table.table_id, seats: e.seats, cells: e.num, lost: e.lostNum, tobi_to };
+      if (e.order.length) op.ton_order = e.order.map((i) => e.seats[i]); // 順は member_id の配列（§6-6）
+      ops = [op];
     } else {
       const h = st.hanchans.find((x) => x.hanchan_id === e.hanchan_id);
       ops = [];
       e.num.forEach((v, i) => { if (v !== h.cells[i]) ops.push({ op: 'cell_set', hanchan_id: h.hanchan_id, seat: i, value: v, base_version: h.cell_ver[i] }); });
-      if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.lost_ver });
-      if (e.order.length && JSON.stringify(e.order) !== JSON.stringify(h.order)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, order: e.order, base_version: h.order_ver });
-      for (const b of e.busted) if (e.tobi[b] !== h.tobi_to[b]) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, seat: b, to: e.tobi[b], base_version: h.tobi_ver[b] || 0 });
-      for (const k of Object.keys(h.tobi_to)) if (!e.busted.includes(Number(k))) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, seat: Number(k), to: null, base_version: h.tobi_ver[k] || 0 });
+      if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.version });
+      const ton = e.order.length ? e.order.map((i) => e.seats[i]) : null;
+      if (ton && canon(ton) !== canon(h.ton_order)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, ton_order: ton, base_version: h.order_version });
+      // 飛び：tobi_set を抜いた組を一度当てた後（§4 の鍵消しの後）の tobi_to と比べる＝また飛んで同じ人を選んだ時も消えない
+      const want = {};
+      for (const b of e.busted) want[String(b)] = e.tobi[b];
+      const trial = ops.length ? applyOps(st, ops) : { ok: true, state: st };
+      const th = trial.ok ? trial.state.hanchans.find((x) => x.hanchan_id === h.hanchan_id) : h;
+      if (canon(th.tobi_to) !== canon(want)) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, tobi_to: want, base_version: h.tobi_version });
     }
     if (ops.length) {
       const r = commit(ops);
@@ -415,18 +443,18 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>精算を出せません（' + esc(s.err) + '）</b></div>'; return; }
     const settles = st.settles.filter((x) => x.session_id === d.sid);
     const last = settles[settles.length - 1];
-    const changed = last ? d.order.filter((m) => (last.snap.ten[m] || 0) !== (s.ten[m] || 0)) : [];
+    const changed = last ? d.order.filter((m) => (last.content.ten[m] || 0) !== (s.ten[m] || 0)) : [];
     let h = top;
     if (last) h += '<div class="r-white">' + hm(last.at) + ' にこの対局を終えました</div>';
     if (last && changed.length && !viewSnap) {
       h += '<div class="r-red"><b>終えた後に変わりました（' + changed.length + '人）</b><span>' + changed.map((m) => esc(s.name(m))).join('・') + '</span></div>';
-      h += '<p class="sec">終えた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.snap.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
+      h += '<p class="sec">終えた時 → 今</p><div class="list">' + changed.map((m) => { const a = last.content.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
       if (!s.missing.length) h += '<button class="btn btn-main" id="sClose">この中身で終え直す</button>';
       h += '<button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
       el.innerHTML = h; wireSeisan(d, settles.length); return;
     }
-    const pay = viewSnap && last ? last.snap.pay : s.pay;
-    const ten = viewSnap && last ? last.snap.ten : s.ten;
+    const pay = viewSnap && last ? last.content.pay : s.pay;
+    const ten = viewSnap && last ? last.content.ten : s.ten;
     const many = d.views.length > 1;
     if (!viewSnap) {
       if (s.missing.length) h += '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>';
@@ -465,7 +493,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (q('#sClose')) q('#sClose').onclick = () => {
       const s = d.s;
       if (s.missing.length) return;
-      const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, at: new Date().toISOString(), snap: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, missing: s.missing.length, sig: sessionSig(st, d.sid) } }]);
+      // §3 settle_snap：content（精算の中身）・used（使った版）・missing（入っていない物の一覧）。at は倉庫の now()
+      const ss = st.sessions.find((x) => x.session_id === d.sid);
+      const tabs = st.tables.filter((t) => t.session_id === d.sid);
+      const used = {
+        session: { session_id: d.sid, date: ss.date, rate: ss.rate, version: 1 },
+        tables: tabs.map((t) => ({ table_id: t.table_id, rate: null, rate_mode: 'session', version: 1 })),
+        hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version })),
+      };
+      const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, content: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, sig: sessionSig(st, d.sid) }, used, missing: s.missing }]);
       if (r.ok) { viewSnap = false; render(); }
     };
     if (q('#sSnap')) q('#sSnap').onclick = () => { viewSnap = true; render(); };
@@ -491,14 +527,17 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     mergeTimer = setTimeout(flushMerge, 1000);
     render();
   }
-  function flushMerge() {
+  function flushMerge(quiet) {
+    clearTimeout(mergeTimer);
     const ops = [];
     for (const [k, add] of merge) { if (!add) continue; const [mid, kind] = k.split('|'); ops.push({ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }); }
     merge.clear();
-    if (!ops.length) return;
-    outbox.push({ op_id: uuid(), ops }); save(OUT(uid, rid), outbox);
-    sendOutbox(); if (page === 'room') render();
+    if (!ops.length || st.needs_upload) return; // needs_upload の部屋は写しが元（並びに積まない）
+    for (let i = 0; i < ops.length; i += OPS_MAX) outbox.push({ op_id: uuid(), ops: ops.slice(i, i + OPS_MAX) }); // 30個ごとの組
+    save(OUT(uid, rid), outbox);
+    sendOutbox(); if (!quiet && page === 'room') render();
   }
+  flushNow = () => flushMerge(true);
 
   function wireRoom() {
     const q = (s) => el.querySelector(s);
