@@ -6,12 +6,13 @@
  *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 22個・31個・知らない op）
  *  ③ 範囲 ④ 版 ⑤ 飛び賞 ⑥ そろった後 ⑦ チップ・祝儀（11通り・倉庫と lib〔画面の lib/room-state.mjs の tableView〕に同じ表を通す）
  *  ⑦' 2c-2a1（紙 write2_sekkei.md v3.3）＝卓の一度そろった（first_complete_at）・卓の印・正味の門（v1510:195①）・使わない種と取り消した開催日・前の組の締め
+ *  ⑩ 2c-2a0＝範囲の端の表 tests/fixtures/write-cases.json を倉庫に流す（want_db ?? want と ok／err だけ比べる・弾いた組は何も書かない）
  *  ⑧ 数え（先見・後見の busy・internal と一時の失敗・古い窓・入と管が別）⑧' 上限 ⑨ 送り直し・部屋・last_seen
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋・trigger も全部戻る）。
  * ★now() が取引の中で止まる＝節ごとに write:* の行を消してから始める（1分の上限の偽の赤を出さない）★
  * ★lib の比べ＝この repo の lib/room-state.mjs（gamen-1 は 5290b84 で main に入った）を読む。MJ_GAMEN_LIB で別の置き場を指せる。無ければ赤（未測定）★
  * 使い方: node tests/write.live.mjs            … 試験
- *         node tests/write.live.mjs --waza     … ★わざと壊して狙った試験が赤になるか★（26か所を1つずつ壊す・先に素の回りが緑か見る・壊した関数は塊と一緒に戻る）
+ *         node tests/write.live.mjs --waza     … ★わざと壊して狙った試験が赤になるか★（27か所を1つずつ壊す・先に素の回りが緑か見る・壊した関数は塊と一緒に戻る）
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -106,6 +107,11 @@ const OPQ1 = '00000000-0000-4000-8000-000000000001', OPQ2 = 'ffffffff-ffff-4fff-
 const BIG = 'x'.repeat(33000);
 /* 32KB ちょうど：content {"big": "x…"} は n+11 字・used {} と missing [] は2字ずつ＝n+15 = 32768（倉庫で re5_len を数えて確かめる） */
 const EDGE = 'x'.repeat(32768 - 15);
+/* N7（write2_sekkei.md）鍵の多い中身＝鍵 500 個（k000〜k499・値「あ」3バイト）＋ p に x の詰め。倉庫の jsonb::text は「: 」「, 」に空白が入る＝
+ * 鍵 500 個で 2 + 500×13 + 499×2 = 7,500・p の行は n+7 と区切り2・used と missing で 4 → 7,513 + n = 32,768 で n = 25,255（倉庫で many_len を数えて確かめる）。
+ * 写し（JSON.stringify の UTF-8）は空白が無い＝同じ中身を 1,000 バイトほど短く数える＝写しが通しても倉庫は range を返す（写しの注の向き）。 */
+const MANY = (n) => Object.fromEntries([['p', 'x'.repeat(n)], ...Array.from({ length: 500 }, (_, i) => ['k' + String(i).padStart(3, '0'), 'あ'])]);
+const MANY_N = 25255;
 const SNAPREV = S(`(select to_jsonb(coalesce(max(rev), 0) + 1) from mahjong.settle_snaps where session_id = '${SA}')`);
 /* ⑦ チップ・祝儀の11通り：[名, 部屋, chip_pt10, shugi_pt10, 卓, 半荘, extras[[人, 種, 足す]], 席にいない人の行, 答え[c, s, e]] */
 const CASES = [
@@ -141,6 +147,20 @@ const setupOps = (room) => {
 const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) => c[6].map(([who, kind, add]) => O('extra_add', { table_id: c[4], member_id: RM[room].m[who], kind, add }))));
 const NAMES12 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid'];
 
+/* ⑩ 範囲の端の表（2c-2a0・紙 write2_sekkei.md §1 2c-2a0・§5）＝tests/fixtures/write-cases.json を倉庫に流す（画面の写しの試験 room-state.test.mjs と同じ表）
+ *  部屋は表の rules ごとに1つ（持ち主＝人7）・base_ops を当ててから、case ごとに塊の中で書いて戻す。比べは want_db ?? want と ok／err だけ。
+ *  ★ok の行は「通る事」だけを守る（書けた中身は見ない＝中身は ①〜⑨ の手書きの試験が見る）・③ は入の数え rejNyu・at・空白だけの label を見るので残す（taiketsu 2c-2a0 注意3・任意1）★
+ *  記号の id（h1・t1・m1・s1 …）は部屋ごとに uuid へ写す・記号でない字（例 nai）は新しい uuid＝無い物。 */
+const WT = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/write-cases.json'), 'utf8'));
+const WT_RK = Object.keys(WT.rules);
+const WT_ROOM = Object.fromEntries(WT_RK.map((k, i) => [k, 'rt' + i]));
+const WT_IDS = Object.fromEntries(WT_RK.map((k) => [k, {}]));
+const WT_ID_KEYS = ['hanchan_id', 'table_id', 'member_id', 'session_id'];
+const wtId = (rk, v) => (typeof v !== 'string' ? v : /^[a-z]\d+$/.test(v) ? (WT_IDS[rk][v] ||= U()) : U());
+const wtOp = (rk, o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k,
+  WT_ID_KEYS.includes(k) ? wtId(rk, v) : (k === 'seats' || k === 'ton_order') && Array.isArray(v) ? v.map((x) => wtId(rk, x)) : v]));
+const wtOps = (rk, ops) => A(...ops.map((o) => `${lit(JSON.stringify(wtOp(rk, o)))}::jsonb`));
+const WT_CASES = WT.cases.map((c) => ({ ...c, ops: c.ops_repeat ? Array.from({ length: c.ops_repeat.n }, () => c.ops_repeat.op) : c.ops }));
 const ROOMS = [['ra', 1, '{"players":4,"chip_pt10":10}'], ['rc', 1, '{"players":4,"tobi_from":"all","chip_pt10":10,"shugi_pt10":10}'],
   ['re', 1, '{"players":4,"shugi_pt10":10}'], ['rf', 1, '{"players":4}'], ['rb', 6, '{"players":3,"kyotaku_end":"kieru"}']];
 
@@ -267,6 +287,10 @@ const body = `
     res := res || jsonb_build_object('re5_len', octet_length(jsonb_build_object('big', '${EDGE}')::text) + octet_length('{}'::jsonb::text) + octet_length('[]'::jsonb::text));
     ${W('re5', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: SNAPREV, content: { big: EDGE }, used: {}, missing: [] })))}
     ${W('re6', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: SNAPREV, content: { big: EDGE + 'x' }, used: {}, missing: [] })))}`)}
+  ${undo('rm', `${RS}
+    res := res || jsonb_build_object('many_len', octet_length(${V(MANY(MANY_N))}::text) + octet_length('{}'::jsonb::text) + octet_length('[]'::jsonb::text));
+    ${W('rm1', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: SNAPREV, content: MANY(MANY_N), used: {}, missing: [] })))}
+    ${W('rm2', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: SNAPREV, content: MANY(MANY_N + 1), used: {}, missing: [] })))}`)}
 
   /* ③' 取り消した開催日・卓／リーグの日（行を直に変えて塊ごと戻す） */
   ${RS}
@@ -479,10 +503,18 @@ const body = `
   update mahjong.room_accounts set last_seen = now() - interval '5 minutes' where room_id = ra and user_id = us[2];
   ${W('ls2', 2, 'ra', A(ma(U(), 'さっき')))}
   ${ROW('ls2_v', `select last_seen = now() - interval '5 minutes' from mahjong.room_accounts where room_id = ra and user_id = us[2]`)}
+  /* ⑩ 表（人7 が持ち主の部屋を rules ごとに作る） */
+  ${WT_RK.map((k) => `${asWho(7)}
+  r := public.mj_room_create(gen_random_uuid(), ${lit('w-rt-' + k)}, ${lit(PASS)}, ${lit(JSON.stringify(WT.rules[k]))}::jsonb, jsonb_build_object('url_token_hash', md5(random()::text) || md5(random()::text)));
+  res := res || jsonb_build_object('made_${WT_ROOM[k]}', r); ${WT_ROOM[k]} := (r->>'room_id')::uuid;
+  ${RS}
+  ${W('tb_' + WT_ROOM[k], 7, WT_ROOM[k], wtOps(k, WT.base_ops))}`).join('\n  ')}
+  ${WT_CASES.map((c, i) => undo('tc' + i, `${RS}
+    ${W('tc' + i, 7, WT_ROOM[c.rules] || 'rz', wtOps(WT_ROOM[c.rules] ? c.rules : WT_RK[0], c.ops))}`)).join('\n  ')}
 `;
 
 const mkSql = (prefix = '') => `do ${q('wt')} declare res jsonb := '{}'; r jsonb; cx jsonb; i int; nm text; arr jsonb; v_no text;
-  ra uuid; rb uuid; rc uuid; re uuid; rf uuid; rz uuid;
+  ra uuid; rb uuid; rc uuid; re uuid; rf uuid; rz uuid; ${WT_RK.map((k) => WT_ROOM[k] + ' uuid;').join(' ')}
   us uuid[] := '{}'; ss uuid[] := '{}';
 begin
   ${prefix}
@@ -610,6 +642,11 @@ function check(out, lib, say) {
   ok('③ settle_snap rev 0 → bad at rev・32KB 越え → range at size', isErr('rs0', 'bad', { at: 'rev' }) && isErr('rsz', 'range', { at: 'size' }) && has('rsz', rejNyu), J([R('rs0'), R('rsz'), d('rsz')]));
   ok('③ 通る端：rate 10・100,000・place 40字 → ok', isOk('re1') && isOk('re2'), J([R('re1'), R('re2'), out.re_err]));
   ok('③ 通る端：label 20字・name 20字 → ok', isOk('re3') && isOk('re4'), J([R('re3'), R('re4'), out.re_err]));
+  {
+    const libLen = Buffer.byteLength(J(MANY(MANY_N + 1))) + 8;   // 写しは content・used・missing を配列ごと stringify＝［］と区切り2つで +8
+    ok('③ N7 鍵 500 個と「あ」の中身：倉庫で数えて 32,768 ちょうど → ok・1 越え → range at size（写しは同じ中身を短く数える）',
+      out.many_len === 32768 && isOk('rm1') && isErr('rm2', 'range', { at: 'size' }) && libLen < 32768, J([out.many_len, libLen, R('rm1'), R('rm2'), out.rm_err]));
+  }
   ok('③ 通る端：settle_snap ちょうど 32,768 → ok・1 越え → range at size', out.re5_len === 32768 && isOk('re5') && isErr('re6', 'range', { at: 'size' }), J([out.re5_len, R('re5'), R('re6'), out.re_err]));
   /* ③' */
   ok("③' 取り消した開催日に table_add → bad at session_id", isErr('vs1', 'bad', { at: 'session_id' }) && has('vs1', rejNyu), J([R('vs1'), d('vs1'), out.vs_err]));
@@ -714,6 +751,16 @@ function check(out, lib, say) {
   ok('⑨ 無い部屋 → gone', isErr('nr', 'gone'), J(R('nr')));
   ok('⑨ last_seen：2時間前の行は now() に上がる', isOk('ls1') && out.ls1_v === true, J([R('ls1'), out.ls1_v]));
   ok('⑨ last_seen：5分前の行は動かない', isOk('ls2') && out.ls2_v === true, J([R('ls2'), out.ls2_v]));
+  /* ⑩ 範囲の端の表（write-cases.json） */
+  ok('⑩ 表の版1・case 84以上・rules は表の名だけ', WT.v === 1 && WT_CASES.length >= 84 && WT_CASES.every((c) => c.rules in WT.rules), J(WT_CASES.filter((c) => !(c.rules in WT.rules)).map((c) => c.id + ':' + c.rules)));
+  ok('⑩ 表の部屋を作れて base_ops が当たった', WT_RK.every((k) => out['made_' + WT_ROOM[k]]?.ok === true && isOk('tb_' + WT_ROOM[k])), J(WT_RK.map((k) => [out['made_' + WT_ROOM[k]], R('tb_' + WT_ROOM[k])])));
+  WT_CASES.forEach((c, i) => {
+    const want = c.want_db ?? c.want;
+    const r = R('tc' + i);
+    const got = r.ok === true ? 'ok' : r.ok === false ? r.err : 'なし';
+    ok('⑩ 表：' + c.id, got === want, 'want ' + want + ' got ' + got + ' ' + J(r));
+    if (want !== 'ok') ok('⑩ 表：' + c.id + '＝弾いた組は何も書かない', has('tc' + i, { rc: 0, hc: 0, h: 0, op: 0, m: 0, x: 0 }), J(d('tc' + i)));
+  });
   /* 全体 */
   const errs = Object.keys(out).filter((k) => k.endsWith('_err'));
   ok('塊の中で思わぬ例外が無い', errs.length === 0, errs.map((k) => k + '=' + out[k]).join(' / '));
@@ -734,6 +781,7 @@ const fnText = (name) => {
 };
 /* [名, 関数, 壊す字, 替える字, 2つ目の替え（無ければ null）, 狙った試験の名の頭] */
 const WAZA = [
+  ['素点の範囲を見ない（表の行で赤になるか）', 'mahjong_private.mj_w_op', 'if v_x not between -200000 and 200000 or v_x % 100 <> 0 then', 'if false then', null, '⑩ 表：cell_set の 200,100 は range'],
   ['op_results を書かない', 'public.mj_write', 'insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id, v_ret, v_me);', 'null;', null, '⑨ 同じ人の同じ op_id 2回'],
   ['卓の部屋を確かめない', 'mahjong_private.mj_w_t', 'where x.id = p_tid and x.room_id = p_room for update', 'where x.id = p_tid for update', null, '② 別の部屋の table_id'],
   ['MJ001 を値に直さない（internal に化ける）', 'public.mj_write', 'v_ret := sqlerrm::jsonb; v_n := 0;', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '② 別の部屋の hanchan_id'],
