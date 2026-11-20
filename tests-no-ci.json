@@ -14,5 +14,9 @@
   "tests/needs-order.live.mjs": {
     "why": "本物のテスト倉庫の mj_needs_order を呼ぶ（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
     "back": "CI に倉庫の鍵を置いた日"
+  },
+  "tests/room-create.live.mjs": {
+    "why": "本物のテスト倉庫の public.mj_room_create を呼ぶ（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
+    "back": "CI に倉庫の鍵を置いた日"
   }
 }

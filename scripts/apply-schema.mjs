@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 20, ops: 28, caps: 12, rule_keys: 41, public_funcs: 0 };
+export const EXPECT = { tables: 21, ops: 28, caps: 12, rule_keys: 41, common_pass: 100, public_funcs: 1 };
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {
@@ -66,6 +66,10 @@ select
  (select count(*) from pg_class c join n on n.oid=c.relnamespace where n.nspname='mahjong' and c.relkind='r' and c.relrowsecurity) as rls_on,
  (select count(*) from pg_policies where schemaname in ('mahjong','mahjong_private')) as policies,
  (select count(*) from pg_proc p join pg_namespace s on s.oid=p.pronamespace where s.nspname='public' and p.proname like 'mj\\_%') as public_funcs,
+ (select count(*) from pg_proc p join pg_namespace s on s.oid=p.pronamespace where s.nspname='public' and p.proname like 'mj\\_%'
+    and p.prosecdef and p.proconfig @> array['search_path=""']
+    and has_function_privilege('anon', p.oid, 'EXECUTE') and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+    and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x where x.grantee = 0)) as public_funcs_ok,
  (select count(*) from n where has_schema_privilege('anon', n.oid, 'USAGE') or has_schema_privilege('authenticated', n.oid, 'USAGE')) as client_usage,
  (select count(*) from pg_class c join n on n.oid=c.relnamespace where c.relkind in ('r','v','S')
     and (has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE') or has_table_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,DELETE'))) as client_table_priv,
@@ -73,7 +77,8 @@ select
     where has_function_privilege('anon', p.oid, 'EXECUTE') or has_function_privilege('authenticated', p.oid, 'EXECUTE')) as client_private_funcs
 `;
 const SEED_SQL = `select (select count(*) from mahjong.mj_ops) as ops, (select count(*) from mahjong.mj_caps) as caps,
- (select count(*) from mahjong.totals) as totals_rows, (select count(*) from mahjong.mj_rule_keys) as rule_keys`;
+ (select count(*) from mahjong.totals) as totals_rows, (select count(*) from mahjong.mj_rule_keys) as rule_keys,
+ (select count(*) from mahjong.mj_common_pass) as common_pass`;
 
 async function main() {
   const cfg = readConfig();
@@ -114,10 +119,12 @@ async function main() {
   const clientOk = Number(a.client_usage) === 0 && Number(a.client_table_priv) === 0 && Number(a.client_private_funcs) === 0;
   const ok = Number(a.tables) === EXPECT.tables && Number(a.rls_on) === EXPECT.tables && Number(a.policies) === 0
     && Number(s.ops) === EXPECT.ops && Number(s.caps) === EXPECT.caps && Number(s.rule_keys) === EXPECT.rule_keys && Number(s.totals_rows) === 1
-    && Number(a.public_funcs) === EXPECT.public_funcs && clientOk;
+    && Number(s.common_pass) === EXPECT.common_pass
+    && Number(a.public_funcs) === EXPECT.public_funcs && Number(a.public_funcs_ok) === EXPECT.public_funcs && clientOk;
   console.log(`\nAPPLY RESULT: ${ok ? 'OK' : 'NG'}`
     + `  表=${a.tables}/${EXPECT.tables} RLS=${a.rls_on} 決まり書き=${a.policies} 操作=${s.ops}/${EXPECT.ops}`
-    + ` 上限=${s.caps}/${EXPECT.caps} ルールの鍵=${s.rule_keys}/${EXPECT.rule_keys} public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}`);
+    + ` 上限=${s.caps}/${EXPECT.caps} ルールの鍵=${s.rule_keys}/${EXPECT.rule_keys} よくあるパス=${s.common_pass}/${EXPECT.common_pass}`
+    + ` public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}（definer・search_path 空・anon と authenticated に EXECUTE・PUBLIC 無し=${a.public_funcs_ok}）`);
   console.log(`  客（anon・authenticated）… 部屋の USAGE=${a.client_usage} 表の権限=${a.client_table_priv} 部屋の関数=${a.client_private_funcs}`
     + `（★全部0★）${clientOk ? '' : ' ← ★ここが NG★'}`);
   process.exit(ok ? 0 : 1);
