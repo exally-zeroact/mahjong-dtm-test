@@ -78,6 +78,15 @@ jobs:
           node tests/score-table.test.mjs --self-test | tee score-self.out
           sh scripts/ci-yuka.sh score-self.out 176
 
+      # ── 計算の道具（待ち読み）＝画面と同じ lib/shanten.mjs を手で決めた答えと突き合わせる ──────
+      - name: 待ち読み（lib/shanten.mjs）のシャンテン・待ち・受け入れが手で決めた答えと同じか（清一色の全通り・七対子・国士・純空・3人）
+        run: node tests/shanten.test.mjs
+      - name: 待ち読みの見張りの自己確認（七対子の式・和了の判定・純空をわざと壊して3つとも赤になるか）
+        shell: bash
+        run: |
+          node tests/shanten.test.mjs --self-test | tee shanten-self.out
+          sh scripts/ci-yuka.sh shanten-self.out 3
+
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
       #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。fork の PR には secret が 渡らない＝飛ばして 緑に しない。

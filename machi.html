@@ -14,7 +14,36 @@
 <body>
 <header class="appbar"><a class="back" href="index.html">‹ ホーム</a><h1>待ち読み</h1></header>
 <main>
-<p class="soon">準備中</p>
+<div class="seg" id="seg-mode" role="group" aria-label="手牌の枚数">
+  <button type="button" data-v="13" aria-pressed="true">13枚（待ち）</button>
+  <button type="button" data-v="14" aria-pressed="false">14枚（何を切る）</button>
+</div>
+<section class="card">
+  <div class="row-h"><h2 id="hand-h">手牌</h2><button type="button" class="btn-s" id="clear-hand">全部消す</button></div>
+  <div class="tiles hand" id="hand"></div>
+</section>
+<section class="card" id="result" aria-live="polite"></section>
+<div class="seg" id="seg-target" role="group" aria-label="下の牌をどちらに入れるか">
+  <button type="button" data-v="hand" aria-pressed="true">手牌に入れる</button>
+  <button type="button" data-v="seen" aria-pressed="false">見えている牌に入れる</button>
+</div>
+<section class="card">
+  <div class="kb" id="kb" aria-label="牌を選ぶ"></div>
+</section>
+<section class="card">
+  <div class="row-h"><h2 id="seen-h">見えている牌</h2><button type="button" class="btn-s" id="clear-seen">全部消す</button></div>
+  <div class="tiles" id="seen"></div>
+  <p class="note">河・鳴いた牌・ドラ表示を入れると、残りの枚数から引きます。</p>
+</section>
+<details class="card">
+  <summary>ルール</summary>
+  <div class="opts">
+    <label for="r-players">人数</label>
+    <select id="r-players"><option value="4">4人</option><option value="3">3人（2〜8萬なし）</option></select>
+  </div>
+  <p class="note">この端末に覚えます（記録はしません）。</p>
+</details>
 </main>
+<script type="module" src="js/machi.js"></script>
 </body>
 </html>

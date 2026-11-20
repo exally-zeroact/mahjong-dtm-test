@@ -14,6 +14,17 @@
   --c-man: #F6E3D3;
   --c-seg: #E9EBEF;
   --c-kage: rgba(0,0,0,.12);
+  /* 牌の絵（js/tile-svg.mjs・見本 v11.1 の色） */
+  --t-men: #FFFDF5;
+  --t-se: #2E6F9E;
+  --t-fuchi: #B9B19C;
+  --t-uchi: #EFE8D6;
+  --t-aka: #C8312B;
+  --t-midori: #1E7A46;
+  --t-ao: #1F4E8C;
+  --t-kuro: #1A1A1A;
+  --t-kuchibashi: #D9A21B;
+  --t-haku: #7FA7D6;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -74,3 +85,27 @@ main { padding: 16px; max-width: 640px; margin: 0 auto; }
 .opts select { font: inherit; font-size: 16px; min-height: 44px; padding: 0 8px; border: 1px solid var(--c-sen); border-radius: 8px; background: var(--c-men); color: var(--c-ji); }
 details.card > summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
 
+/* ── 待ち読み ── */
+.tiles { display: flex; flex-wrap: wrap; gap: 2px; align-items: flex-end; }
+.tile { display: block; }
+.tbtn { position: relative; padding: 0; border: 0; background: none; line-height: 0; }
+.tbtn:disabled { opacity: .3; }
+.kb { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+.kb .tbtn svg { width: 100%; height: auto; }
+.hand { min-height: 52px; }
+.row-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+.row-h h2 { margin: 0; font-size: 14px; color: var(--c-ji-usui); font-weight: 600; }
+.btn-s { position: relative; min-height: 36px; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--c-sen); border-radius: 8px; background: var(--c-men); color: var(--c-kon); }
+.btn-s::after { content: ""; position: absolute; inset: -4px 0; }
+.res-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.res-top .big { font-size: 28px; font-weight: 700; color: var(--c-kon); font-variant-numeric: tabular-nums; }
+.forms { font-size: 13px; color: var(--c-ji-usui); margin: 4px 0 8px; }
+.wrow { display: flex; align-items: center; gap: 12px; min-height: 56px; border-top: 1px solid var(--c-sen); }
+.wrow .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--c-seg); overflow: hidden; }
+.wrow .bar i { display: block; height: 100%; background: var(--c-kon); }
+.wrow .n { font-size: 14px; min-width: 5em; text-align: right; font-variant-numeric: tabular-nums; }
+.drow { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--c-sen); }
+.drow .what { font-size: 15px; font-weight: 600; }
+.drow .sub2 { font-size: 13px; color: var(--c-ji-usui); }
+.drow .tiles { grid-column: 2; }
+.empty { color: var(--c-ji-usui); font-size: 14px; margin: 4px 0; }
