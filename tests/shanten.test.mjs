@@ -51,6 +51,9 @@ function run(L, quick) {
   const u = L.ukeire(C('23m67p123s456s11z2z'));
   ok(`受け入れ（${u && u.kinds}種 ${u && u.total}枚）`, !!u && u.shanten === 1 && u.kinds === 4 && u.total === 16);
 
+  // 手で4枚持つ牌は受け入れに数えない（1111m456p789s234z＝5枚目の1mでも式は1シャンテンに下がるが、引けない・11-20 taiketsu-naoshi の任意1）
+  const u4 = L.ukeire(C('1111m456p789s234z'));
+  ok(`4枚持ちの牌を受け入れに入れない（${u4 && u4.kinds}種・1m ${u4 && u4.tiles.some((t) => t.tile === 0)}）`, !!u4 && u4.shanten === 2 && !u4.tiles.some((t) => t.tile === 0) && u4.kinds === 5);
   if (quick) return bad.slice();
   // ① 清一色13枚の全部
   let hands = 0, tenpai = 0;

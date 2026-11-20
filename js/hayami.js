@@ -12,6 +12,10 @@ function cell(p) {
 const KEY = 'mj.hayami.v1';
 const st = Object.assign({ oya: 'ko', agari: 'ron', players: '4', tsumo3: 'son', kiriage: '0', kazoe: 'yakuman' },
   (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })());
+// 端末から戻した値を信じない：決まった字の外は既定に戻す（待ち読みと同じ守り・11-20）
+const ALLOWED = { oya: ['ko', 'oya'], agari: ['ron', 'tsumo'], players: ['4', '3'], tsumo3: ['son', 'secchan'], kiriage: ['0', '1'], kazoe: ['yakuman', 'sanbai'] };
+const DEF = { oya: 'ko', agari: 'ron', players: '4', tsumo3: 'son', kiriage: '0', kazoe: 'yakuman' };
+for (const k of Object.keys(ALLOWED)) if (!ALLOWED[k].includes(st[k])) st[k] = DEF[k];
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* 覚えられない端末でも表は出す */ } };
 const $ = (id) => document.getElementById(id);
 const rules = () => ({ players: +st.players, tsumo3: st.tsumo3, kiriage: st.kiriage === '1', kazoe: st.kazoe });
@@ -35,7 +39,7 @@ function render() {
   $('hy-main').innerHTML = h + '</tbody>';
   $('hy-main').classList.toggle('tsumo', tsumo);
   const n3 = R.players === 3;
-  $('hy-note').textContent = '色付き＝満貫。' + (R.kiriage ? '30符4翻・60符3翻は切り上げて満貫。' : '30符4翻・60符3翻を満貫に切り上げるかはルールで選ぶ。')
+  $('hy-note').textContent = '色付き＝満貫。' + (R.kiriage ? '30符4翻・60符3翻は切り上げて満貫。' : '30符4翻・60符3翻を満貫に切り上げるかはルール設定で選ぶ。')
     + (tsumo ? (oya ? '親ツモは子の1人ずつの払い（オール）。' : '子ツモは上が子の払い・下が親の払い。') : '')
     + (n3 && tsumo ? (R.tsumo3 === 'son' ? '3人のツモ損＝居ない人の分は払わない。' : '3人の折半＝4人の時の払いに、居ない人の払いの半分を足して100点に切り上げ。') : '');
   let L = '<thead><tr><th scope="col"></th><th scope="col">翻</th><th scope="col">子</th><th scope="col">親</th></tr></thead><tbody>';

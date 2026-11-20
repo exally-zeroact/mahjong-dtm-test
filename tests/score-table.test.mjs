@@ -46,51 +46,51 @@ const LIMIT = {
   // 8翻は上の 8 と同じ行・9翻もここで足した（5〜13翻の9段×11符×4＝396マス＋4翻以下176＝572）
 };
 
-function run(tables) {
+function run(tables, pts = points) {
   const bad = [];
   let n = 0;
   const eq = (what, got, want) => { n++; if (got !== want) bad.push(`${what}: 出た ${got} ／ 正 ${want}`); };
   const R4 = { players: 4 };
   const sets = [['子ロン', tables.KO_RON, false, false], ['親ロン', tables.OYA_RON, true, false], ['子ツモ', tables.KO_TSUMO, false, true], ['親ツモ', tables.OYA_TSUMO, true, true]];
   for (const [nm, tbl, oya, tsumo] of sets)
-    for (const fu of FU_LIST) for (let h = 1; h <= 4; h++) eq(`${nm} ${fu}符${h}翻`, label(points(h, fu, oya, tsumo, R4)), tbl[fu][h - 1]);
+    for (const fu of FU_LIST) for (let h = 1; h <= 4; h++) eq(`${nm} ${fu}符${h}翻`, label(pts(h, fu, oya, tsumo, R4)), tbl[fu][h - 1]);
   for (const h of Object.keys(tables.LIMIT).map(Number))
-    for (const fu of FU_LIST) sets.forEach(([nm, , oya, tsumo], i) => eq(`${nm} ${fu}符${h}翻`, label(points(h, fu, oya, tsumo, R4)), tables.LIMIT[h][i]));
+    for (const fu of FU_LIST) sets.forEach(([nm, , oya, tsumo], i) => eq(`${nm} ${fu}符${h}翻`, label(pts(h, fu, oya, tsumo, R4)), tables.LIMIT[h][i]));
   // 切り上げ満貫＝30符4翻・60符3翻だけ満貫になる（他は変わらない）
   const K = { players: 4, kiriage: true };
-  eq('切り上げ 子ロン30符4翻', label(points(4, 30, false, false, K)), '8,000');
-  eq('切り上げ 親ロン60符3翻', label(points(3, 60, true, false, K)), '12,000');
-  eq('切り上げ 子ツモ30符4翻', label(points(4, 30, false, true, K)), '2,000-4,000');
-  eq('切り上げ 親ツモ60符3翻', label(points(3, 60, true, true, K)), '4,000オール');
-  eq('切り上げ 子ロン50符3翻（変わらない）', label(points(3, 50, false, false, K)), '6,400');
-  eq('切り上げ 子ロン30符3翻（変わらない）', label(points(3, 30, false, false, K)), '3,900');
+  eq('切り上げ 子ロン30符4翻', label(pts(4, 30, false, false, K)), '8,000');
+  eq('切り上げ 親ロン60符3翻', label(pts(3, 60, true, false, K)), '12,000');
+  eq('切り上げ 子ツモ30符4翻', label(pts(4, 30, false, true, K)), '2,000-4,000');
+  eq('切り上げ 親ツモ60符3翻', label(pts(3, 60, true, true, K)), '4,000オール');
+  eq('切り上げ 子ロン50符3翻（変わらない）', label(pts(3, 50, false, false, K)), '6,400');
+  eq('切り上げ 子ロン30符3翻（変わらない）', label(pts(3, 30, false, false, K)), '3,900');
   // 数え：sanbai＝13翻も三倍満
-  eq('数え三倍満止め 子ロン13翻', label(points(13, 30, false, false, { players: 4, kazoe: 'sanbai' })), '24,000');
-  eq('数え役満 子ロン14翻', label(points(14, 30, false, false, R4)), '32,000');
+  eq('数え三倍満止め 子ロン13翻', label(pts(13, 30, false, false, { players: 4, kazoe: 'sanbai' })), '24,000');
+  eq('数え役満 子ロン14翻', label(pts(14, 30, false, false, R4)), '32,000');
   // 役満の役（翻と別）・ダブル役満
-  eq('役満 親ロン', label(points(0, 0, true, false, R4, 1)), '48,000');
-  eq('ダブル役満 子ツモ', label(points(0, 0, false, true, R4, 2)), '16,000-32,000');
+  eq('役満 親ロン', label(pts(0, 0, true, false, R4, 1)), '48,000');
+  eq('ダブル役満 子ツモ', label(pts(0, 0, false, true, R4, 2)), '16,000-32,000');
   // 3人：ツモ損＝1人の払いは4人と同じ・合計は1人分少ない／折半＝居ない人の分を2人で半分
   const S = { players: 3, tsumo3: 'son' }, H = { players: 3, tsumo3: 'secchan' };
-  eq('3人ツモ損 子ツモ30符1翻', label(points(1, 30, false, true, S)), '300-500');
-  eq('3人ツモ損 子ツモ30符1翻 合計', String(points(1, 30, false, true, S).total), '800');
-  eq('3人ツモ損 親ツモ満貫 合計', String(points(5, 30, true, true, S).total), '8000');
-  eq('3人ツモ損 子ロン満貫', label(points(5, 30, false, false, S)), '8,000');
+  eq('3人ツモ損 子ツモ30符1翻', label(pts(1, 30, false, true, S)), '300-500');
+  eq('3人ツモ損 子ツモ30符1翻 合計', String(pts(1, 30, false, true, S).total), '800');
+  eq('3人ツモ損 親ツモ満貫 合計', String(pts(5, 30, true, true, S).total), '8000');
+  eq('3人ツモ損 子ロン満貫', label(pts(5, 30, false, false, S)), '8,000');
   // 3人折半（北家折半・4人の払いに北家の払いの半分を足して100点に切り上げ）＝手で足した値
-  eq('3人折半 子ツモ30符1翻', label(points(1, 30, false, true, H)), '500-700');
-  eq('3人折半 子ツモ30符1翻 合計', String(points(1, 30, false, true, H).total), '1200');
-  eq('3人折半 子ツモ40符1翻', label(points(1, 40, false, true, H)), '600-900');
-  eq('3人折半 子ツモ30符2翻', label(points(2, 30, false, true, H)), '800-1,300');
-  eq('3人折半 子ツモ30符3翻', label(points(3, 30, false, true, H)), '1,500-2,500');
-  eq('3人折半 親ツモ30符1翻', label(points(1, 30, true, true, H)), '800オール');
-  eq('3人折半 親ツモ40符3翻', label(points(3, 40, true, true, H)), '3,900オール');
-  eq('3人折半 子ツモ満貫', label(points(5, 30, false, true, H)), '3,000-5,000');
-  eq('3人折半 子ツモ満貫 合計', String(points(5, 30, false, true, H).total), '8000');
-  eq('3人折半 親ツモ満貫', label(points(5, 30, true, true, H)), '6,000オール');
-  eq('3人折半 親ツモ30符2翻', label(points(2, 30, true, true, H)), '1,500オール');
+  eq('3人折半 子ツモ30符1翻', label(pts(1, 30, false, true, H)), '500-700');
+  eq('3人折半 子ツモ30符1翻 合計', String(pts(1, 30, false, true, H).total), '1200');
+  eq('3人折半 子ツモ40符1翻', label(pts(1, 40, false, true, H)), '600-900');
+  eq('3人折半 子ツモ30符2翻', label(pts(2, 30, false, true, H)), '800-1,300');
+  eq('3人折半 子ツモ30符3翻', label(pts(3, 30, false, true, H)), '1,500-2,500');
+  eq('3人折半 親ツモ30符1翻', label(pts(1, 30, true, true, H)), '800オール');
+  eq('3人折半 親ツモ40符3翻', label(pts(3, 40, true, true, H)), '3,900オール');
+  eq('3人折半 子ツモ満貫', label(pts(5, 30, false, true, H)), '3,000-5,000');
+  eq('3人折半 子ツモ満貫 合計', String(pts(5, 30, false, true, H).total), '8000');
+  eq('3人折半 親ツモ満貫', label(pts(5, 30, true, true, H)), '6,000オール');
+  eq('3人折半 親ツモ30符2翻', label(pts(2, 30, true, true, H)), '1,500オール');
   // 満貫以上の段の字
   eq('段 三倍満止めでも役の役満の段はある', limitRows({ kazoe: 'sanbai' }).map((r) => r.name).join(','), '満貫,跳満,倍満,三倍満,役満');
-  eq('段 三倍満止めの役満の段の点', label(points(0, 0, false, false, { players: 4, kazoe: 'sanbai' }, 1)), '32,000');
+  eq('段 三倍満止めの役満の段の点', label(pts(0, 0, false, false, { players: 4, kazoe: 'sanbai' }, 1)), '32,000');
   eq('段 ふつうは5段', String(limitRows({}).length), '5');
   return { n, bad };
 }
@@ -109,9 +109,16 @@ if (process.argv.includes('--self-test')) {
       if (run(copy).bad.length > 0) caught++;
     }
   }
-  console.log(`自己確認: ${caught}/${total}`); // CI は scripts/ci-yuka.sh で床 176 を見る
-  if (caught !== total || total !== 176) { console.log(`✗ 自己確認：壊した ${total} マスのうち 赤になったのは ${caught}`); process.exit(1); }
-  console.log(`✓ 自己確認：正解表を1マスずつ壊した ${total} 回とも赤になった`);
+  // 3人折半の行は正解表の外（手で足した値）＝式の側を壊して赤になるかも見る（11-20 taiketsu-naoshi の任意3）
+  const secchan = (r) => r && r.players === 3 && r.tsumo3 === 'secchan';
+  const brokenPts = [
+    (h, fu, oya, ts, r, y) => points(h, fu, oya, ts, secchan(r) ? { ...r, tsumo3: 'son' } : r, y), // 折半を払わない
+    (h, fu, oya, ts, r, y) => points(h, fu, oya, ts, secchan(r) ? { ...r, players: 4 } : r, y), // 3人を4人として払う
+  ];
+  for (const bp of brokenPts) { total++; if (run(T, bp).bad.some((x) => x.startsWith('3人折半'))) caught++; }
+  console.log(`自己確認: ${caught}/${total}`); // CI は scripts/ci-yuka.sh で床 178 を見る
+  if (caught !== total || total !== 178) { console.log(`✗ 自己確認：壊した ${total} マスのうち 赤になったのは ${caught}`); process.exit(1); }
+  console.log(`✓ 自己確認：正解表を1マスずつ壊した 176 回と、3人折半の式を壊した 2 回の ${total} 回とも赤になった`);
   process.exit(0);
 }
 

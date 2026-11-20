@@ -5,14 +5,15 @@
 :root {
   --c-ji: #1F2328;
   --c-ji-usui: #57606A;
-  --c-haikei: #F6F7F9;
+  --c-haikei: #F4F3EF; /* 地・切り替え・紺・満貫・表の頭は絵 mahjong_dougu_v153／home_v154 から測った色（11-20） */
   --c-men: #FFFFFF;
   --c-sen: #D0D7DE;
-  --c-kon: #14213D;
+  --c-kon: #24467A;
   --c-kon-ji: #FFFFFF;
   --c-kin: #B8860B;
-  --c-man: #F6E3D3;
-  --c-seg: #E9EBEF;
+  --c-man: #F8EBDD;
+  --c-seg: #E9E7E0;
+  --c-men-usui: #FAF9F6;
   --c-kage: rgba(0,0,0,.12);
   /* 牌の絵（js/tile-svg.mjs・見本 v11.1 の色） */
   --t-men: #FFFDF5;
@@ -41,14 +42,15 @@ body {
   display: flex; align-items: center; gap: 12px;
   min-height: 52px;
   padding: env(safe-area-inset-top) 16px 0;
-  background: var(--c-kon); color: var(--c-kon-ji);
+  background: var(--c-haikei); color: var(--c-ji);
 }
-.appbar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+/* 絵（dougu_v153・home_v154）の見出し＝地と同じ明るさ・左に‹戻る（紺）・題は真ん中 */
+.appbar h1 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 17px; font-weight: 700; white-space: nowrap; }
 .back {
   position: relative;
   display: inline-flex; align-items: center;
   min-height: 36px; font-size: 14px;
-  color: var(--c-kon-ji); text-decoration: none;
+  color: var(--c-kon); text-decoration: none;
 }
 .back::after { content: ""; position: absolute; inset: -4px -8px; }
 main { padding: 16px; max-width: 640px; margin: 0 auto; }
@@ -70,11 +72,12 @@ main { padding: 16px; max-width: 640px; margin: 0 auto; }
   flex: 1; min-height: 44px; font: inherit; font-size: 16px; font-weight: 600;
   border: 0; border-radius: 8px; background: transparent; color: var(--c-ji-usui);
 }
-.seg button[aria-pressed="true"] { background: var(--c-men); color: var(--c-kon); box-shadow: 0 1px 3px var(--c-kage); }
+.seg button[aria-pressed="true"] { background: var(--c-men); color: var(--c-ji); box-shadow: 0 1px 3px var(--c-kage); }
 .card { background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
 .hy { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 15px; }
 .hy th, .hy td { padding: 0 6px; height: 44px; text-align: right; border-bottom: 1px solid var(--c-sen); white-space: nowrap; }
 .hy th { color: var(--c-ji-usui); font-weight: 600; font-size: 14px; }
+.hy thead th { background: var(--c-men-usui); }
 .hy th:first-child, .hy td:first-child { text-align: left; }
 .hy tbody tr:last-child > * { border-bottom: 0; }
 .hy .two { display: inline-block; line-height: 1.25; padding: 4px 0; }
@@ -109,3 +112,4 @@ details.card > summary { min-height: 44px; display: flex; align-items: center; f
 .drow .sub2 { font-size: 13px; color: var(--c-ji-usui); }
 .drow .tiles { grid-column: 2; }
 .empty { color: var(--c-ji-usui); font-size: 14px; margin: 4px 0; }
+.sec-h { margin: 0 0 8px; font-size: 14px; color: var(--c-ji-usui); font-weight: 600; }

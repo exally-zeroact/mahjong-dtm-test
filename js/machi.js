@@ -9,6 +9,18 @@ import { tileSVG } from './tile-svg.mjs';
 const KEY = 'mj.machi.v1';
 const st = Object.assign({ mode: '13', target: 'hand', players: '4', hand: [], seen: [] },
   (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })());
+// 端末から戻した物を信じない：知らない字・1種5枚目・枚数の越えを落とす（11-20 taiketsu-naoshi の任意4）
+(() => {
+  if (!['13', '14'].includes(st.mode)) st.mode = '13';
+  if (!['hand', 'seen'].includes(st.target)) st.target = 'hand';
+  if (!['3', '4'].includes(st.players)) st.players = '4';
+  const n = new Array(34).fill(0);
+  const idx = (c) => { try { return typeof c === 'string' ? codeToIndex(c) : -1; } catch { return -1; } }; // codeToIndex は知らない字で投げる
+  const ok = (c) => { const i = idx(c); if (!(i >= 0 && i < 34) || n[i] >= 4 || !exists(i, +st.players)) return false; n[i]++; return true; };
+  st.hand = (Array.isArray(st.hand) ? st.hand : []).filter(ok).slice(0, +st.mode);
+  n.fill(0); for (const c of st.hand) n[idx(c)]++; // 切って落とした手牌を見えている牌の数に残さない（11-20 taiketsu 任意2）
+  st.seen = (Array.isArray(st.seen) ? st.seen : []).filter(ok);
+})();
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* 覚えられなくても動く */ } };
 const $ = (id) => document.getElementById(id);
 const KB = ['1m', '2m', '3m', '4m', '5m', '6m', '7m', '8m', '9m', '1p', '2p', '3p', '4p', '5p', '6p', '7p', '8p', '9p',
@@ -34,8 +46,10 @@ function resultHTML() {
     const s = r.shanten;
     const forms = `一般形 ${sh(s.normal)}・七対子 ${sh(s.chiitoi)}・国士 ${sh(s.kokushi)}`;
     if (s.best === 0) {
-      let h = `<div class="res-top"><span>聴牌（0シャンテン）</span><span class="big">${r.waits.length}種 ${r.waitTotal}枚</span></div><p class="forms">${forms}</p>`;
+      let h = `<div class="res-top"><span>聴牌（0シャンテン）</span><span class="big">${r.waits.length}種 ${r.waitTotal}枚</span></div>`; // 絵 v153＝聴牌の時は形の内訳を出さない
       for (const w of r.waits) h += `<div class="wrow">${T(w.tile, 32)}<span class="bar"><i style="width:${w.left * 25}%"></i></span><span class="n">残り ${w.left}枚</span></div>`;
+      h += '<p class="note">残り＝4枚 − 手の中の数 − 見えている牌。</p>';
+      if (r.waits.some((w) => c[w.tile] >= 4)) h += '<p class="note">残り0枚の待ちは、その牌を手で4枚使っています（純空）。和了の形ではあっても、引く事はできません。</p>';
       return h;
     }
     const u = r.ukeire.best;
