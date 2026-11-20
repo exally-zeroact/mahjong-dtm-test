@@ -66,6 +66,8 @@ jobs:
         run: node tests/needs-order.test.mjs
       - name: よくあるパスの名簿（schema.sql の種）と lib/common-pass.mjs が同じか・パスのそろえと形の確かめ（入口 mj_room_create は room-create.live.mjs＝手元）
         run: node tests/common-pass.test.mjs
+      - name: 部屋の URL の token の形と hash の式（lib/url-token.mjs＝端末と試験が使う1本・倉庫と同じかは room-join.live.mjs＝手元）
+        run: node tests/url-token.test.mjs
 
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
