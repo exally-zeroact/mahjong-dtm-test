@@ -8,12 +8,19 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="theme-color" content="#14213D">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/gamen.css">
 <script src="js/supa-config.js"></script>
 <script src="js/env-badge.js"></script>
+<script src="vendor/supabase-2.112.4.js"></script>
+<script src="js/exally-login.js"></script>
 </head>
 <body>
-<header class="appbar"><h1>麻雀〜do the math〜</h1></header>
+<header class="appbar"><h1>麻雀〜do the math〜</h1><span class="appbar-r" id="acct"></span></header>
 <main>
+<section id="tsuzuki" class="tsuzuki" hidden>
+  <h2 class="midashi">続きの部屋</h2>
+  <div id="tsuzukiList" class="list"></div>
+</section>
 <nav class="home">
   <a class="btn btn-big" href="taikyoku.html">対局</a>
   <a class="btn" href="senseki.html">戦績</a>
@@ -22,5 +29,6 @@
   <a class="btn" href="league.html">リーグ</a>
 </nav>
 </main>
+<script type="module" src="js/gamen-home.mjs"></script>
 </body>
 </html>

@@ -4,17 +4,119 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>対局｜麻雀〜do the math〜</title>
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!-- ★/r/<token> からも開く（vercel.json の書き換え）＝素材は全部 / から書く★ -->
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="theme-color" content="#14213D">
-<link rel="stylesheet" href="css/app.css">
-<script src="js/supa-config.js"></script>
-<script src="js/env-badge.js"></script>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/gamen.css">
+<script src="/js/supa-config.js"></script>
+<script src="/js/env-badge.js"></script>
+<script src="/vendor/supabase-2.112.4.js"></script>
+<script src="/vendor/qrcode-generator.js"></script>
+<script src="/js/exally-login.js"></script>
 </head>
 <body>
-<header class="appbar"><a class="back" href="index.html">‹ ホーム</a><h1>対局</h1></header>
+<header class="appbar"><a class="back" href="/index.html">‹ ホーム</a><h1 id="title">対局</h1></header>
 <main>
-<p class="soon">準備中</p>
+<div id="obi" class="obi" hidden></div>
+
+<!-- ログインを待つ -->
+<section id="vLogin" class="view" hidden>
+  <p class="setsumei">対局の部屋はアカウントごとに残ります。ログインしてください。</p>
+  <button class="btn btn-main" type="button" id="btnLogin">ログイン・新規登録</button>
+</section>
+
+<!-- 作るか入るか -->
+<section id="vChoose" class="view" hidden>
+  <button class="btn btn-big" type="button" id="goCreate">部屋を作る</button>
+  <button class="btn" type="button" id="goJoin">部屋に入る（部屋番号とパス）</button>
+  <p class="setsumei">URL をもらった人は、その URL を開くだけで入れます。</p>
+</section>
+
+<!-- 部屋を作る＝名前・パス・ルール（設計図 §2 ルール設定） -->
+<section id="vCreate" class="view" hidden>
+  <h2 class="midashi">部屋を作る</h2>
+  <label class="field"><span>部屋の名前</span><input id="cName" maxlength="40" autocomplete="off" placeholder="例 木曜の会"></label>
+  <label class="field"><span>パス（4字以上・入る人に口で伝える）</span><input id="cPass" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+
+  <h3 class="komidashi">ルール</h3>
+  <div class="field"><span>人数</span>
+    <div class="seg" role="radiogroup" id="cPlayers">
+      <button type="button" role="radio" data-v="4" aria-checked="true">4人</button>
+      <button type="button" role="radio" data-v="3" aria-checked="false">3人</button>
+    </div>
+  </div>
+  <div class="field"><span>レート（1pt＝何点）</span>
+    <div class="chips" id="cRateChips">
+      <button type="button" data-v="">なし</button><button type="button" data-v="50">50</button><button type="button" data-v="100">100</button><button type="button" data-v="200">200</button><button type="button" data-v="500">500</button>
+    </div>
+    <input id="cRate" inputmode="numeric" placeholder="10の倍数（10〜100,000）・空＝なし">
+  </div>
+  <div class="row2">
+    <label class="field"><span>持ち点</span><input id="cStart" inputmode="numeric"></label>
+    <label class="field"><span>返し</span><input id="cReturn" inputmode="numeric"></label>
+  </div>
+  <div class="field"><span>ウマ（1位から）</span><div class="uma" id="cUma"></div></div>
+  <div class="field"><span>飛び賞</span>
+    <div class="seg" role="radiogroup" id="cTobi">
+      <button type="button" role="radio" data-v="1" aria-checked="true">あり</button>
+      <button type="button" role="radio" data-v="0" aria-checked="false">なし</button>
+    </div>
+    <label class="inline" id="cTobiPtBox"><input id="cTobiPt" inputmode="numeric"> pt</label>
+  </div>
+  <div class="field"><span>チップ</span>
+    <div class="seg" role="radiogroup" id="cChip">
+      <button type="button" role="radio" data-v="0" aria-checked="true">いらん</button>
+      <button type="button" role="radio" data-v="1" aria-checked="false">いる</button>
+    </div>
+    <label class="inline" id="cChipPtBox" hidden>1枚＝<input id="cChipPt" inputmode="decimal" value="1"> pt</label>
+  </div>
+  <div class="field"><span>祝儀</span>
+    <div class="seg" role="radiogroup" id="cShugi">
+      <button type="button" role="radio" data-v="0" aria-checked="true">いらん</button>
+      <button type="button" role="radio" data-v="1" aria-checked="false">いる</button>
+    </div>
+    <label class="inline" id="cShugiPtBox" hidden>1枚＝<input id="cShugiPt" inputmode="decimal" value="1"> pt</label>
+  </div>
+  <div class="err" id="cErr"></div>
+  <button class="btn btn-main" type="button" id="btnCreate">この設定で部屋を作る</button>
+  <button class="btn btn-sub" type="button" data-back>やめる</button>
+</section>
+
+<!-- 作った＝部屋番号・パス・URL・QR -->
+<section id="vMade" class="view" hidden>
+  <h2 class="midashi">部屋ができました</h2>
+  <dl class="made">
+    <dt>部屋番号</dt><dd id="mNo" class="big-no"></dd>
+    <dt>パス</dt><dd id="mPass"></dd>
+    <dt>URL</dt><dd><span id="mUrl" class="url"></span></dd>
+  </dl>
+  <div class="qr" id="mQr"></div>
+  <button class="btn" type="button" id="btnCopy">URL を写す（LINE に貼る）</button>
+  <button class="btn btn-main" type="button" id="btnToRoom">対局へ</button>
+</section>
+
+<!-- 部屋に入る（番号＋パス） -->
+<section id="vJoin" class="view" hidden>
+  <h2 class="midashi">部屋に入る</h2>
+  <label class="field"><span>部屋番号（8桁）</span><input id="jNo" inputmode="numeric" maxlength="9" autocomplete="off"></label>
+  <label class="field"><span>パス</span><input id="jPass" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+  <div class="err" id="jErr"></div>
+  <button class="btn btn-main" type="button" id="btnJoin">入る</button>
+  <button class="btn btn-sub" type="button" data-back>やめる</button>
+</section>
+
+<!-- URL で入っている途中 -->
+<section id="vUrlJoin" class="view" hidden>
+  <p id="uMsg">部屋に入っています…</p>
+  <div class="err" id="uErr"></div>
+  <button class="btn" type="button" id="btnUrlRetry" hidden>もう一度</button>
+</section>
+
+<!-- 部屋の中（対局の1ページ）＝js/gamen-taikyoku-room.mjs -->
+<section id="vRoom" class="view" hidden></section>
 </main>
+<script type="module" src="/js/gamen-taikyoku.mjs"></script>
 </body>
 </html>

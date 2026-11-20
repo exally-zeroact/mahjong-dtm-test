@@ -26,6 +26,9 @@
   --t-kuro: #1A1A1A;
   --t-kuchibashi: #D9A21B;
   --t-haku: #7FA7D6;
+  --c-aka: #B42318;
+  --c-aka-usui: #FEF3F2;
+  --c-midori: #067647;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
