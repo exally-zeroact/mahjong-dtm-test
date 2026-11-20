@@ -65,7 +65,7 @@
     {"id": "extra_add の席にいない人の 1000 は range（人が部屋に在れば先に add の範囲）", "rules": "tane", "ops": [{"op": "extra_add", "table_id": "t1", "member_id": "m5", "kind": "chip", "add": 1000}], "want": "range"},
     { "id": "extra_add の取り消した半荘だけの人は bad", "rules": "tane", "ops": [{ "op": "hanchan_void", "hanchan_id": "h1" }, { "op": "extra_add", "table_id": "t1", "member_id": "m1", "kind": "chip", "add": 1 }], "want": "bad" },
     { "id": "extra_add の種が chip・shugi 以外は bad", "rules": "top", "ops": [{ "op": "extra_add", "table_id": "t1", "member_id": "m1", "kind": "x", "add": 1 }], "want": "bad" },
-    { "id": "extra_set は12個に無い＝bad", "rules": "top", "ops": [{ "op": "extra_set", "table_id": "t1", "member_id": "m1", "kind": "chip", "value": 1, "base_version": 1 }], "want": "bad", "want_db": "not_yet" },
+    { "id": "extra_set は12個に無い＝bad", "rules": "top", "ops": [{ "op": "extra_set", "table_id": "t1", "member_id": "m1", "kind": "chip", "value": 1, "base_version": 1 }], "want": "bad", "want_db": "bad" },
     { "id": "table_add の label 20字は通る", "rules": "top", "ops": [{ "op": "table_add", "table_id": "t2", "session_id": "s1", "label": "あいうえおかきくけこさしすせそたちつてと" }], "want": "ok" },
     { "id": "table_add の label 21字は bad", "rules": "top", "ops": [{ "op": "table_add", "table_id": "t2", "session_id": "s1", "label": "あいうえおかきくけこさしすせそたちつてとな" }], "want": "bad" },
     { "id": "table_add の label 空は bad", "rules": "top", "ops": [{ "op": "table_add", "table_id": "t2", "session_id": "s1", "label": "" }], "want": "bad" },
