@@ -119,6 +119,15 @@ jobs:
           node tests/shanten.test.mjs --self-test | tee shanten-self.out
           sh scripts/ci-yuka.sh shanten-self.out 3
 
+      # ── 端末に控える（sw.js・js/sw-reg.js・scripts/sw-assets.mjs）
+      - name: 端末の控え（sw.js）＝名簿の道と sha が今の中身と同じ・VER と version.json・全画面に sw-reg の1行・/v/ と素の道・install の失敗で控えを残さない・取り直しは1本・supa-config の3秒
+        run: node tests/sw.test.mjs
+      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json を24か所壊して全部赤になるか）
+        shell: bash
+        run: |
+          node tests/sw.test.mjs --self-test | tee sw-self.out
+          sh scripts/ci-yuka.sh sw-self.out 24
+
       # ── 計算の道具の画面（早見表・待ち読み）を本物の WebKit で押す ──────
       #   playwright は package.json に入れない（Vercel が devDependencies を入れる）＝ここで --no-save で入れる
       - name: 画面の試験の道具を入れる（playwright 1.60.0 と WebKit）
@@ -134,6 +143,15 @@ jobs:
         run: |
           node tests/e2e/keisan.e2e.mjs --self-test | tee e2e-self.out
           sh scripts/ci-yuka.sh e2e-self.out 35
+      - name: 端末の控えを本物の SW で（webkit・初めての claim・ネット無しで開く・/r/・版上げの帯・押した1枚だけ読み直す・入れ替えた直後に進んでも1つの版・start_url は素の道）
+        timeout-minutes: 10
+        run: node tests/e2e/sw.e2e.mjs
+      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を8か所壊して全部赤になるか・作業木は触らない）
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
+          sh scripts/ci-yuka.sh sw-e2e-self.out 8
 
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。

@@ -119,6 +119,13 @@ details.card > summary { min-height: 44px; display: flex; align-items: center; f
 .empty { color: var(--c-ji-usui); font-size: 14px; margin: 4px 0; }
 .sec-h { margin: 0 0 8px; font-size: 14px; color: var(--c-ji-usui); font-weight: 600; }
 
+/* ── 件3 PWA の帯（js/sw-reg.js）＝画面の下・ボタン 16px 字→44 ── */
+.mj-swband { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 1000; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--c-kon); color: var(--c-kon-ji); font-size: 16px; box-shadow: 0 2px 8px var(--c-kage); }
+.mj-swband[hidden] { display: none; }
+.mj-swband > span { flex: 1; }
+.mj-swband-btn { min-height: 44px; padding: 0 16px; font: inherit; font-size: 16px; font-weight: 600; border: 0; border-radius: 8px; background: var(--c-kin); color: var(--c-kon); }
+.mj-swband-btn[hidden] { display: none; }
+
 /* ── 点数計算（tensu.html・絵 dougu_v153 ①）── 押す所は字 16px→44・14px→36（11-19 の決め）・★body.tensu の時だけ効かせる（対局の gamen.css の .chips 等を変えない・11-20 taiketsu 止め2）★ */
 body.tensu .obi { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--c-man); color: var(--c-ji); font-size: 14px; }
 body.tensu .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; align-items: center; }

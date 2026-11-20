@@ -30,7 +30,9 @@ const srv = http.createServer((q, r) => {
   if (!f.startsWith(ROOT)) { r.writeHead(403); r.end(); return; }
   fs.readFile(f, (e, d) => {
     if (e) { r.writeHead(404); r.end(); return; }
-    if (mutate && rel === mutate.file) d = Buffer.from(d.toString('utf8').replace(/\r\n/g, '\n').split(mutate.from).join(mutate.to));
+    // 字のファイルは LF にそろえて配る（repo・Vercel・CI と同じ中身＝sw.js の名簿の sha が合い、手元でも SW が効く・件3）
+    if (!/\.(png|ico|jpe?g|webp|woff2?)$/i.test(rel)) d = Buffer.from(d.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+    if (mutate && rel === mutate.file) d =Buffer.from(d.toString('utf8').replace(/\r\n/g, '\n').split(mutate.from).join(mutate.to));
     r.writeHead(200, { 'content-type': MT[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-store' });
     r.end(d);
   });
