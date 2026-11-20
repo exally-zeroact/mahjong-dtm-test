@@ -171,11 +171,22 @@ async function openRoom(roomId) {
   const room = myRooms(me.id).find((x) => x.room_id === roomId);
   if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋番号とパスか URL で入ってください。', 'warn'); return; }
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
-  $('title').textContent = room.name || '対局';
   obi('');
   show('vRoom');
   const m = await import('./gamen-room.mjs');
-  m.mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null) });
+  m.mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null), bar });
+}
+
+/* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま */
+function bar({ back = 'ホーム', onBack, title = '', right, onRight } = {}) {
+  const b = $('barBack');
+  b.textContent = '‹ ' + back;
+  b.onclick = onBack ? (ev) => { ev.preventDefault(); onBack(); } : null;
+  $('title').textContent = title;
+  const r = $('barR');
+  r.hidden = !right;
+  r.textContent = right || '';
+  r.onclick = right && onRight ? onRight : null;
 }
 
 /* ── 始め ── */
