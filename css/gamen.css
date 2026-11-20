@@ -1,0 +1,51 @@
+/* gamen.css — ログイン・部屋を作る／入る・対局の画面の型（麻雀-画面）
+ * 色は css/app.css の :root の変数だけを使う（ここに色の字を書かない）。
+ * ボタンの高さは字に合わせる：16px→44・14px→36（押せる広さが足りない時は見えない ::after）。
+ * 入力欄は 16px（iOS が拡大しない大きさ）。
+ */
+.view { display: flex; flex-direction: column; gap: 12px; }
+.view[hidden], .obi[hidden], [hidden] { display: none !important; }
+.midashi { margin: 4px 0 0; font-size: 20px; font-weight: 700; }
+.komidashi { margin: 8px 0 0; font-size: 17px; font-weight: 600; }
+.setsumei { margin: 0; color: var(--c-ji-usui); font-size: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { font-size: 14px; color: var(--c-ji-usui); }
+.field input, .inline input, .uma input {
+  min-height: 44px; padding: 0 12px; font-size: 16px;
+  border: 1px solid var(--c-sen); border-radius: 10px; background: var(--c-men); color: var(--c-ji);
+}
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.uma { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.uma label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--c-ji-usui); }
+.uma input { width: 100%; text-align: center; }
+.inline { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.inline input { width: 96px; text-align: right; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button, .btn-s {
+  position: relative; min-height: 36px; padding: 0 14px; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--c-sen); border-radius: 18px; background: var(--c-men); color: var(--c-kon);
+}
+.chips button::after, .btn-s::after { content: ""; position: absolute; inset: -4px 0; }
+.btn-on-kon { background: transparent; color: var(--c-kon-ji); border-color: var(--c-kon-ji); }
+.appbar-r { margin-left: auto; }
+.btn-main { background: var(--c-kon); color: var(--c-kon-ji); border-color: var(--c-kon); }
+.btn-sub { background: transparent; border-color: transparent; color: var(--c-ji-usui); font-weight: 400; }
+.btn:disabled, .btn[aria-busy="true"] { opacity: .5; }
+.btn-row { justify-content: space-between; }
+.row-name { font-weight: 600; }
+.row-sub { font-size: 14px; font-weight: 400; color: var(--c-ji-usui); }
+.tsuzuki { margin-bottom: 16px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.err { min-height: 0; color: var(--c-aka); font-size: 14px; }
+.err:empty { display: none; }
+.obi { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--c-men); border: 1px solid var(--c-sen); }
+.obi-warn, .obi-err { background: var(--c-aka-usui); border-color: var(--c-aka); color: var(--c-aka); }
+.made { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.made dt { color: var(--c-ji-usui); font-size: 14px; align-self: center; }
+.made dd { margin: 0; font-size: 17px; }
+.big-no { font-size: 28px !important; font-weight: 700; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
+.url { word-break: break-all; font-size: 14px; }
+.qr { width: 200px; max-width: 60vw; align-self: center; }
+.qr svg { display: block; width: 100%; height: auto; }
+.qr-bg { fill: var(--c-men); }
+.qr-fg { fill: var(--c-ji); }
