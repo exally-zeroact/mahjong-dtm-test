@@ -10,7 +10,7 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, tobiSetOp, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, tobiSetOp, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
@@ -403,24 +403,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     toRoom();
   }
 
+  // 精算の数は lib の sessionBreakdown（S2 v1.1 止め4＝取り消していない・レートのある卓だけ・卓ごとのレートは kei で分ける）
   function seisanData() {
     const sid = table.session_id;
-    const s = sessionSeisan(st, sid);
-    const views = st.tables.filter((t) => t.session_id === sid).map((t) => tableView(st, t.table_id));
-    const by = {}; const order = [];
-    let count = 0;
-    for (const v of views) {
-      count += v.rows.filter((r) => !r.voided).length;
-      for (const w of v.windows) {
-        if (!by[w.member_id]) { by[w.member_id] = { han: 0, n: 0, chip: 0, chip10: 0, shugi: 0, shugi10: 0 }; order.push(w.member_id); }
-        const b = by[w.member_id];
-        b.han += w.hanPt10; b.n += v.rows.filter((r) => r.ok && r.by[w.member_id]).length;
-        if (v.extrasOk) { b.chip += w.chip; b.chip10 += w.chipPt10; b.shugi += w.shugi; b.shugi10 += w.shugiPt10; }
-      }
-    }
-    const used = { chip: views.some((v) => v.used.chip && v.extrasOk), shugi: views.some((v) => v.used.shugi && v.extrasOk) };
-    return { sid, s, views, by, order, count, used, rate: views.length ? views[0].rate : null };
+    return { ...sessionBreakdown(st, sid), s: sessionSeisan(st, sid) };
   }
+  const ratesText = (rates) => (rates.length > 1 ? 'レートは卓ごと' : rateText(rates.length ? rates[0] : null));
+  const keiText = (kei) => Object.keys(kei).map(Number).sort((a, b) => a - b).map((r) => fmtPt(kei[r]) + 'pt × ' + r.toLocaleString('ja-JP')).join(' ＋ ');
   function missingText(m, many) {
     const pre = many ? '卓' + m.table + '：' : '';
     if (m.no) {
@@ -434,11 +423,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function renderSeisan() {
     bar({ back: '対局', onBack: toRoom, title: '精算' });
     const d = seisanData(), s = d.s;
-    const top = '<div class="r-top"><span>' + esc(md(st.sessions.find((x) => x.session_id === d.sid).date)) + '・' + rateText(d.rate) + '・半荘' + d.count + '回</span>' + liveTag() + '</div>';
-    if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>精算を出せません（' + esc(s.err) + '）</b></div>'; return; }
+    const top = '<div class="r-top"><span>' + (d.date ? esc(md(d.date)) + '・' : '') + ratesText(d.rates) + '・半荘' + d.count + '回</span>' + liveTag() + '</div>';
+    if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; return; }
     const settles = st.settles.filter((x) => x.session_id === d.sid);
     const last = settles[settles.length - 1];
-    const changed = last ? d.order.filter((m) => (last.content.ten[m] || 0) !== (s.ten[m] || 0)) : [];
+    const changed = last ? tenChanged(last.content.ten, s.ten) : []; // 鍵を合わせて比べる（取り消した卓にだけ居た人も漏らさない・S2 v1.1 止め2）
     let h = top;
     if (last) h += '<div class="r-white">' + hm(last.at) + ' にこの対局を終えました</div>';
     if (last && changed.length && !viewSnap) {
@@ -450,7 +439,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     }
     const pay = viewSnap && last ? last.content.pay : s.pay;
     const ten = viewSnap && last ? last.content.ten : s.ten;
-    const many = d.views.length > 1;
+    const many = d.tables > 1;
     if (!viewSnap) {
       if (s.missing.length) h += '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>';
       else if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + '</p>';
@@ -461,15 +450,17 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       if (pay.length) h += '<div class="list">' + pay.map((x) => '<div class="li r-pay"><span class="minus b">' + esc(s.name(x.from)) + '</span><span class="plus b r-pay-to">→ ' + esc(s.name(x.to)) + '</span><span class="r-pay-n">' + x.ten.toLocaleString('ja-JP') + '</span></div>').join('') + '</div>';
       else h += '<p class="setsumei">払う人はいません。</p>';
       h += '<p class="sec">1人ずつ（' + (s.missing.length ? 'そろった分の pt だけ' : '点＝pt × レート') + '）</p>';
-      for (const m of d.order) {
+      // 札は今の並び＋点にだけ在る人（終えた時にだけ居た人も札を出す）・内訳の無い人は名前と額だけ
+      for (const m of d.order.concat(Object.keys(ten).filter((k) => !d.order.includes(k)))) {
         if (ten[m] === undefined) continue;
         const b = d.by[m];
+        if (!b) { h += '<div class="r-card"><div class="r-card-top"><span class="r-w-name">' + esc(s.name(m)) + '</span><span class="r-card-big ' + sign(ten[m]) + '">' + fmt(ten[m]) + '</span></div></div>'; continue; }
         const parts = ['半荘 ' + b.n + '回 ' + fmtPt(b.han)];
         if (d.used.chip) parts.push('チップ ' + fmtCnt(b.chip) + '枚 ' + fmtPt(b.chip10));
         if (d.used.shugi) parts.push('祝儀 ' + fmtCnt(b.shugi) + '枚 ' + fmtPt(b.shugi10));
         const total10 = b.han + b.chip10 + b.shugi10;
         h += '<div class="r-card"><div class="r-card-top"><span class="r-w-name">' + esc(s.name(m)) + '</span><span class="r-card-big ' + sign(ten[m]) + '">' + fmt(ten[m]) + '</span></div>' +
-          '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + fmtPt(total10) + 'pt × ' + (d.rate || 0).toLocaleString('ja-JP') + '</div></div>';
+          '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
       }
     }
     const nr = Object.entries(s.pt10NoRate || {});
@@ -490,10 +481,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       if (s.missing.length) return;
       // §3 settle_snap：content（精算の中身）・used（使った版）・missing（入っていない物の一覧）。at は倉庫の now()
       const ss = st.sessions.find((x) => x.session_id === d.sid);
-      const tabs = st.tables.filter((t) => t.session_id === d.sid);
+      // 使った版（S2 v1.1 D'）＝取り消していない卓だけ・卓は実際に使ったレート（倉庫は used の中身を見ない）
+      const tabs = st.tables.filter((t) => t.session_id === d.sid && !t.voided);
       const used = {
-        session: { session_id: d.sid, date: ss.date, rate: ss.rate, version: 1 },
-        tables: tabs.map((t) => ({ table_id: t.table_id, rate: null, rate_mode: 'session', version: 1 })),
+        session: { session_id: d.sid, date: ss.date, rate: ss.rate, version: ss.version ?? 1 },
+        tables: tabs.map((t) => ({ table_id: t.table_id, rate_mode: rateModeOf(t), rate: tableRate(t, ss), version: t.version ?? 1 })),
         hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version })),
       };
       const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, content: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, sig: sessionSig(st, d.sid) }, used, missing: s.missing }]);

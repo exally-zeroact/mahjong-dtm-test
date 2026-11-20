@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
-  migrateState, tobiSetOp, roomGate, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
+  migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
 } from '../lib/room-state.mjs';
 import { defaultRules, rulesOk } from '../lib/rules.mjs';
 
@@ -423,6 +423,62 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, yakitori_to: 'each' } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
+}
+
+console.log('■ S2 卓のレート・取り消した卓・終えた後の比べ・精算の内訳（s2_seisan_rate_v1.md v1.1）');
+{
+  const C = [40000, 30000, 20000, 10000];
+  const more = ['m5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12'].map((m) => ({ op: 'member_add', member_id: m, name: '人' + m }));
+  const hsT = (id, tid, seats, cells) => ({ op: 'hanchan_start', hanchan_id: id, table_id: tid, seats, cells });
+  const S2 = ['m5', 'm6', 'm7', 'm8'], S3 = ['m9', 'm10', 'm11', 'm12'];
+  const mk = (extra = []) => { const r = applyOps(base(), [...more,
+    { op: 'table_add', table_id: 't2', session_id: 's1', label: '卓2' }, { op: 'table_add', table_id: 't3', session_id: 's1', label: '卓3' },
+    hsT('h1', 't1', SEATS, C), hsT('h2', 't2', S2, C), hsT('h3', 't3', S3, C), ...extra]); if (!r.ok) throw new Error('S2 の写し：' + J(r.res)); return r.state; };
+  const st = mk();
+  const T = (x, id) => x.tables.find((y) => y.table_id === id);
+  T(st, 't2').rate_mode = 'num'; T(st, 't2').rate = 50; T(st, 't3').rate_mode = 'none'; T(st, 't3').rate = null;
+  ok('写しの半荘3つはそろっている', ['t1', 't2', 't3'].every((id) => tableView(st, id).rows[0].ok));
+  ok('門：鍵の在る正しい値（num 50・none null）は ok', roomGate(st).mode === 'ok');
+  ok('①num の卓は卓の rate・③session は開催の rate・②none は null', tableView(st, 't2').rate === 50 && tableView(st, 't1').rate === 100 && tableView(st, 't3').rate === null);
+  ok('⑤rate_mode の鍵が無い卓＝session（今の写し）', tableRate({ table_id: 'x' }, { rate: 30 }) === 30 && tableRate({ table_id: 'x' }, null) === null);
+  ok('開催が取り消しでも session の卓は開催の rate（倉庫と同じ）', tableRate({}, { rate: 70, voided: true }) === 70);
+  const s = sessionSeisan(st, 's1'), bd = sessionBreakdown(st, 's1');
+  ok('②none の卓は noRateTables に番号3・その人は点に無く pt10NoRate に在る', J(s.noRateTables) === J([3]) && s.ten.m9 === undefined && s.pt10NoRate.m9 !== undefined && !bd.by.m9);
+  ok('④前：卓ごとの点＝t2 の人は pt10×50/10', s.ten.m5 === s.pt10.m5 * 5 && s.ten.m1 === s.pt10.m1 * 10);
+  ok('止め4：全員 Σ kei[r]×r/10 ＝ 精算の点', Object.keys(s.ten).every((m) => Object.entries(bd.by[m].kei).reduce((a, [r, v]) => a + v * Number(r) / 10, 0) === s.ten[m]), J(bd.by));
+  ok('止め4：rates は数えた卓のレート（小さい順）・回数は3卓とも', J(bd.rates) === J([50, 100]) && bd.count === 3 && bd.tables === 3);
+  // ④取り消した卓は精算・未入力・レートなしに入らず、番号はずれない（卓1＝取り消した卓・卓2＝未入力の卓）
+  const sv = mk([hsT('h2b', 't2', S2, [40000, 30000, 20000, 9000])]);
+  T(sv, 't1').voided = true; T(sv, 't3').rate_mode = 'none'; T(sv, 't3').voided = true;
+  const s4 = sessionSeisan(sv, 's1'), b4 = sessionBreakdown(sv, 's1');
+  ok('④取り消した卓の人は点に無い・内訳にも無い', s4.ok && s4.ten.m1 === undefined && s4.pt10.m1 === undefined && !b4.by.m1, J(s4.ten));
+  ok('④未入力は卓2 のまま（番号がずれない）', s4.missing.length === 1 && s4.missing[0].table === 2, J(s4.missing));
+  ok('④取り消した none の卓は noRateTables に入らない・数える卓は1つ', J(s4.noRateTables) === J([]) && b4.tables === 1 && b4.count === 2);
+  // 開催の取り消し・無い開催
+  const so = clone(st); so.sessions[0].voided = true;
+  ok('止め1：取り消した開催は ok:false err voided（お金の数を出さない）', (() => { const x = sessionSeisan(so, 's1'); return !x.ok && x.err === 'voided' && x.ten === undefined && x.missing.length === 0; })());
+  ok('無い開催は err session', sessionSeisan(st, 'sz').err === 'session');
+  // 止め2：終えた後に、卓2 にだけ居た人の半荘を取り消す
+  const sc = mk(); T(sc, 't3').rate_mode = 'none';
+  const lastTen = sessionSeisan(sc, 's1').ten;
+  const sc2 = applyOps(sc, [{ op: 'hanchan_void', hanchan_id: 'h2' }]).state;
+  const now = sessionSeisan(sc2, 's1');
+  const ch = tenChanged(lastTen, now.ten);
+  ok('止め2：tenChanged に卓2 にだけ居た m5 が入る（今の並びだけで比べると入らない）', ch.includes('m5') && !sessionBreakdown(sc2, 's1').order.includes('m5'), J(ch));
+  ok('止め2：変わらない人は入らない・並びは終えた時の順', !ch.includes('m1') && J(ch) === J(S2), J(ch));
+  ok('tenChanged：今にだけ在る人も入る・0 と無いは同じ', J(tenChanged({ a: 0 }, { b: 5 })) === J(['b']) && J(tenChanged({ a: 0 }, {})) === J([]));
+  // E' 門の7つ（今の写しの形＝鍵なしは上の 336 件で ok のまま）
+  const gw = (fn) => { const x = clone(st); fn(x); return roomGate(x); };
+  const is = (g, mode, why) => g.mode === mode && g.why === why;
+  ok('門1 rate_mode 知らない字 → newer', is(gw((x) => { T(x, 't1').rate_mode = 'zzz'; }), 'newer', 'rate_mode'));
+  ok('門2 rate_mode null → rules_bad', is(gw((x) => { T(x, 't1').rate_mode = null; }), 'rules_bad', 'rate_mode'));
+  ok('門3 num で rate null → rules_bad', is(gw((x) => { T(x, 't2').rate = null; }), 'rules_bad', 'rate'));
+  ok('門4 num で rate 5（範囲の外）→ rules_bad', is(gw((x) => { T(x, 't2').rate = 5; }), 'rules_bad', 'rate'));
+  ok('門5 session で rate 100 → rules_bad', is(gw((x) => { T(x, 't1').rate = 100; }), 'rules_bad', 'rate'));
+  ok('門6 卓の voided が真偽値でない → rules_bad', is(gw((x) => { T(x, 't1').voided = 'yes'; }), 'rules_bad', 'voided'));
+  ok('門7 開催の voided が真偽値でない → rules_bad', is(gw((x) => { x.sessions[0].voided = 1; }), 'rules_bad', 'voided'));
+  ok('門＋ 開催の rate が範囲の外 → rules_bad・null は ok', is(gw((x) => { x.sessions[0].rate = 15; }), 'rules_bad', 'rate') && gw((x) => { x.sessions[0].rate = null; }).mode === 'ok');
+  ok('門で止まった部屋へは op が当たらない', applyOps((() => { const x = clone(st); T(x, 't1').rate_mode = 'zzz'; return x; })(), [{ op: 'member_add', member_id: 'mz', name: 'z' }]).res.err === 'newer');
 }
 
 console.log(`\n${p} passed, ${f} failed`);
