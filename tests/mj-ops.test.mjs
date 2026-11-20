@@ -1,7 +1,7 @@
 /* mj-ops.test.mjs — ★操作の表 mahjong.mj_ops の値そのものの誤りを捕まえる★（案 v18_login_sekkei.md K-1・I-5）
  * =============================================================================
  * 試験は表から引く（名前を字で並べない）が、★表そのものが間違っていたら表から引く試験は全部緑★。
- * だから ★K-1 の全34行×全列★ をここに字で固定する（K-1 の表から起こした字・schema.sql からは写さない）
+ * だから ★K-1 の全35行×全列★（2c-3c で yakitori_set を足した＝write3_sekkei.md §4） をここに字で固定する（K-1 の表から起こした字・schema.sql からは写さない）
  * ＝表を変えた日に ★この試験が赤になる★。読むのは supabase/schema.sql の insert into mahjong.mj_ops（倉庫に当てる物と同じ字）。
  * 字の読み替え（K-1 → 表）：
  *   who_plain：本人=self／入=nyu／本人か管=self_or_kan／管=kan／持ち主=owner／持ち主か管=owner_or_kan／K-2 の決まり=revert_rule／—=none
@@ -20,7 +20,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COLS = ['who_plain', 'who_league', 'on_deleted', 'writes_history', 'revert', 'versioned', 're'];
 const o = true, x = false;
 export const FIXED = {
-  count: 34,
+  count: 35,
   /* 種に書いてはいけない v15 の列（倉庫では空だけ＝mj_ops_old_empty） */
   oldEmpty: ['kan', 'nyu', 'needs_secret'],
   rows: {
@@ -41,6 +41,7 @@ export const FIXED = {
     hanchan_unvoid:   ['nyu',          'nyu',             x, o, 'void',          x, 'no'],
     cell_set:         ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     tobi_set:         ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
+    yakitori_set:     ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     kyotaku_set:      ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     hanchan_order:    ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     extra_set:        ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
@@ -122,8 +123,8 @@ if (DIRECT && process.argv.includes('--self-test')) {
   T('hanchan_seats のリーグの日を nyu に', (c) => { row(c, 'hanchan_seats').who_league = 'nyu'; });
   T('account_remove を持ち主だけに', (c) => { row(c, 'account_remove').who_plain = 'owner'; });
   T('league_owner_set のリーグの日を L に', (c) => { row(c, 'league_owner_set').who_league = 'L'; });
-  T('行を1つ消す（33）', (c) => { c.pop(); });
-  T('知らない操作を足す（35）', (c) => { c.push({ ...c[0], name: 'room_merge' }); });
+  T('行を1つ消す（34）', (c) => { c.pop(); });
+  T('知らない操作を足す（36）', (c) => { c.push({ ...c[0], name: 'room_merge' }); });
   T('列を1つ書き忘れる（re 抜け）', (c) => { delete row(c, 'member_link').re; });
   T('v15 の kan 列に値を入れる', (c) => { row(c, 'cell_set').kan = true; });
   console.log('\n' + p + ' passed, ' + f + ' failed');
