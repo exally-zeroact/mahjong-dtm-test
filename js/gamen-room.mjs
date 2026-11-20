@@ -153,8 +153,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
   function whyText(r) {
     if (r.why === 'sum') return r.no + '回目：合計が ' + fmt(r.diff) + ' 合いません（計に入れていません）';
-    if (r.why === 'order') return r.no + '回目：同じ点の人がいます。起家からの順を入れてください（「' + r.no + '回」を押す）';
+    if (r.why === 'order') return r.no + '回目：' + (r.yakiOnly ? 'やきとりを分ける端数の配り先に' : '同じ点の人がいます。') + '起家からの順を入れてください（「' + r.no + '回」を押す）';
     if (r.why === 'tobi') return r.no + '回目：飛び賞を受け取る人を選んでください（「' + r.no + '回」を押す）';
+    if (r.why === 'yaki_calc') return r.no + '回目：やきとりはこの版では精算に入れられません（計に入れていません）';
     return r.no + '回目：入れ直してください（' + r.why + '）';
   }
 
@@ -424,6 +425,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       if (m.why === 'sum') return pre + m.no + '回目＝素点の合計が ' + fmt(m.diff) + ' 合いません';
       if (m.why === 'order') return pre + m.no + '回目＝起家からの順がまだ';
       if (m.why === 'tobi') return pre + m.no + '回目＝飛び賞の受け取りがまだ';
+      if (m.why === 'yaki_calc') return pre + m.no + '回目＝やきとりはこの版では精算に入れられません';
       return pre + m.no + '回目＝入れ直しが要ります';
     }
     // 自由な項目（2c-3b）：合計が合わない／お金の数え方がこの版に無い（③-2 の前）
@@ -530,7 +532,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       const used = {
         session: { session_id: d.sid, date: ss.date, rate: ss.rate, version: ss.version ?? 1 },
         tables: tabs.map((t) => ({ table_id: t.table_id, rate_mode: rateModeOf(t), rate: tableRate(t, ss), version: t.version ?? 1 })),
-        hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version })),
+        hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version, yakitori_version: h.yakitori_version ?? 1 })),
       };
       const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, content: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, sig: sessionSig(st, d.sid) }, used, missing: s.missing }]);
       confirming = false;
