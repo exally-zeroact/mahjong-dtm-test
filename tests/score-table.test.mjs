@@ -92,6 +92,13 @@ function run(tables, pts = points) {
   eq('段 三倍満止めでも役の役満の段はある', limitRows({ kazoe: 'sanbai' }).map((r) => r.name).join(','), '満貫,跳満,倍満,三倍満,役満');
   eq('段 三倍満止めの役満の段の点', label(pts(0, 0, false, false, { players: 4, kazoe: 'sanbai' }, 1)), '32,000');
   eq('段 ふつうは5段', String(limitRows({}).length), '5');
+  // 符の上限（件4a-0）＝点数計算の手は 110 符を超える事がある。式は 25 か 20〜170 の10の倍数を受ける
+  const L = (f) => { try { return label(f()); } catch (e) { return 'throw'; } };
+  eq('符の上限 親ロン4翻120符（暗槓1m・9m・5p＋234s＋東東単騎＝三暗刻＋三槓子）', L(() => pts(4, 120, true, false, R4)), '12,000');
+  eq('符の上限 子ロン3翻130符', L(() => pts(3, 130, false, false, R4)), '8,000');
+  eq('符の上限 子ロン1翻110符（今の値のまま）', L(() => pts(1, 110, false, false, R4)), '3,600');
+  eq('符の上限 1翻115符（10の倍数でない）は throw', L(() => pts(1, 115, false, false, R4)), 'throw');
+  eq('符の上限 1翻180符（170 を超える）は throw', L(() => pts(1, 180, false, false, R4)), 'throw');
   return { n, bad };
 }
 const CELLS_572 = () => { let c = 0; for (let h = 1; h <= 13; h++) for (const fu of FU_LIST) for (let k = 0; k < 4; k++) c++; return c; };
@@ -116,9 +123,12 @@ if (process.argv.includes('--self-test')) {
     (h, fu, oya, ts, r, y) => points(h, fu, oya, ts, secchan(r) ? { ...r, players: 4 } : r, y), // 3人を4人として払う
   ];
   for (const bp of brokenPts) { total++; if (run(T, bp).bad.some((x) => x.startsWith('3人折半'))) caught++; }
-  console.log(`自己確認: ${caught}/${total}`); // CI は scripts/ci-yuka.sh で床 178 を見る
-  if (caught !== total || total !== 178) { console.log(`✗ 自己確認：壊した ${total} マスのうち 赤になったのは ${caught}`); process.exit(1); }
-  console.log(`✓ 自己確認：正解表を1マスずつ壊した 176 回と、3人折半の式を壊した 2 回の ${total} 回とも赤になった`);
+  // 符の上限を前の 110 に戻す壊し（件4a-0）＝赤になるか
+  const fu110 = (h, fu, oya, ts, r, y) => { if (fu > 110) throw new Error('fu'); return points(h, fu, oya, ts, r, y); };
+  total++; if (run(T, fu110).bad.some((x) => x.startsWith('符の上限'))) caught++;
+  console.log(`自己確認: ${caught}/${total}`); // CI は scripts/ci-yuka.sh で床 179 を見る
+  if (caught !== total || total !== 179) { console.log(`✗ 自己確認：壊した ${total} マスのうち 赤になったのは ${caught}`); process.exit(1); }
+  console.log(`✓ 自己確認：正解表を1マスずつ壊した 176 回と、3人折半の式を壊した 2 回と、符の上限を 110 に戻した 1 回の ${total} 回とも赤になった`);
   process.exit(0);
 }
 

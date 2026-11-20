@@ -76,13 +76,13 @@ jobs:
         run: node tests/room-state.test.mjs
 
       # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
-      - name: 早見表（lib/score-table.mjs）が正解表の 600 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）
+      - name: 早見表（lib/score-table.mjs）が正解表の 605 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）
         run: node tests/score-table.test.mjs
       - name: 早見表の見張りの自己確認（正解表を1マスずつ壊した 176 回と3人折半の式を壊した 2 回が全部赤になるか）
         shell: bash
         run: |
           node tests/score-table.test.mjs --self-test | tee score-self.out
-          sh scripts/ci-yuka.sh score-self.out 178
+          sh scripts/ci-yuka.sh score-self.out 179
 
       # ── 計算の道具（待ち読み）＝画面と同じ lib/shanten.mjs を手で決めた答えと突き合わせる ──────
       - name: 待ち読み（lib/shanten.mjs）のシャンテン・待ち・受け入れが手で決めた答えと同じか（清一色の全通り・七対子・国士・純空・3人）
