@@ -7,6 +7,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "kinshi": "node tests/kinshi-ji.test.mjs"
+    "kinshi": "node tests/kinshi-ji.test.mjs",
+    "db:guard": "node scripts/sql-guard.mjs supabase/schema.sql",
+    "db:apply": "node scripts/apply-schema.mjs",
+    "db:probe": "node scripts/apply-schema.mjs --probe",
+    "db:checks": "node tests/db-checks.live.mjs"
   }
 }
