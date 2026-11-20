@@ -74,6 +74,10 @@ jobs:
         run: node tests/seisan.test.mjs
       - name: 部屋の中の状態（lib/room-state.mjs）＝op を当てる・版の conflict・組ごと当てる・半荘の表・人ごとの窓・チップ祝儀・精算
         run: node tests/room-state.test.mjs
+      - name: 送り口（lib/outbox.mjs）＝倉庫の返りの振り分け（done・retry・conflict・reload・login・stop）と止めた並びの held（取り決め §6-11・12・14・14'）
+        run: node tests/outbox.test.mjs
+      - name: 送り口の見張りの自己確認（振り分けをわざと壊して赤になるか）
+        run: node tests/outbox.test.mjs --self-test
 
       # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
       - name: 早見表（lib/score-table.mjs）が正解表の 605 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）

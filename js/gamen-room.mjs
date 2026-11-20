@@ -10,7 +10,7 @@
  * 状態は lib/room-state.mjs（端末の写し）。押した事は mj_write の op の組にして未送信の並びに積む。
  * ★倉庫の mj_read／mj_write が来るまでは端末の中だけ★＝WRITE_READY を true にした日から送るだけ（op の形は同じ）。
  */
-import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig, migrateState, tobiSetOp, orderIdx, bustedSeats, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
@@ -397,9 +397,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       // 飛び：tobi_set を抜いた組を一度当てた後（§4 の鍵消しの後）の tobi_to と比べる＝また飛んで同じ人を選んだ時も消えない
       const want = {};
       for (const b of e.busted) want[String(b)] = e.tobi[b];
-      const trial = ops.length ? applyOps(st, ops) : { ok: true, state: st };
-      const th = trial.ok ? trial.state.hanchans.find((x) => x.hanchan_id === h.hanchan_id) : h;
-      if (canon(th.tobi_to) !== canon(want)) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, tobi_to: want, base_version: h.tobi_version });
+      const ts = tobiSetOp(st, ops, h.hanchan_id, want);
+      if (ts) ops.push(ts);
     }
     if (ops.length) {
       const r = commit(ops);
