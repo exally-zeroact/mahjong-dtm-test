@@ -103,6 +103,8 @@ const LIM = [
   ['1d 49時間前', 'create:1d', '49 hours', true], ['1d 47時間前', 'create:1d', '47 hours', false],
   ['u1d 49時間前', 'create:u1d', '49 hours', true], ['u1d 47時間前', 'create:u1d', '47 hours', false],
   ['sweep:bad 49時間前', 'sweep:bad', '49 hours', true], ['sweep:bad 47時間前', 'sweep:bad', '47 hours', false],
+  ['write:ur1m 11分前', 'write:ur1m', '11 minutes', true], ['write:ur1m 9分前', 'write:ur1m', '9 minutes', false],
+  ['write:rn1d 49時間前', 'write:rn1d', '49 hours', true], ['write:uk1d 47時間前', 'write:uk1d', '47 hours', false],
   ['知らない kind 26年前', 'test:zz', '9500 days', false],
 ];
 const LIMV = LIM.map(([, k, ago], i) => `('${k}', 'test:l${i}', now() - interval '${ago}', 1)`).join(', ');

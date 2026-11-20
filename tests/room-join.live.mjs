@@ -14,7 +14,7 @@
  *  ⑨ 消した部屋→gone（入っている人も）・行を作らない ⑩ 人数の上限→full ⑪ ok1h 60→busy:room・1時間より前の窓は数えず消える
  *  ⑫ room_bans に在る人→removed（数えない）・印を消すと入れる
  *  ⑬ anon は 401/403・捨てアカウントで外れ→wrong で数えが残る／GET と Prefer: tx=rollback で外れを送って「wrong なのに数えが残らない」道が無い
- *  ⑭ 平文のパス・token が rooms・room_accounts・limits の字に無い ⑮ 関数の権限（public.mj_* 2本・definer・search_path 空・authenticated だけ）
+ *  ⑭ 平文のパス・token が rooms・room_accounts・limits の字に無い ⑮ 関数の権限（public.mj_* 3本・definer・search_path 空・authenticated だけ）
  *  ★wrong 以外の ok でない返しの後は数え（limits の join:*・fail_count・room_accounts）が1つも増えていない★
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋も全部戻る）。
  * ⑬ の捨てアカウントの数え（limits の join:*）は最後に消す（mahjong の limits を書くのは試験だけ＝khaw の客の行は0）。
@@ -389,8 +389,8 @@ if (out) {
   ok('⑭ 平文のパス・外れのパス・token が rooms・room_accounts・limits の字に無い', pl.rooms && hits.length === 0, hits.join(','));
   /* ⑮ */
   const fn = out.funcs || [];
-  ok('⑮ public.mj_* は mj_room_create・mj_room_join の2本', fn.map((x) => x.name).join(',') === 'mj_room_create,mj_room_join', JSON.stringify(fn.map((x) => x.name)));
-  ok('⑮ 2本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 2 && fn.every((x) => x.definer === true
+  ok('⑮ public.mj_* は mj_room_create・mj_room_join・mj_write の3本（段2c-1）', fn.map((x) => x.name).join(',') === 'mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
+  ok('⑮ 3本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 3 && fn.every((x) => x.definer === true
     && JSON.stringify(x.config) === JSON.stringify(['search_path=""']) && !x.anon && x.auth && !x.public), JSON.stringify(fn));
   const errs = Object.keys(out).filter((k) => k.endsWith('_err'));
   ok('塊の中で思わぬ例外が無い', errs.length === 0, errs.map((k) => k + '=' + out[k]).join(' / '));

@@ -310,9 +310,9 @@ if (out) {
   ok('⑧ 人ごとも24時間より前の窓は数えず、作った時に消える', out.u_old && out.u_old.ok === true && Number(out.u_old_left) === 0, JSON.stringify({ r: out.u_old, left: out.u_old_left, e: out.u_old_err }));
   /* ⑨ */
   const fn = (out.funcs || []);
-  const fc = fn.find((x) => x.name === 'mj_room_create');   // 段2b-1 から public.mj_* は2本（mj_room_join の権限は room-join.live ⑮）
-  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join の2本）', fn.filter((x) => x.name === 'mj_room_create').length === 1
-    && fn.map((x) => x.name).sort().join(',') === 'mj_room_create,mj_room_join', JSON.stringify(fn.map((x) => x.name)));
+  const fc = fn.find((x) => x.name === 'mj_room_create');   // 段2c-1 から public.mj_* は3本（mj_room_join は room-join.live ⑮・mj_write は write.live ⓪）
+  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join・write の3本）', fn.filter((x) => x.name === 'mj_room_create').length === 1
+    && fn.map((x) => x.name).sort().join(',') === 'mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
   ok('⑨ definer・search_path 空・authenticated に EXECUTE・anon と PUBLIC に無し', fc && fc.definer === true
     && JSON.stringify(fc.config) === JSON.stringify(['search_path=""']) && !fc.anon && fc.auth && !fc.public, JSON.stringify(fc));
   ok('⑨ 部屋の関数は客から呼べない', Number(out.priv_anon) === 0, String(out.priv_anon));
