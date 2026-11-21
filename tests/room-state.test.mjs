@@ -44,7 +44,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は24個（2c-2a2 の直す op 6個・2c-3c の yakitori_set・2c-2b の人の op 5個を足した）', OP_NAMES.length === 24 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set', 'yakitori_set']), J(OP_NAMES));
+ok('op は28個（2c-2a2 の直す op 6個・2c-3c の yakitori_set・2c-2b の人の op 5個・2c-2c の部屋の op 4個を足した）', OP_NAMES.length === 28 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set', 'yakitori_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -481,7 +481,7 @@ console.log('■ 直す op 6個（2c-2a2＝倉庫 schema.sql の mj_write と同
 console.log('■ 弾く形（知らない鍵・19個以外・constructor・__proto__・組の数）');
 {
   const st = applyOps(base(), [hs('h1', [40000, 30000, 20000, 10000])]).state;
-  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'room_delete', 'mj_write', '']) {
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'league_create', 'mj_write', '']) {
     ok('op の名「' + name + '」は bad', applyOp(st, { op: name }).err === 'bad');
     let got;
     try { got = applyOp(st, { op: name, hanchan_id: 'h1' }).err; } catch (e) { got = 'throw ' + e.message; }
@@ -579,7 +579,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 24);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 28);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -741,10 +741,10 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
 {
   const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
   const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
-  ok('WHO・RE は24個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
+  ok('WHO・RE は28個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
   const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
   const cKeys = ck ? JSON.parse(ck[1]) : null;
-  ok('KEYS の名と鍵は schema の c_keys と同じ（24個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('KEYS の名と鍵は schema の c_keys と同じ（28個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
   ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
   ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
     needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
@@ -791,5 +791,48 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
   ok('roomGate が門より先（newer の部屋は人の op も newer）', !gl.ok && gl.res.err === 'newer');
 }
 
+console.log('■ 2c-2c 部屋の op 4つ（正本＝408f091 の mj_write ①・mj_w_op・mj_ops・紙 write5_utsushi.md v1）');
+{
+  const NOW = '2026-11-21T12:00:00Z', NS = Date.parse(NOW) / 1000;
+  const s0 = applyOps(emptyState(), [{ op: 'member_add', member_id: 'p1', name: '一' }]).state; const keep = J(s0);
+  const D = (ops, o = {}) => applyOps(s0, ops, { now: NOW, direct: true, role: 'owner', reauthAt: NS, ...o });
+  const E = (r) => (r.ok ? 'ok' : r.res.err + (r.res.at ? '@' + r.res.at : '') + (r.res.need ? ':' + r.res.need : '') + '#' + r.res.i);
+  const H = 'a'.repeat(64), MA = { op: 'member_add', member_id: 'p9', name: '九' }, RS = (pass, url_token_hash) => ({ op: 'room_secret', pass, url_token_hash });
+  ok('部屋の op 4つは PERSON_OPS に入る・WHO/RE は mj_ops の字', ['room_leave', 'room_delete', 'room_undelete', 'room_secret'].every((n) => PERSON_OPS.includes(n)) && J([WHO.room_leave, WHO.room_secret, WHO.room_delete, WHO.room_undelete]) === J(['self', 'kan', 'owner', 'owner_or_kan']) && J([RE.room_leave, RE.room_secret, RE.room_delete, RE.room_undelete]) === J(['owner', 'yes', 'yes', 'no']));
+  const cases = [
+    ['① 組に1つ：前の op の知らない鍵が先 → bad@x#0', [{ ...MA, x: 1 }, { op: 'room_leave' }], {}, 'bad@x#0'],
+    ['① 組に1つ：[member_add, room_leave] → bad@op#1', [MA, { op: 'room_leave' }], {}, 'bad@op#1'],
+    ['① 組に1つ：[room_leave, member_add] → bad@op#0', [{ op: 'room_leave' }, MA], {}, 'bad@op#0'],
+    ['① 組に1つ：[room_secret, room_secret] → bad@op#0', [RS('abcd', H), RS('abcd', H)], {}, 'bad@op#0'],
+    ['① 組に1つ：部屋の op の知らない鍵より長さが先 → bad@op#0', [{ op: 'room_delete', x: 1 }, MA], {}, 'bad@op#0'],
+    ['room_delete 1つ（owner・入り直し済み）→ ok・状態は変えない', [{ op: 'room_delete' }], {}, 'ok'],
+    ['room_delete 知らない鍵 → bad@x', [{ op: 'room_delete', x: 1 }], {}, 'bad@x#0'],
+    ["③' room_delete を kan → mj_role:owner", [{ op: 'room_delete' }], { role: 'kan' }, 'mj_role:owner#0'],
+    ["③'' room_delete を owner・reauthAt 無し → mj_reauth", [{ op: 'room_delete' }], { reauthAt: undefined }, 'mj_reauth#0'],
+    ["③'' room_delete 601秒前 → mj_reauth", [{ op: 'room_delete' }], { reauthAt: NS - 601 }, 'mj_reauth#0'],
+    ['room_leave を nyu・入り直し無し → ok（re owner は持ち主だけ）', [{ op: 'room_leave' }], { role: 'nyu', reauthAt: undefined }, 'ok'],
+    ['room_leave を role 無し（nyu に倒す）→ ok', [{ op: 'room_leave' }], { role: undefined, reauthAt: undefined }, 'ok'],
+    ["③'' room_leave を owner・入り直し無し → mj_reauth", [{ op: 'room_leave' }], { reauthAt: undefined }, 'mj_reauth#0'],
+    ['room_undelete を kan・入り直し無し → ok（re no）', [{ op: 'room_undelete' }], { role: 'kan', reauthAt: undefined }, 'ok'],
+    ["③' room_undelete を nyu → mj_role:kan", [{ op: 'room_undelete' }], { role: 'nyu' }, 'mj_role:kan#0'],
+    ["③' room_secret を nyu → mj_role:kan", [RS('abcd', H)], { role: 'nyu' }, 'mj_role:kan#0'],
+    ["③'' room_secret を kan・入り直し無し → mj_reauth（re yes）", [RS('abcd', H)], { role: 'kan', reauthAt: undefined }, 'mj_reauth#0'],
+    ["③' が中身より先：悪い pass を nyu → mj_role", [RS('ab', H)], { role: 'nyu' }, 'mj_role:kan#0'],
+    ['room_secret 正しい（kan）→ ok', [RS('abcd', H)], { role: 'kan' }, 'ok'],
+    ['room_secret pass 64字 → ok', [RS('x'.repeat(64), H)], {}, 'ok'],
+    ['room_secret pass 絵文字4つ（UTF-16 では8・code point 4）→ ok', [RS('\u{1F004}'.repeat(4), H)], {}, 'ok'],
+    ['room_secret pass 絵文字33（UTF-16 では66・code point 33）→ ok', [RS('\u{1F004}'.repeat(33), H)], {}, 'ok'],
+    ['room_secret pass 3字 → bad@pass', [RS('abc', H)], {}, 'bad@pass#0'],
+    ['room_secret pass 65字 → bad@pass', [RS('x'.repeat(65), H)], {}, 'bad@pass#0'],
+    ['room_secret pass 数 → bad@pass', [RS(1234, H)], {}, 'bad@pass#0'],
+    ['room_secret pass 無し → bad@pass', [{ op: 'room_secret', url_token_hash: H }], {}, 'bad@pass#0'],
+    ['room_secret pass も hash も悪い → bad@pass（pass が先）', [RS('ab', 'zz')], {}, 'bad@pass#0'],
+    ['room_secret hash 大文字 → bad@url_token_hash', [RS('abcd', 'A'.repeat(64))], {}, 'bad@url_token_hash#0'],
+    ['room_secret hash 63字 → bad@url_token_hash', [RS('abcd', 'a'.repeat(63))], {}, 'bad@url_token_hash#0'],
+    ['room_secret hash 無し → bad@url_token_hash', [{ op: 'room_secret', pass: 'abcd' }], {}, 'bad@url_token_hash#0'],
+  ];
+  for (const [name, ops, o, want] of cases) { const r = D(ops, o); ok(name, E(r) === want && (r.ok ? J(r.state) === keep : r.state === s0) && J(s0) === keep, E(r)); }
+  ok('direct が無い組の部屋の op → err direct', [{ op: 'room_leave' }, { op: 'room_delete' }, { op: 'room_undelete' }, RS('abcd', H)].every((op) => { const r = applyOps(s0, [op], { now: NOW, role: 'owner', reauthAt: NS }); return !r.ok && E(r) === 'direct#0' && r.state === s0; }));
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

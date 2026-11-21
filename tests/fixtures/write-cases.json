@@ -145,7 +145,7 @@
     {"id": "member_add のそろえた字が空（ゼロ幅の字だけ）は bad", "rules": "top", "ops": [{"op": "member_add", "member_id": "m9", "name": "​"}], "want": "bad"},
     {"id": "member_add のそろえた字が41字（NFKC で伸びる字）は bad", "rules": "top", "ops": [{"op": "member_add", "member_id": "m9", "name": "ﷺﷺﷺ"}], "want": "bad"},
     { "id": "知らない引数の鍵は bad", "rules": "top", "ops": [{ "op": "cell_set", "hanchan_id": "h1", "seat": 0, "value": 41000, "base_version": 1, "foo": 1 }], "want": "bad" },
-    { "id": "12個以外の op は bad", "rules": "top", "ops": [{ "op": "room_delete" }], "want": "bad", "want_db": "mj_reauth" },
+    { "id": "12個以外の op は bad", "rules": "top", "ops": [{ "op": "room_delete" }], "want": "direct", "want_db": "mj_reauth", "note": "2c-2c から在る op＝写しは direct の門（並びに積まない）・倉庫は入り直しの門" },
     { "id": "op の名 constructor は bad", "rules": "top", "ops": [{ "op": "constructor" }], "want": "bad" },
     { "id": "op の名 toString は bad", "rules": "top", "ops": [{ "op": "toString" }], "want": "bad" },
     { "id": "settle_snap の rev 1 は通る", "rules": "top", "ops": [{ "op": "settle_snap", "session_id": "s1", "rev": 1, "content": { "ten": {} }, "used": {}, "missing": [] }], "want": "ok" },
