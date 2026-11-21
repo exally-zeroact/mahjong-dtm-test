@@ -24,6 +24,8 @@ const NAMES = (uid) => 'mj-names:' + uid;
 // 卓の人（前もって・gamen_0kaime_sadame.md v1.1 段1）＝半荘の前に決めた n 人。この端末だけ（倉庫の席の op は段2）
 const SEATS = (uid, rid) => 'mj-seats:' + uid + ':' + rid;
 
+// 素点の差は + を付けない（司さん 11-21 夜「点を入れるところに＋なんかいるか？」）＝「1,000 多い／少ない」
+const diffText = (d) => Math.abs(d).toLocaleString('ja-JP') + (d > 0 ? ' 多い' : ' 少ない');
 const fmt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
 const fmtPt = (pt10) => (pt10 > 0 ? '+' : pt10 < 0 ? '−' : '') + (Math.abs(pt10) / 10).toFixed(1);
 const fmtCnt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
@@ -31,6 +33,8 @@ const sign = (n) => (n > 0 ? 'plus' : n < 0 ? 'minus' : 'zero');
 const md = (d) => (d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
 const hm = (iso) => { const d = new Date(iso); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+// 点の箱に出す字（−は全角に揃える・コンサル 11-21 夜「合計の行は −・欄の薄い字は -」）＝toInt は − も読む
+const boxNum = (n) => (n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
 const toInt = (s) => { const t = String(s).replace(/[,，\s]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^[−ー－]/, '-'); return /^-?\d+$/.test(t) ? Number(t) : NaN; };
 
 function load(k, def) { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v === null ? def : v; } catch { return def; } }
@@ -126,7 +130,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const v = tableView(st, table.table_id);
     let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>';
     h += v.rows.length ? renderTable(v) : renderHead(preSeats());
-    h += '<button class="btn btn-main r-add" id="rAdd">＋ ' + v.nextNo + '回目の点を入れる</button>';
+    h += '<button class="btn btn-main r-add" id="rAdd">' + v.nextNo + '回目の点を入れる</button>';
     if (v.windows.length) h += renderWindows(v) + renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
@@ -167,7 +171,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     return h;
   }
   function whyText(r) {
-    if (r.why === 'sum') return r.no + '回目：合計が ' + fmt(r.diff) + ' 合いません（計に入れていません）';
+    if (r.why === 'sum') return r.no + '回目：素点の合計が ' + diffText(r.diff) + '（計に入れていません）';
     if (r.why === 'order') return r.no + '回目：同じ点の人がいます。起家からの順を入れてください（「' + r.no + '回」を押す）';
     if (r.why === 'tobi') return r.no + '回目：飛び賞を受け取る人を選んでください（「' + r.no + '回」を押す）';
     return r.no + '回目：入れ直してください（' + r.why + '）';
@@ -305,7 +309,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       // 元の点で飛んでいない席の受け取りは entry に持たない（片付け・§6-7）
       const bs = bustedSeats(R, x.cells), tobi = {};
       for (const [k, v] of Object.entries(x.tobi_to)) if (bs.includes(Number(k))) tobi[k] = v;
-      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map((v) => Number(v).toLocaleString("ja-JP")), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
+      entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
     } else {
       const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = { seats: [] }; page = 'pick'; render(); return; }
@@ -343,7 +347,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (c.filled) return '<p class="r-check bad" id="eSum">素点の合計 ' + c.got.toLocaleString('ja-JP') + '・' + W + ' より ' + Math.abs(c.got - c.want).toLocaleString('ja-JP') + (c.got > c.want ? ' 多い' : ' 少ない') + '</p>';
     return '<p class="r-check mada" id="eSum">素点の合計 ' + W + (c.nums ? '・残り ' + (c.rest < 0 ? '−' : '') + Math.abs(c.rest).toLocaleString('ja-JP') : '') + '</p>';
   }
-  const sugText = (c, i) => (c.sug === i ? (c.rest < 0 ? '-' : '') + Math.abs(c.rest).toLocaleString('ja-JP') : '');
+  const sugText = (c, i) => (c.sug === i ? boxNum(c.rest) : '');
   function renderEdit() {
     const e = entry;
     bar({ back: '対局', onBack: toRoom, title: e.no + '回目の点を' + (e.hanchan_id ? '直す' : '入れる') });
@@ -397,7 +401,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       const lost = kieru ? toInt(e.lost || '0') : 0;
       if (Number.isNaN(lost) || lost < 0 || lost % 1000 !== 0 || lost > LOST_MAX) return err('消えた供託は0〜' + LOST_MAX.toLocaleString('ja-JP') + 'の1000点単位です。');
       const c = checkEntry(R, cells, lost);
-      if (!c.ok && c.why === 'sum') return err('素点の合計が ' + fmt(c.diff) + ' 合いません。');
+      if (!c.ok && c.why === 'sum') return err('素点の合計が ' + diffText(c.diff) + 'です。');
       if (!c.ok) return err('入れられません（' + c.why + '）。');
       e.num = cells; e.lostNum = lost;
       e.busted = R.tobi_from === 'all' ? [] : c.busted;
@@ -453,7 +457,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function missingText(m, many) {
     const pre = many ? '卓' + m.table + '：' : '';
     if (m.no) {
-      if (m.why === 'sum') return pre + m.no + '回目＝素点の合計が ' + fmt(m.diff) + ' 合いません';
+      if (m.why === 'sum') return pre + m.no + '回目＝素点の合計が ' + diffText(m.diff);
       if (m.why === 'order') return pre + m.no + '回目＝起家からの順がまだ';
       if (m.why === 'tobi') return pre + m.no + '回目＝飛び賞の受け取りがまだ';
       return pre + m.no + '回目＝入れ直しが要ります';
@@ -650,7 +654,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       // 勧めた残りは押せば値になる（全部を選ぶ＝打てば上書き）
       inp.addEventListener('focus', () => { if (inp.value.trim() !== '' || !inp.placeholder) return; inp.value = inp.placeholder; liveUpdate(); inp.select(); });
       // 絵 nyuryoku4 ③＝枠の素点は「20,100」と区切って見せる（打っている間はそのまま・離れたら区切る）
-      inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = v.toLocaleString('ja-JP'); readCells(); } });
+      inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = boxNum(v); readCells(); } });
     }
     if (q('#eLost')) q('#eLost').addEventListener('input', liveUpdate);
     // 数字鍵盤：今の箱（kpInp）に入った時の最初の数の鍵は中身を置き換える（勧めた残りも打ち直せる）
@@ -673,7 +677,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
         } else if (k === 'bs') { if (digits) digits = digits.slice(0, -1); else neg = false; }
         else if (k === 'neg') neg = !neg;
         kpFresh = false;
-        kpInp.value = (neg ? '-' : '') + (digits === '' ? '' : Number(digits).toLocaleString('ja-JP'));
+        kpInp.value = (neg ? '−' : '') + (digits === '' ? '' : Number(digits).toLocaleString('ja-JP'));
         liveUpdate();
       };
       kp.addEventListener('mousedown', (ev) => ev.preventDefault()); // 鍵を押しても箱から focus を外さない
