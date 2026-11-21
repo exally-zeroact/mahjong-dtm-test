@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
-  kindOf, yakiUsed, PERSON_OPS, WHO, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
+  kindOf, yakiUsed, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
 import { readOps } from './mj-ops.test.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
@@ -44,7 +44,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は27個（2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 27 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set']), J(OP_NAMES));
+ok('op は30個（2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 30 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -579,7 +579,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 27);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 30);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -756,10 +756,12 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
 {
   const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
   const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
-  ok('WHO・RE は27個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
+  ok('WHO・WHO_LEAGUE・RE は30個とも schema の mj_ops の who_plain・who_league・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].who_league === WHO_LEAGUE[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].who_league !== WHO_LEAGUE[n] || rows[n].re !== RE[n])));
+  const NY = Object.keys(rows).filter((n) => !OP_NAMES.includes(n)).sort();
+  ok('mj_ops に在って写しに無い op は4つ（not_yet＝rules_save・rerev_ok・history_revert・room_export）', J(NY) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']), J(NY));
   const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
   const cKeys = ck ? JSON.parse(ck[1]) : null;
-  ok('KEYS の名と鍵は schema の c_keys と同じ（27個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('KEYS の名と鍵は schema の c_keys と同じ（30個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
   ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
   ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
     needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
@@ -848,6 +850,48 @@ console.log('■ 2c-2c 部屋の op 4つ（正本＝408f091 の mj_write ①・m
   ];
   for (const [name, ops, o, want] of cases) { const r = D(ops, o); ok(name, E(r) === want && (r.ok ? J(r.state) === keep : r.state === s0) && J(s0) === keep, E(r)); }
   ok('direct が無い組の部屋の op → err direct', [{ op: 'room_leave' }, { op: 'room_delete' }, { op: 'room_undelete' }, RS('abcd', H)].every((op) => { const r = applyOps(s0, [op], { now: NOW, role: 'owner', reauthAt: NS }); return !r.ok && E(r) === 'direct#0' && r.state === s0; }));
+}
+console.log("■ 2c-2d1 リーグの op 3つ・③' は who_league が same か who_plain と同じ op だけ（正本＝schema.sql・紙 write7_league_sadame_v11.md）");
+{
+  const NOW = '2026-11-21T12:00:00Z', NS = Date.parse(NOW) / 1000;
+  const s0 = applyOps(emptyState(), [{ op: 'member_add', member_id: 'p1', name: '一' }]).state; const keep = J(s0);
+  const D = (ops, o = {}) => applyOps(s0, ops, { now: NOW, direct: true, role: 'owner', reauthAt: NS, ...o });
+  const E = (r) => (r.ok ? 'ok' : r.res.err + (r.res.at ? '@' + r.res.at : '') + (r.res.need ? ':' + r.res.need : '') + '#' + r.res.i);
+  const L1 = '7d444840-9dc0-41b0-8a2d-1d6a6f3c2b11';
+  ok('KEYS（頼みの並び）：session_add・league_create・league_save・league_owner_set',
+    J(KEYS_OF('session_add')) === J(['session_id', 'date', 'rate', 'place', 'league_id']) &&
+    J(KEYS_OF('league_create')) === J(['league_id', 'name', 'date_from', 'date_to', 'rank_by', 'min_games', 'players_main', 'rules', 'rules_alt']) &&
+    J(KEYS_OF('league_save')) === J(['league_id', 'base_version', 'name', 'date_from', 'date_to', 'rank_by', 'min_games', 'rules', 'rules_alt']) &&
+    J(KEYS_OF('league_owner_set')) === J(['league_id']));
+  ok('リーグの op は PERSON_OPS（direct）・WHO＝kan/none/owner・RE＝no/no/yes', LEAGUE_OPS.every((n) => PERSON_OPS.includes(n)) && J(LEAGUE_OPS.map((n) => WHO[n])) === J(['kan', 'none', 'owner']) && J(LEAGUE_OPS.map((n) => RE[n])) === J(['no', 'no', 'yes']));
+  const SKIP = OP_NAMES.filter((n) => !ROLE_AT_GATE(n)).sort();
+  ok("③' を飛ばす op＝8つ（session_add・session_edit・table_add・table_edit・hanchan_seats・member_rename・member_active・league_save）", J(SKIP) === J(['hanchan_seats', 'league_save', 'member_active', 'member_rename', 'session_add', 'session_edit', 'table_add', 'table_edit']), J(SKIP));
+  const LC = { op: 'league_create', league_id: L1, name: 'リーグ', date_from: '2026-11-01', date_to: null, rank_by: 'pt', min_games: 0, players_main: 4, rules: {}, rules_alt: null };
+  const cases = [
+    ["league_save を nyu（who_plain none）→ ③' で止めない＝ok（L は倉庫だけ）", [{ op: 'league_save', league_id: L1, base_version: 1 }], { role: 'nyu' }, 'ok'],
+    ["league_save を role 無し → ok（③' を飛ばす）", [{ op: 'league_save', league_id: L1, base_version: 1 }], { role: undefined }, 'ok'],
+    ['league_create を nyu → mj_role:kan（who_league same）', [LC], { role: 'nyu' }, 'mj_role:kan#0'],
+    ['league_create を kan → ok・状態は変えない', [LC], { role: 'kan' }, 'ok'],
+    ['league_owner_set を kan → mj_role:owner', [{ op: 'league_owner_set', league_id: L1 }], { role: 'kan' }, 'mj_role:owner#0'],
+    ["③'' league_owner_set を owner・入り直し無し → mj_reauth（re yes）", [{ op: 'league_owner_set', league_id: L1 }], { reauthAt: undefined }, 'mj_reauth#0'],
+    ['league_owner_set 入り直し済み → ok', [{ op: 'league_owner_set', league_id: L1 }], {}, 'ok'],
+    ['league_id が uuid でない → bad@league_id', [{ op: 'league_owner_set', league_id: 'L1' }], {}, 'bad@league_id#0'],
+    ['league_save の知らない鍵 players_main → bad@players_main', [{ op: 'league_save', league_id: L1, base_version: 1, players_main: 3 }], {}, 'bad@players_main#0'],
+    ['league_create の知らない鍵 → bad@x', [{ ...LC, x: 1 }], {}, 'bad@x#0'],
+    ['session_add の league_id null（direct）→ ok', [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: null }], {}, 'ok+'],
+    ['session_add の league_id "L1" → bad@league_id', [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: 'L1' }], {}, 'bad@league_id#0'],
+    ['session_add の league_id uuid（direct）→ ok・写しは当てない', [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: L1 }], { role: 'nyu' }, 'ok'],
+  ];
+  for (const [name, ops, o, want] of cases) {
+    const r = D(ops, o);
+    if (want === 'ok+') { ok(name, r.ok && r.state.sessions.some((x) => x.session_id === 's9') && J(s0) === keep, E(r)); continue; }
+    ok(name, E(r) === want && (r.ok ? J(r.state) === keep : r.state === s0) && J(s0) === keep, E(r));
+  }
+  const n1 = applyOps(s0, [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: null }], { role: 'nyu' });
+  ok('league_id null の session_add は並びに積める（direct 無しで ok・開催が増える）', n1.ok && n1.state.sessions.some((x) => x.session_id === 's9'));
+  const n2 = applyOps(s0, [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: L1 }], { role: 'nyu' });
+  ok('リーグの日の session_add は並びに積まない（direct 無し → err direct・何も当てない）', !n2.ok && E(n2) === 'direct#0' && n2.state === s0);
+  ok('direct が無い組のリーグの op 3つ → err direct', [LC, { op: 'league_save', league_id: L1, base_version: 1 }, { op: 'league_owner_set', league_id: L1 }].every((op) => { const r = applyOps(s0, [op], { now: NOW, role: 'owner', reauthAt: NS }); return !r.ok && E(r) === 'direct#0' && r.state === s0; }));
 }
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
