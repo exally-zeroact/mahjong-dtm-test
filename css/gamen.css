@@ -139,6 +139,14 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .r-er-n { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .r-er-v { justify-self: end; width: 100%; max-width: 140px; min-height: 40px; padding: 0 12px; font-family: inherit; color: var(--c-ji); background: var(--c-men); text-align: right; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; border: 1.5px solid var(--c-sen); border-radius: 10px; }
 .r-er-v:focus { border-color: var(--c-kin); background: var(--c-man); outline: 0; }
+/* アプリの数字鍵盤（司さん 11-21 夜・定め gamen_kenban_sadame.md）＝字 24px・鍵 60px（2.5）・間 6px・下は安全域 */
+.kp { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: var(--c-seg); border-top: 1px solid var(--c-sen); touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.kp[hidden], .kp-sp[hidden] { display: none; }
+.kp button { height: 60px; padding: 0; font: inherit; font-size: 24px; font-weight: 600; color: var(--c-ji); background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 10px; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
+.kp button:active { background: var(--c-man); }
+.kp .kp-do { color: var(--c-kon-ji); background: var(--c-kon); border-color: var(--c-kon); }
+.kp .kp-ok { grid-column: span 2; }
+.kp-sp { height: calc(284px + env(safe-area-inset-bottom)); }
 .r-er-p { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* 枠の線のボタン */
 .btn-line { background: var(--c-men); color: var(--c-kon); border: 1px solid var(--c-kon); }

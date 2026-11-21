@@ -350,8 +350,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     let h = '';
     if (e.step === 'cells') {
       const c = liveCalc();
-      h += '<div class="r-ent">' + e.seats.map((m, i) => '<label class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><input class="r-er-v" inputmode="numeric" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></label>').join('') + '</div>';
-      if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" inputmode="numeric" value="' + esc(e.lost) + '" autocomplete="off"></label>';
+      h += '<div class="r-ent">' + e.seats.map((m, i) => '<label class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></label>').join('') + '</div>';
+      if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" readonly inputmode="none" value="' + esc(e.lost) + '" autocomplete="off"></label>';
       h += sumLine(c) + '<p class="r-hint">pt と順位は点から自動で出す。</p>';
     } else if (e.step === 'order') {
       h += '<p class="sec">同じ点の人がいます。起家から順に押してください　<b class="kon">' + e.order.length + '／' + n + '</b></p>';
@@ -366,9 +366,14 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     h += '<button class="btn btn-main" id="eOk">' + (e.step !== 'cells' ? '次へ' : e.hanchan_id ? '直す' : '入れる') + '</button>';
     if (e.hanchan_id) h += '<button class="btn btn-line" id="eVoid">' + (e.voided ? 'この半荘を戻す' : 'この半荘を取り消す') + '</button>';
     else if (e.step === 'cells') h += '<button class="btn btn-line" id="ePeople">人を替える</button>';
+    if (e.step === 'cells') h += '<div class="kp-sp" id="eKpSp" hidden></div>' + KP_HTML;
     el.innerHTML = h;
     wireEdit();
   }
+  // アプリの数字鍵盤（司さん 11-21 夜「iPhoneでもAndroidでもキーボードだしたらよかろが」・定め gamen_kenban_sadame.md）＝端末の鍵盤は出さない（箱は readonly＋inputmode none）
+  //   並び＝端末の大きな数字鍵盤の 1〜9・0・⌫ に − と 000・↓（次の人へ）・✓（閉じる）。字 24px・鍵 60px（2.5）
+  const KP_KEYS = [['1'], ['2'], ['3'], ['bs', '⌫', '1字消す'], ['4'], ['5'], ['6'], ['neg', '−', '＋−を替える'], ['7'], ['8'], ['9'], ['next', '↓', '次の人へ'], ['000'], ['0'], ['ok', '✓', '閉じる']];
+  const KP_HTML = '<div class="kp" id="eKp" role="group" aria-label="数字の鍵盤" hidden>' + KP_KEYS.map(([k, t, a]) => '<button type="button" data-kp="' + k + '"' + (a ? ' aria-label="' + a + '"' : '') + ' class="' + (k === 'next' || k === 'ok' ? 'kp-do' : '') + (k === 'ok' ? ' kp-ok' : '') + '">' + (t || k) + '</button>').join('') + '</div>';
   function readCells() {
     for (const inp of el.querySelectorAll('[data-c]')) entry.cells[Number(inp.dataset.c)] = inp.value;
     const lost = el.querySelector('#eLost'); if (lost) entry.lost = lost.value;
@@ -648,6 +653,42 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = v.toLocaleString('ja-JP'); readCells(); } });
     }
     if (q('#eLost')) q('#eLost').addEventListener('input', liveUpdate);
+    // 数字鍵盤：今の箱（kpInp）に入った時の最初の数の鍵は中身を置き換える（勧めた残りも打ち直せる）
+    const kp = q('#eKp');
+    if (kp) {
+      let kpInp = null, kpFresh = false;
+      const boxes = () => [...el.querySelectorAll('[data-c]'), ...(q('#eLost') ? [q('#eLost')] : [])];
+      const kpClose = () => { const x = kpInp; kpInp = null; kp.hidden = true; q('#eKpSp').hidden = true; if (x) x.blur(); };
+      const kpKey = (k) => {
+        if (!kpInp) return;
+        if (k === 'ok') return kpClose();
+        if (k === 'next') { const bs = boxes(), j = bs.indexOf(kpInp); if (j >= 0 && j + 1 < bs.length) bs[j + 1].focus(); else kpClose(); return; }
+        const t = kpInp.value.trim();
+        let neg = /^[-−ー－]/.test(t), digits = (neg ? t.slice(1) : t).replace(/[^0-9]/g, '');
+        if (/^[0-9]+$/.test(k)) {
+          if (kpFresh) { if (digits) neg = false; digits = ''; }
+          const d = (digits + k).replace(/^0+(?=d)/, '');
+          if (d.length > 6) return; // ±200,000（CELL_MAX）より長い数は打たせない
+          digits = d;
+        } else if (k === 'bs') { if (digits) digits = digits.slice(0, -1); else neg = false; }
+        else if (k === 'neg') neg = !neg;
+        kpFresh = false;
+        kpInp.value = (neg ? '-' : '') + (digits === '' ? '' : Number(digits).toLocaleString('ja-JP'));
+        liveUpdate();
+      };
+      kp.addEventListener('mousedown', (ev) => ev.preventDefault()); // 鍵を押しても箱から focus を外さない
+      for (const b of kp.querySelectorAll('[data-kp]')) b.onclick = () => kpKey(b.dataset.kp);
+      for (const inp of boxes()) {
+        inp.addEventListener('focus', () => { kpInp = inp; kpFresh = true; kp.hidden = false; q('#eKpSp').hidden = false; inp.scrollIntoView({ block: 'nearest' }); });
+        inp.addEventListener('blur', (ev) => { if (kpInp === inp && !boxes().includes(ev.relatedTarget)) kpClose(); });
+        // 机の鍵盤（パソコン）も同じ動き
+        inp.addEventListener('keydown', (ev) => {
+          const k = /^[0-9]$/.test(ev.key) ? ev.key : { '-': 'neg', Backspace: 'bs', Enter: 'next', Escape: 'ok' }[ev.key];
+          if (!k || ev.isComposing) return;
+          ev.preventDefault(); kpKey(k);
+        });
+      }
+    }
     if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); picking = { seats: entry.seats.slice() }; entry = null; page = 'pick'; render(); };
     if (q('#eVoid')) q('#eVoid').onclick = () => { commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); toRoom(); };
     if (q('#eOrdReset')) q('#eOrdReset').onclick = () => { entry.order = []; render(); };
