@@ -800,7 +800,7 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_needs_order(jsonb, jsonb) from public, anon, authenticated;
 
--- ── パスのそろえた字（lib/common-pass.mjs の passKey と同じ手順・版1）─────────────────────
+-- ── パスのそろえた字（版1）─────────────────────
 --   ① NFKC（全角の数字・英字を半角に＝日本語の打ち方で「１２３４」と打っても同じパス）② 英字 A〜Z だけ小文字
 --   （lower() は場所の設定で変わるので使わない・カナや空白は変えない＝mj_name_key は借りない）
 --   ★bf にかけるのもこのそろえた字★（端末ごとの打ち方の違いで入れなくならない・mj_room_join も同じ物を通す）
@@ -810,19 +810,14 @@ language sql immutable strict parallel safe set search_path = '' as $fn$
 $fn$;
 revoke all on function mahjong_private.mj_pass_key(text) from public, anon, authenticated;
 
--- ── よくあるパスの名簿（★正本は下の cp 札で囲んだ jsonb の字1本＝lib/common-pass.mjs の COMMON_PASS と同じ・
---    tests/common-pass.test.mjs が CI で比べる）・字はそろえた後の形で持つ・種に無い行は消す ──────────────
+-- ── よくあるパスの名簿は B0（11-21 司さん「パスは簡単なやつでええ」）で外した＝どの門も読まない・行は0にする
+--    （表は残す＝sql-guard が drop table を止める・形の門＝4〜64字・72バイトは残す）──
 create table if not exists mahjong.mj_common_pass (
   key text primary key check (char_length(key) between 1 and 64)
 );
 do $cpdo$
-declare seed jsonb := $cp$["0000","000000","0123","01234","012345","1004","1111","111111","1122","1212","1234","12345","123456","1234567","12345678","123456789","1234567890","1313","1357","1990","1q2w3e4r","1qaz2wsx","2000","2010","2020","2021","2022","2023","2024","2025","2026","2222","222222","2468","2580","3333","333333","4321","4444","444444","4649","54321","5555","555555","654321","6666","666666","6969","7777","777777","7890","8888","888888","987654321","9999","999999","aaaa","aaaaaa","abc123","abcd","abcd1234","abcdef","admin","admin123","asdf","asdfgh","asdfghjkl","dothemath","dragon","guest","iloveyou","letmein","login","maajan","mahjong","mahjong1","majan","master","monkey","pass","pass1234","passw0rd","password","password1","qazwsx","qwerty","qwerty123","qwertyuiop","riichi","root","sunshine","test","test1234","tsumo","user","welcome","zxcv","zxcvbnm","まーじゃん","マージャン"]$cp$;
 begin
-  insert into mahjong.mj_common_pass (key)
-    select e #>> '{}' from pg_catalog.jsonb_array_elements(seed) e
-    on conflict (key) do nothing;
-  delete from mahjong.mj_common_pass c
-   where c.key not in (select e #>> '{}' from pg_catalog.jsonb_array_elements(seed) e);
+  delete from mahjong.mj_common_pass;
 end $cpdo$;
 
 -- ── 呼んだ人（v18 C・K-10）＝全部の入口の頭で呼ぶ・null＝弾く（{ok:false, err:'mj_session'}） ─────────────
@@ -1072,7 +1067,7 @@ revoke all on function mahjong_private.mj_sweep(int) from public, anon, authenti
 -- ⓪ 呼んだ人＝mj_me（null なら {ok:false, err:'mj_session'}＝画面は「ログインが切れました」・K-10）。作った人が持ち主で管。
 -- p_secrets＝{url_token_hash} の1つだけ（128bit 乱数の sha256＝小文字 hex 64字）。channel_key は倉庫が作る（16 byte の乱数の hex）。
 -- 返し：{ok:true, room_id, room_no, channel_key} ／ {ok:false, err:'mj_session'｜'mj_op_other_user'｜'bad', what｜'range', key｜
---   'common'｜'gone'｜'mismatch'｜'dup', what｜'full'｜'busy', what(all｜user｜room_no)}。
+--   'gone'｜'mismatch'｜'dup', what｜'full'｜'busy', what(all｜user｜room_no)}。
 --   ★ok でない返しは creates・limits・totals・部屋に何も残さない★（S1・N2）＝残るのは mj_me の accounts の行だけ（人の印・数えではない）
 -- 順（S1）：人 → 形 → ルール → よくあるパス → totals を for update（作るを全体で1列に並べる＝同じ op_id の2本目はここで待つ）
 --   → creates に在れば送り直しの返し（N1・別の人なら mj_op_other_user＝K-7）→ 一意の当たりを bf の前に見る → full（R−20）
@@ -1127,10 +1122,7 @@ begin
     raise;
   end;
 
-  -- ③ よくあるパス
-  if exists (select 1 from mahjong.mj_common_pass c where c.key = v_key) then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'common');
-  end if;
+  -- ③ よくあるパスの弾きは B0 で外した（どの4〜64字も通す）
 
   -- ④ 作るを全体で1列に並べる
   select t.rooms_all into v_all from mahjong.totals t where t.id = 1 for update;
@@ -2794,7 +2786,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 1);
 
   elsif v_op = 'room_secret' then
-    -- 形（mj_room_create と同じ）→ S1 の門（よくある・前と同じパス・今と同じ URL・他の部屋と同じ URL）＝どれも何も書かない
+    -- 形（mj_room_create と同じ）→ S1 の門（前と同じパス・今と同じ URL・他の部屋と同じ URL）＝どれも何も書かない
     if pg_catalog.jsonb_typeof(p_o -> 'pass') is distinct from 'string' or pg_catalog.char_length(p_o ->> 'pass') not between 4 and 64 then
       perform mahjong_private.mj_w_bad(p_i, 'pass');
     end if;
@@ -2802,9 +2794,7 @@ begin
     if pg_catalog.octet_length(v_key) > 72 or pg_catalog.char_length(v_key) not between 4 and 64 then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
     v_s := case when pg_catalog.jsonb_typeof(p_o -> 'url_token_hash') = 'string' then p_o ->> 'url_token_hash' end;
     if v_s is null or v_s !~ '^[0-9a-f]{64}$' then perform mahjong_private.mj_w_bad(p_i, 'url_token_hash'); end if;
-    if exists (select 1 from mahjong.mj_common_pass x where x.key = v_key) then
-      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'pass', 'reason', 'common'));
-    end if;
+    -- よくあるパスの弾きは B0 で外した
     select x.pass_hash, x.url_token_hash into s from mahjong.rooms x where x.id = p_room;
     if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'pass', 'reason', 'same'));

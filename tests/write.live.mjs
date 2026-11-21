@@ -935,7 +935,6 @@ const body = `
     ${WA('zsc3', 3, AMR.fresh, 'ra', A(sec('abc', H1)))}
     ${WA('zsc4', 3, AMR.fresh, 'ra', A(sec(PASS2, 'xyz')))}
     ${WA('zsc5', 3, AMR.fresh, 'ra', A(O('room_secret', { pass: PASS2 })))}
-    ${WA('zsc6', 3, AMR.fresh, 'ra', A(sec(S('(select to_jsonb(key) from mahjong.mj_common_pass order by key limit 1)'), H1)))}
     ${WA('zsc7', 3, AMR.fresh, 'ra', A(sec(PASS, H1)))}
     ${WA('zsc7b', 3, AMR.fresh, 'ra', A(sec(PASS.toUpperCase(), H1)))}
     ${WA('zsc8', 3, AMR.fresh, 'ra', A(sec(PASS2, S('(select to_jsonb(url_token_hash) from mahjong.rooms where id = ra)'))))}
@@ -949,6 +948,8 @@ const body = `
     ${WAo('zsc12', 3, AMR.fresh, 'ra', A(sec(PASS2, H1)), OPS)}
     ${JOIN('zsc13', 4, PASS)}
     ${JOIN('zsc14', 7, PASS2)}`)}
+  ${undo('zsc15b', `${H14('zsc15b')}
+    ${WA('zsc15', 3, AMR.fresh, 'ra', A(sec('1234', H1)))}`)}
   ${undo('zk3', `${H14('zk3')}
     update mahjong.room_accounts set role = 'kan' where room_id = ra and user_id = us[8];
     ${JA(2, '5 days')} ${JA(8, '2 days')} ${JA(3, '1 day')}
@@ -1492,11 +1493,11 @@ function check(out, lib, say) {
   ok('⑮ room_undelete：7日より前に消した部屋 → gone', isErr('zrd11', 'gone'), J(R('zrd11')));
   ok('⑮ room_secret：入 → mj_role need kan・管の amr が古い → mj_reauth', isErr('zsc1', 'mj_role', { need: 'kan' }) && isErr('zsc2', 'mj_reauth'), J([R('zsc1'), R('zsc2')]));
   ok('⑮ room_secret：形が悪い（短いパス・URL の字・URL が無い）→ bad', isErr('zsc3', 'bad', { at: 'pass' }) && isErr('zsc4', 'bad', { at: 'url_token_hash' }) && isErr('zsc5', 'bad', { at: 'url_token_hash' }), J([R('zsc3'), R('zsc4'), R('zsc5')]));
-  ok('⑮ room_secret：よくあるパス → bad reason common', isErr('zsc6', 'bad', { at: 'pass', reason: 'common' }), J(R('zsc6')));
+  ok('⑮ room_secret：1234 でも通る（B0＝よくあるパスの弾きを外した）→ ok', isOk('zsc15'), J(R('zsc15')));
   ok('⑮ room_secret：前と同じパス（大文字でも）→ bad reason same', isErr('zsc7', 'bad', { at: 'pass', reason: 'same' }) && isErr('zsc7b', 'bad', { at: 'pass', reason: 'same' }), J([R('zsc7'), R('zsc7b')]));
   ok('⑮ room_secret：今と同じ URL → bad reason same', isErr('zsc8', 'bad', { at: 'url_token_hash', reason: 'same' }), J(R('zsc8')));
   ok('⑮ room_secret：他の部屋の URL → bad at url_token_hash・弾いた組は何も書かない', isErr('zsc9', 'bad', { at: 'url_token_hash' }) && R('zsc9').reason === undefined
-    && ['zsc3', 'zsc4', 'zsc5', 'zsc6', 'zsc7', 'zsc7b', 'zsc8', 'zsc9'].every((k) => has(k, { hc: 0, h: 0 })), J(R('zsc9')));
+    && ['zsc3', 'zsc4', 'zsc5', 'zsc7', 'zsc7b', 'zsc8', 'zsc9'].every((k) => has(k, { hc: 0, h: 0 })), J(R('zsc9')));
   ok('⑮ room_secret：組に1つだけ → bad i 1 at op', isErr('zsc10', 'bad', { i: 1, at: 'op' }), J(R('zsc10')));
   const k11 = R('zsc11').results?.[0]?.channel_key;
   ok('⑮ room_secret：管が押す → ok・新しい channel_key・入の行が消え（L と管は残る）・消した入のつなぎと名乗りが消え・出した印0・履歴2', isOk('zsc11') && /^[0-9a-f]{32}$/.test(k11 || '')
@@ -1660,7 +1661,6 @@ const WAZA = [
   ["段1 で tobi_set を捨てる", "mahjong_private.mj_w_op", "update mahjong.hanchans x set tobi_to = v_j, tobi_version = x.tobi_version + 1 where x.id = h.id;", "update mahjong.hanchans x set tobi_to = x.tobi_to where x.id = h.id;", null, "⑤ tobi_set で入れて ok"],
   /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1 S1〜S4・K-3・組に1つ） */
   ["room_secret の前と同じパスを見ない", 'mahjong_private.mj_w_op', "if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then", "if false then", null, '⑮ room_secret：前と同じパス'],
-  ["room_secret のよくあるパスを見ない", 'mahjong_private.mj_w_op', "if exists (select 1 from mahjong.mj_common_pass x where x.key = v_key) then", "if false then", null, '⑮ room_secret：よくあるパス'],
   ["room_secret の今と同じ URL を見ない", 'mahjong_private.mj_w_op', "if v_s = s.url_token_hash then", "if false then", null, '⑮ room_secret：今と同じ URL'],
   ["op_results に channel_key を残す", 'public.mj_write', "case when (p_ops -> 0 ->> 'op') = 'room_secret' then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end", "v_ret", null, '⑮ room_secret：送り直しの答えに channel_key を書かない'],
   ["送り直しで channel_key を読み直さない", 'public.mj_write', "if (p_ops -> 0 ->> 'op') = 'room_secret' and (v_x ->> 'ok') = 'true' then", "if false then", null, '⑮ room_secret：送り直し →'],

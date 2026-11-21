@@ -64,8 +64,6 @@ jobs:
         run: node tests/rules.test.mjs
       - name: 起家からの順が要る半荘か（lib/needs-order.mjs が手で決めた答えを出すか・倉庫と同じかは needs-order.live.mjs＝手元）
         run: node tests/needs-order.test.mjs
-      - name: よくあるパスの名簿（schema.sql の種）と lib/common-pass.mjs が同じか・パスのそろえと形の確かめ（入口 mj_room_create は room-create.live.mjs＝手元）
-        run: node tests/common-pass.test.mjs
       - name: 部屋の URL の token の形と hash の式（lib/url-token.mjs＝端末と試験が使う1本・倉庫と同じかは room-join.live.mjs＝手元）
         run: node tests/url-token.test.mjs
       - name: 半荘の pt（lib/hanchan-pt.mjs）＝§5 の正解表（丸め・同点・箱下・3人・飛び賞）＋素点の全部の形 7,049,112 通りを別の作りの式と突き合わせ

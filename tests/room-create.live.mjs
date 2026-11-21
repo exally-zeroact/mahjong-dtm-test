@@ -79,9 +79,6 @@ const BAD = [
   ['ルール null', call(uid(), '甲', PASS, null, sec(hex())), 'range', '(object)'],
   ['ルールに無い鍵', call(uid(), '甲', PASS, '{"players":4,"zzz":1}', sec(hex())), 'range', '(unknown)'],
   ['ルール 返し＜持ち点', call(uid(), '甲', PASS, '{"players":4,"start_pts":30000,"return_pts":25000}', sec(hex())), 'range', 'return_pts'],
-  ['よくあるパス Password', call(uid(), '甲', 'Password', '{"players":4}', sec(hex())), 'common', null],
-  ['よくあるパス 全角の１２３４', call(uid(), '甲', '１２３４', '{"players":4}', sec(hex())), 'common', null],
-  ['よくあるパス 半角カナのﾏｰｼﾞｬﾝ', call(uid(), '甲', 'ﾏｰｼﾞｬﾝ', '{"players":4}', sec(hex())), 'common', null],
   ['一意の当たり url（別の op_id）', call(uid(), '甲', PASS, '{"players":4}', sec(U1)), 'dup', 'url_token_hash'],
   ['送り直しで url が違う', call(OP1, '甲', PASS, '{"players":4}', sec(hex())), 'mismatch', null],
 ];
@@ -178,6 +175,7 @@ begin
   ${AS_U}
   ${undo('gone', `update mahjong.rooms set deleted_at = now() where id = rid;
     r := ${call(OP1, '甲', PASS, '{"players":4}', S1)}; res := res || jsonb_build_object('gone', r, 'c_gone', ${CNT});`)}
+  ${undo('p1234', `r := ${call(uid(), '甲', '1234', '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('p1234', r);`)}
   ${undo('full', `update mahjong.totals set rooms_all = (select cap - 20 from mahjong.mj_caps where tbl = 'rooms' and scope = 'all') where id = 1;
     cx := ${CNT}; r := ${fresh()}; res := res || jsonb_build_object('full', r, 'c_full0', cx, 'c_full1', ${CNT});
     update mahjong.totals set rooms_all = (select cap - 21 from mahjong.mj_caps where tbl = 'rooms' and scope = 'all') where id = 1;
@@ -295,6 +293,7 @@ if (out) {
   /* ⑦ */
   ok('⑦ R−20 で full', out.full && out.full.err === 'full', JSON.stringify(out.full || out.full_err));
   ok('⑦ full で何も増えない', out.c_full0 && same(out.c_full0, out.c_full1));
+  ok('B0 よくあるパスの弾きは無い＝1234 で作れる', out.p1234 && out.p1234.ok === true, JSON.stringify(out.p1234));
   ok('⑦ R−21 なら作れる', out.full_m1 && out.full_m1.ok === true, JSON.stringify(out.full_m1));
   /* ⑧ */
   ok('⑧ 1分20個の後は busy:all', out.b1m && out.b1m.err === 'busy' && out.b1m.what === 'all', JSON.stringify(out.b1m || out.b1m_err));
