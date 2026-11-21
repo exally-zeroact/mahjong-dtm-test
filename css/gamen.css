@@ -65,6 +65,10 @@
 .r-hyou tbody th { font-size: 14px; font-weight: 400; color: var(--c-ji-usui); }
 .r-hyou tbody td { height: 56px; }
 .r-hyou td b { display: block; font-size: 17px; font-weight: 700; }
+/* 0回目の名前の列（押すと人を選ぶ）＝15px の字・高さ36・押す所は ::after で44 */
+.r-nm { position: relative; width: 100%; height: 36px; padding: 0 2px; font: inherit; font-size: 15px; font-weight: 700; border: 0; border-radius: 8px; background: transparent; color: var(--c-ji); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-nm::after { content: ""; position: absolute; inset: -4px 0; }
+.r-nm-add { font-size: 14px; background: var(--c-seg); color: var(--c-kon); }
 .r-hyou td small { display: block; margin-top: 2px; font-size: 11px; color: var(--c-ji-usui); white-space: nowrap; }
 .r-hyou tfoot th, .r-hyou tfoot td { position: sticky; bottom: 0; height: 44px; font-size: 17px; font-weight: 800; background: var(--c-seg); border-bottom: 0; }
 .r-row { cursor: pointer; }

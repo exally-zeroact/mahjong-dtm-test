@@ -7,10 +7,10 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '3658518c9d03';
+const VER = '2285a2c52134';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
-  ['/css/gamen.css', 'fc5daeccdc2b0ade87ed2a7127873596c3f14217ca987c67da0f8819ff8bbcc0'],
+  ['/css/gamen.css', 'd44778981a9846fe130b9f4c06e2d09427cba3352c834674aac8c2b92d3fdf20'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
@@ -20,7 +20,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '74d940aac968df411af4fa575104a2a7beef531c4775437c3b6c8e7e6206492b'],
   ['/js/gamen-home.mjs', 'fd60b18ecd59219c0bf805886ea266f91842e2fd22f0256cc1939a15099d33a1'],
-  ['/js/gamen-room.mjs', '9ce4c560d8688dfc41f0797cb84efa824cf173da8266aadd6208caad41f9d6b2'],
+  ['/js/gamen-room.mjs', 'fba3de56c2a3c675f3d95022bc608bc2d7751ea9e7fc1d0835f44d0d7b375d43'],
   ['/js/gamen-rules.mjs', '11616375c9bdc79373083c9705ec8e94b31fda29c2f69e64185025f3e43c5c3d'],
   ['/js/gamen-taikyoku.mjs', '5b46acbaf9ba19c8253d596b698b01ec6491ff6f6cf540e000a438dbcb8bf41c'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],

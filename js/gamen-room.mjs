@@ -21,6 +21,8 @@ const WRITE_READY = false; // 倉庫の mj_write が入った日に true（送�
 const KEY = (uid, rid) => 'mj-room:' + uid + ':' + rid;
 const OUT = (uid, rid) => 'mj-outbox:' + uid + ':' + rid;
 const NAMES = (uid) => 'mj-names:' + uid;
+// 卓の人（前もって・gamen_0kaime_sadame.md v1.1 段1）＝半荘の前に決めた n 人。この端末だけ（倉庫の席の op は段2）
+const SEATS = (uid, rid) => 'mj-seats:' + uid + ':' + rid;
 
 const fmt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('ja-JP');
 const fmtPt = (pt10) => (pt10 > 0 ? '+' : pt10 < 0 ? '−' : '') + (Math.abs(pt10) / 10).toFixed(1);
@@ -61,9 +63,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   let viewSnap = false;
   let confirming = false; // 入っていない物があるまま終える時の確かめ（開いている画面の間だけ）
   let closeErr = null;    // 対局終了を残せなかった時の err
+  let pmErr = null;       // チップ等の［−］［＋］が弾かれた時の字（黙らない・v1.1）
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add の1秒まとめ
-  const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; render(); };
+  const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; render(); };
 
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
@@ -122,15 +125,27 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     bar({ back: 'ホーム', title: '対局', right: 'ルール', onRight: () => { page = 'rules'; render(); }, ten });
     const v = tableView(st, table.table_id);
     let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>';
-    h += renderTable(v);
+    h += v.rows.length ? renderTable(v) : renderHead(preSeats());
     h += '<button class="btn btn-main r-add" id="rAdd">＋ ' + v.nextNo + '回目の点を入れる</button>';
-    if (v.windows.length) h += renderWindows(v) + renderCheck(v) + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
+    if (v.windows.length) h += renderWindows(v) + renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
     wireRoom();
   }
 
+  // 0回目（行が0）の表の頭＝卓の人が在れば名前の列・無ければ［＋名前］×n。押すと人を選ぶ（決めるだけ・点の画面へは行かない）
+  function renderHead(ps) {
+    const cells = ps ? ps.map((m) => '<th><button type="button" class="r-nm" data-seats="1" aria-label="' + esc(nameOf(m)) + '・人を選び直す">' + esc(nameOf(m)) + '</button></th>')
+      : Array.from({ length: n }, () => '<th><button type="button" class="r-nm r-nm-add" data-seats="1">＋名前</button></th>');
+    return '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + cells.join('') + '</tr></thead></table></div>';
+  }
+  function preSeats() {
+    const x = load(SEATS(uid, rid), null);
+    if (!x || typeof x !== 'object' || x.table_id !== table.table_id || !Array.isArray(x.seats) || x.seats.length !== n || new Set(x.seats).size !== n) return null;
+    if (!x.seats.every((m) => { const y = st.members.find((z) => z.member_id === m); return y && y.active; })) return null;
+    return x.seats.slice();
+  }
   function renderTable(v) {
     if (!v.rows.length) return '';
     const ppl = v.people;
@@ -227,7 +242,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (act.length || hist.length) h += '<p class="r-hint">押すだけでこの半荘に入る。ほかの部屋の名前を押すと、この部屋の名簿にも足される。</p>';
     h += '</div><p class="sec">新しい人</p><label class="r-in"><span>名前</span><input id="pNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
     h += '<div id="pCand"></div><p class="err" id="pErr"></p>';
-    h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で始める</button>' +
+    h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で' + (p.only ? '決める' : '始める') + '</button>' +
       '<p class="r-hint">席（東南西北）は選ばない。同点の時だけ「上家はどっち？」を聞く（ルールが上家取りの時）。</p></div>';
     el.innerHTML = h;
     wirePick();
@@ -292,7 +307,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       for (const [k, v] of Object.entries(x.tobi_to)) if (bs.includes(Number(k))) tobi[k] = v;
       entry = { hanchan_id: hid, no: x.no, seats: x.seats.slice(), cells: x.cells.map((v) => Number(v).toLocaleString("ja-JP")), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], tobi, voided: x.voided };
     } else {
-      const seats = lastSeats();
+      const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = { seats: [] }; page = 'pick'; render(); return; }
       entry = { seats, no: tableView(st, table.table_id).nextNo, cells: new Array(n).fill(''), lost: '0', step: 'cells', order: [], tobi: {} };
     }
@@ -558,7 +573,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
 
   function plusMinus(mid, kind, add) {
     const r = applyOps(st, [{ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }], { roomRules: room.rules });
-    if (!r.ok) return;
+    if (!r.ok) { pmErr = r.res && r.res.at === 'member_id' ? 'この人はこの卓の半荘に入っていないので、入れられませんでした' : '入れられませんでした'; render(); return; }
+    pmErr = null;
     st = r.state; save(KEY(uid, rid), st);
     const k = mid + '|' + kind;
     merge.set(k, (merge.get(k) || 0) + add);
@@ -581,6 +597,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function wireRoom() {
     const q = (s) => el.querySelector(s);
     q('#rAdd').onclick = () => startEntry(null);
+    for (const b of el.querySelectorAll('[data-seats]')) b.onclick = () => { picking = { seats: preSeats() || [], only: true }; page = 'pick'; render(); };
     if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; render(); };
     for (const b of el.querySelectorAll('.r-no')) b.onclick = () => startEntry(b.dataset.h);
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
@@ -594,7 +611,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     for (const b of q('#pBase').querySelectorAll('[data-pick]')) b.onclick = () => { if (seat(b.dataset.pick)) renderPick(); };
     for (const b of q('#pBase').querySelectorAll('[data-hist]')) b.onclick = () => { const r = addMember(b.dataset.hist); pickDone(r.mid || r.dup); };
     q('#pGo').onclick = () => {
-      const seats = picking.seats.slice(); picking = null;
+      const seats = picking.seats.slice(), only = picking.only; picking = null;
+      save(SEATS(uid, rid), { table_id: table.table_id, seats });
+      if (only) { toRoom(); return; }
       entry = { seats, no: tableView(st, table.table_id).nextNo, cells: new Array(n).fill(''), lost: '0', step: 'cells', order: [], tobi: {} };
       page = 'edit'; render();
     };
