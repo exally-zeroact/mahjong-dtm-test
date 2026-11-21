@@ -83,11 +83,13 @@ const bigKids = (v, rs) => `
   insert into mahjong.op_results (room_id, op_id, result, user_id) select ${v}, gen_random_uuid(), '{}'::jsonb, us[1] from generate_series(1, 5);
   insert into mahjong.room_accounts (room_id, user_id, role, joined_via) select ${v}, us[k], 'nyu', 'pass' from generate_series(2, 4) k;
   insert into mahjong.room_bans (room_id, user_id) values (${v}, us[5]);
+  insert into mahjong.member_claims (room_id, member_id, user_id) select ${v}, m.id, us[k] from mahjong.members m, generate_series(2, 3) k where m.room_id = ${v};   -- 名乗り 8行（2c-2b N1）
   insert into mahjong.settle_snaps (room_id, session_id, rev, content, used, missing) values (${v}, s1, 1, '{}', '{}', '[]');`;
 /* 部屋に残っている子の数 */
 const KIDS = (v) => `(select count(*) from mahjong.history where room_id = ${v}) + (select count(*) from mahjong.hanchans where room_id = ${v})
   + (select count(*) from mahjong.sessions where room_id = ${v}) + (select count(*) from mahjong.members where room_id = ${v})
-  + (select count(*) from mahjong.rule_sets where room_id = ${v}) + (select count(*) from mahjong.room_accounts where room_id = ${v})`;
+  + (select count(*) from mahjong.rule_sets where room_id = ${v}) + (select count(*) from mahjong.room_accounts where room_id = ${v})
+  + (select count(*) from mahjong.member_claims where room_id = ${v})`;
 const undo = (key, body) => `
   begin
     ${body}
@@ -224,10 +226,12 @@ begin
   ${undo('s0', `${mkRoom('v', 'rs', { deleted: "now() - interval '8 days'" })}
     insert into mahjong.rule_sets (id, version, room_id, rules) values (rs, 2, v, '{"players":4}');
     ${mkPlay('v', 'rs', 1, 's1', 't1', 2)} ${mkPlay('v', 'rs', 2, 's2', 't2', 2)}
+    insert into mahjong.members (id, room_id, name, name_key) values (gen_random_uuid(), v, 'c', 'c');
+    insert into mahjong.member_claims (room_id, member_id, user_id) select v, m.id, us[2] from mahjong.members m where m.room_id = v;   -- 名乗り1行（2c-2b N1 の 1-a）
     a0 := ${ALL}; ${SW(100)}
     begin set constraints all immediate; e := 'ok'; exception when others then e := sqlerrm; end; set constraints all deferred;
     res := res || jsonb_build_object('s0', jsonb_build_object('room', exists (select 1 from mahjong.rooms where id = v), 'rs', (select count(*) from mahjong.rule_sets where room_id = v),
-      'han', (select count(*) from mahjong.hanchans where room_id = v), 'all', ${ALL} - a0, 'fk', e));`)}
+      'han', (select count(*) from mahjong.hanchans where room_id = v), 'all', ${ALL} - a0, 'fk', e, 'cl', (select count(*) from mahjong.member_claims where room_id = v)));`)}
   /* ④ 大きい消した部屋を p_max 1〜13 で回す・消して6日の部屋は触らない */
   ${undo('big', `${mkRoom('v', 'rs', { deleted: "now() - interval '8 days'" })} ${bigKids('v', 'rs')}
     ${mkRoom('v2', 'rs2', { deleted: "now() - interval '6 days'" })}
@@ -240,7 +244,7 @@ begin
     end loop;
     res := res || jsonb_build_object('big', jsonb_build_object('kids0', n, 'calls', kc, 'fk', e, 'room', exists (select 1 from mahjong.rooms where id = v),
       'bad', exists (select 1 from mahjong.limits where kind = 'sweep:bad' and key = v::text), 'all', ${ALL} - a0,
-      'd6', exists (select 1 from mahjong.rooms where id = v2), 'd6kids', ${KIDS('v2')}));`)}
+      'd6', exists (select 1 from mahjong.rooms where id = v2), 'd6kids', ${KIDS('v2')}, 'cl0', (select count(*) from mahjong.member_claims where room_id = v) = 0));`)}
   /* ⑧ 1回の時間（p_max 100・④の部屋・5回の各々） */
   ${undo('tm', `${mkRoom('v', 'rs', { deleted: "now() - interval '8 days'" })} ${bigKids('v', 'rs')}
     for i in 1..5 loop t0 := clock_timestamp(); ${SW(100)} ms := ms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
@@ -315,6 +319,7 @@ if (out) {
   /* ④ */
   ok('④-0 小さい消した部屋（2版を開催日・卓・半荘が指す）が1回で消える・rooms_all −1', out.s0 && out.s0.room === false && Number(out.s0.rs) === 0 && Number(out.s0.han) === 0 && Number(out.s0.all) === -1, J(out.s0));
   ok('④-0 外部キーをその場で見て赤0', out.s0 && out.s0.fk === 'ok', out.s0 && out.s0.fk);
+  ok('④-0 小さい消した部屋の名乗り1行も消える（2c-2b N1）', out.s0 && Number(out.s0.cl) === 0 && out.s0.room === false, J(out.s0));
   ok('④-1 1回目の掃除で消えた版は p_max 100 以下（§3.2 手順ごとに最大100行）', out.rv && Number(out.rv.first) > 0 && Number(out.rv.first) <= 100, JSON.stringify(out.rv));
   ok('⑨ 1回目は room_accounts を消して進む（印なし）', out.stk1 && out.stk1.mark === false && Number(out.stk1.ra) === 0, J(out.stk1));
   ok('⑨ 2回目は1行も消せない＝mj_sweep_stuck で部屋は残り sweep:bad の印・版は 105 のまま', out.stk && out.stk.room === true && out.stk.mark === true && Number(out.stk.rs) === 105, J(out.stk));
@@ -323,6 +328,7 @@ if (out) {
   const b = out.big || {};
   ok('④ 大きい部屋を p_max 1〜13 で回して毎回 外部キー赤0', b.fk === 'ok', b.fk);
   ok('④ 最後に rooms が消え rooms_all −1・印は付かない', b.room === false && Number(b.all) === -1 && b.bad === false, J(b));
+  ok('④ 大きい部屋の名乗り（8行）も残らない（2c-2b N1）', b.cl0 === true, J(b));
   ok('④ 消して6日の部屋は触らない', b.d6 === true && Number(b.d6kids) === 2, J(b));
   console.log(`    （④ 子 ${b.kids0} 行を ${b.calls} 回で消した）`);
   /* ⑧ */

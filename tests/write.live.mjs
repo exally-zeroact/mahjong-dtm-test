@@ -3,11 +3,12 @@
  * 案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2 の「試験」§8 ⓪〜⑨・⑧'：
  *  ⓪ ログイン無し → mj_session・anon と PUBLIC に EXECUTE が無い・下請けは客から呼べない
  *  ① 一本道（member_add×4 → session_add → table_add → hanchan_start → cell_set で崩す → 戻す → extra_add ± → settle_snap）
- *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 16個・31個・知らない op）
+ *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 11個・31個・知らない op）
  *  ③ 範囲 ④ 版 ⑤ 飛び賞 ⑥ そろった後 ⑦ チップ・祝儀（11通り・倉庫と lib〔画面の lib/room-state.mjs の tableView〕に同じ表を通す）
  *  ⑦' 2c-2a1（紙 write2_sekkei.md v3.3）＝卓の一度そろった（first_complete_at）・卓の印・正味の門（v1510:195①）・使わない種と取り消した開催日・前の組の締め
  *  ⑪ 2c-2a2（作り write_2c2a2_tsukuri.md）＝直す op 6個（member_rename・member_active・session_edit・table_edit・hanchan_seats・extra_set）と印・版
  *  ⑫ 2c-3b（紙 write3_sekkei.md §3）＝自由な項目の枚 c:<id>  ⑬ 2c-3c（同 §4・v1.1 S1〜S3）＝やきとり yakitori_set（形・使わない部屋・版・締めた後の印・split の端数で並び・飛びの直しを止めない・取り消した半荘）
+ *  ⑭ 2c-2b（紙 write4_sekkei.md v1〜v1.2・write4_shiken_keikaku.md）＝人の op 5つ（member_link・member_unlink・member_relink・role_set・account_remove）・役の門 mj_role・入り直しの門 mj_reauth（jwt の amr 10分）・名乗り member_claims
  *  ⑩ 2c-2a0＝範囲の端の表 tests/fixtures/write-cases.json を倉庫に流す（want_db ?? want と ok／err だけ比べる・弾いた組は何も書かない）
  *  ⑧ 数え（先見・後見の busy・internal と一時の失敗・古い窓・入と管が別）⑧' 上限 ⑨ 送り直し・部屋・last_seen
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋・trigger も全部戻る）。
@@ -39,7 +40,7 @@ const q = (t) => D + t + D;
 const lit = (s) => q('v') + s + q('v');
 const MAIL = 'mj-write.invalid';
 const PASS = 'Zq9Pass';
-const N_U = 7;                                // 1＝A・C・E・F の持ち主 2＝A の入 3＝A の管 4＝入っていない人 5＝出す人 6＝B の持ち主 7＝空き
+const N_U = 11;                               // 1＝A・C・E・F の持ち主 2＝A の入 3＝A の管 4＝入っていない人 5＝出す人 6＝B の持ち主 7＝空き 8〜11＝⑭ で A に足す人 xu1〜4
 const asWho = (i) => `perform set_config('request.jwt.claims', jsonb_build_object('sub', us[${i}], 'session_id', ss[${i}], 'role', 'authenticated')::text, true);`;
 const U = () => crypto.randomUUID();
 const RS = `delete from mahjong.limits where kind like 'write:%';`;
@@ -170,8 +171,38 @@ const setupOps = (room) => {
   return A(...xs);
 };
 const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) => c[6].map(([who, kind, add]) => O('extra_add', { table_id: c[4], member_id: RM[room].m[who], kind, add }))));
-const NAMES19 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'yakitori_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
-  'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'extra_set'];
+const NAMES24 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'yakitori_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
+  'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'extra_set',
+  'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove'];
+/* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2）：人 8〜11＝足す人 xu1〜4（各節の頭で ra の room_accounts へ nyu で直に入れる）・L0〜L9＝各節の頭で足す名簿の人
+ *  入り直しの jwt＝asWhoA（asWho に amr を足す）。FRESH は古い otp と新しい password（max を見るか）・OLD＝601秒前・空・字の timestamp・字の amr */
+const L = Array.from({ length: 10 }, () => U());
+const UJ = (i) => S(`to_jsonb(us[${i}]::text)`);
+const asWhoA = (i, amr) => `perform set_config('request.jwt.claims', jsonb_build_object('sub', us[${i}], 'session_id', ss[${i}], 'role', 'authenticated', 'amr', ${amr})::text, true);`;
+const EP = `floor(extract(epoch from now()))`;
+const AMR = {
+  fresh: `jsonb_build_array(jsonb_build_object('method', 'otp', 'timestamp', ${EP} - 3000), jsonb_build_object('method', 'password', 'timestamp', ${EP} - 5))`,
+  old: `jsonb_build_array(jsonb_build_object('method', 'password', 'timestamp', ${EP} - 601))`,
+  empty: `'[]'::jsonb`,
+  strts: `jsonb_build_array(jsonb_build_object('method', 'password', 'timestamp', (${EP})::text))`,
+  str: `to_jsonb('password'::text)`,
+};
+const WA = (key, who, amr, room, ops) => W(key, who, room, ops).replace(asWho(who), asWhoA(who, amr));
+const LU = (i, who) => `update mahjong.members set user_id = us[${who}] where id = '${L[i]}';`;
+const CL = (i, who) => `insert into mahjong.member_claims (room_id, member_id, user_id) values (ra, '${L[i]}', us[${who}]);`;
+const lk = (i) => O('member_link', { member_id: L[i] });
+const ul = (i) => O('member_unlink', { member_id: L[i] });
+const rl = (i, who) => O('member_relink', { member_id: L[i], user_id: UJ(who) });
+const rset = (who, role) => O('role_set', { user_id: UJ(who), role });
+const ar = (who) => O('account_remove', { user_id: UJ(who) });
+const H14 = (p) => `${RS}
+    insert into mahjong.room_accounts (room_id, user_id, role, joined_via) select ra, us[k], 'nyu', 'pass' from generate_series(8, 11) k;
+    ${W(p + '0', 1, 'ra', A(...L.map((id, i) => ma(id, 'L' + i))))}`;
+const ST14 = (key) => ROW(key, `select jsonb_build_object(
+    'lu', (select jsonb_agg(m.user_id order by x.o) from unnest(array[${L.map((id) => `'${id}'::uuid`).join(', ')}]) with ordinality x(id, o) left join mahjong.members m on m.id = x.id),
+    'ra', (select jsonb_object_agg(a.user_id, a.role) from mahjong.room_accounts a where a.room_id = ra),
+    'bans', (select jsonb_agg(b.user_id) from mahjong.room_bans b where b.room_id = ra),
+    'cl', (select jsonb_agg(jsonb_build_array(c.member_id, c.user_id)) from mahjong.member_claims c where c.room_id = ra))`);
 
 /* ⑩ 範囲の端の表（2c-2a0・紙 write2_sekkei.md §1 2c-2a0・§5）＝tests/fixtures/write-cases.json を倉庫に流す（画面の写しの試験 room-state.test.mjs と同じ表）
  *  部屋は表の rules ごとに1つ（持ち主＝人7）・base_ops を当ててから、case ごとに塊の中で書いて戻す。比べは want_db ?? want と ok／err だけ。
@@ -272,7 +303,7 @@ const body = `
   ${W('dupn', 2, 'ra', A(ma(U(), ' 甲 ')))}
   ${asWho(2)}
   arr := '{}';
-  for nm in select name from mahjong.mj_ops where name not in (${NAMES19.map((n) => `'${n}'`).join(', ')}) order by name loop
+  for nm in select name from mahjong.mj_ops where name not in (${NAMES24.map((n) => `'${n}'`).join(', ')}) order by name loop
     r := public.mj_write(ra, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', nm)));
     arr := arr || jsonb_build_object(nm, r);
   end loop;
@@ -722,6 +753,89 @@ const body = `
   ${undo('fhi', `update mahjong.mj_caps set cap = (select history_count from mahjong.rooms where id = ra) where tbl = 'history' and scope = 'room';
     ${W('fhi', 2, 'ra', A(ma(U(), '履歴満ち')))}`)}
 
+  /* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2・各節を undo で分ける） */
+  ${undo('qr', `${H14('qr')}
+    ${W('qr1', 2, 'ra', A(rl(0, 2)))}
+    ${W('qr2', 2, 'ra', A(ar(5)))}
+    ${W('qr3', 3, 'ra', A(rset(2, 'kan')))}
+    ${W('qr4', 2, 'ra', A(ma(U(), 'qr4'), ar(5)))}`)}
+  ${undo('qa', `${H14('qa')}
+    ${WA('qa1', 1, AMR.old, 'ra', A(rset(2, 'kan')))}
+    ${ST14('qa1_s')}
+    ${W('qa2', 1, 'ra', A(rset(2, 'kan')))}
+    ${WA('qa3', 1, AMR.empty, 'ra', A(rset(2, 'kan')))}
+    ${WA('qa4', 1, AMR.strts, 'ra', A(rset(2, 'kan')))}
+    ${WA('qa5', 1, AMR.str, 'ra', A(rset(2, 'kan')))}
+    ${WA('qa6', 1, AMR.fresh, 'ra', A(rset(2, 'kan')))}
+    ${ST14('qa6_s')}
+    ${W('qa7', 1, 'ra', A(rset(2, 'nyu')))}
+    ${ST14('qa7_s')}`)}
+  ${undo('ql', `${H14('ql')}
+    ${W('ql1', 2, 'ra', A(lk(0)))}
+    ${W('ql2', 2, 'ra', A(lk(0)))}
+    ${W('ql3', 2, 'ra', A(lk(1)))}
+    ${LU(2, 8)}
+    ${W('ql4', 3, 'ra', A(lk(2)))}
+    ${W('ql5', 3, 'ra', A(lk(2)))}
+    ${ST14('ql5_s')}
+    ${CL(0, 9)}
+    ${W('ql6', 2, 'ra', A(ul(0), lk(1)))}
+    ${ST14('ql6_s')}
+    ${CL(1, 3)}
+    ${W('ql7', 3, 'ra', A(lk(3)))}
+    ${ST14('ql7_s')}
+    ${LU(4, 10)}
+    ${W('ql8', 11, 'ra', A(lk(1)))}
+    ${W('ql9', 11, 'ra', A(lk(2)))}
+    ${W('ql10', 11, 'ra', A(lk(3)))}
+    ${W('ql11', 11, 'ra', A(lk(4)))}
+    ${undo('qlc', `update mahjong.mj_caps set cap = (select count(*) from mahjong.member_claims where room_id = ra) where tbl = 'member_claims' and scope = 'room';
+      ${W('ql12', 9, 'ra', A(lk(2)))}`)}
+    update mahjong.members set active = false where id = '${L[9]}';
+    ${W('ql13', 9, 'ra', A(lk(9)))}
+    ${W('ql14', 9, 'ra', A(O('member_link', { member_id: MB[0] })))}`)}
+  ${undo('qu', `${H14('qu')}
+    ${LU(0, 2)} ${LU(1, 8)} ${LU(2, 9)}
+    ${W('qu1', 2, 'ra', A(ul(0)))}
+    ${W('qu2', 3, 'ra', A(ul(1)))}
+    ${W('qu3', 2, 'ra', A(ul(2)))}
+    ${W('qu4', 2, 'ra', A(ul(5)))}
+    ${ST14('qu_s')}`)}
+  ${undo('qe', `${H14('qe')}
+    ${LU(0, 2)}
+    ${W('qe1', 3, 'ra', A(rl(1, 2)))}
+    ${ST14('qe1_s')}
+    ${W('qe2', 3, 'ra', A(rl(2, 4)))}
+    insert into mahjong.room_bans (room_id, user_id) values (ra, us[5]);
+    ${W('qe3', 3, 'ra', A(rl(2, 5)))}
+    ${undo('qeo', `delete from mahjong.room_accounts where room_id = ra and user_id = us[1];
+      ${W('qe4', 3, 'ra', A(rl(3, 1)))}
+      ${ST14('qe4_s')}`)}`)}
+  ${undo('qs', `${H14('qs')}
+    ${WA('qs1', 1, AMR.fresh, 'ra', A(rset(8, 'kan')))}
+    ${WA('qs2', 1, AMR.fresh, 'ra', A(rset(9, 'kan')))}
+    ${WA('qs3', 1, AMR.fresh, 'ra', A(rset(10, 'kan')))}
+    ${WA('qs4', 1, AMR.fresh, 'ra', A(rset(11, 'kan')))}
+    ${ST14('qs_s')}
+    ${WA('qs5', 1, AMR.fresh, 'ra', A(rset(3, 'kan')))}
+    ${WA('qs6', 1, AMR.fresh, 'ra', A(rset(1, 'kan')))}
+    insert into mahjong.room_bans (room_id, user_id) values (ra, us[5]);
+    ${WA('qs7', 1, AMR.fresh, 'ra', A(rset(5, 'nyu')))}
+    ${WA('qs8', 1, AMR.fresh, 'ra', A(rset(2, 'boss')))}`)}
+  ${undo('qx', `${H14('qx')}
+    ${LU(4, 5)} ${LU(0, 8)} ${CL(0, 5)} ${CL(4, 9)}
+    ${W('qx1', 3, 'ra', A(ar(5)))}
+    ${ST14('qx1_s')}
+    ${W('qx2', 5, 'ra', A(ma(U(), 'qx2')))}
+    ${asWho(5)} r := public.mj_room_join('pass', v_no, null, ${lit(PASS)}); res := res || jsonb_build_object('qx3', r);
+    ${W('qx4', 3, 'ra', A(ar(5)))}
+    ${W('qx5', 3, 'ra', A(ar(1)))}
+    ${W('qx6', 1, 'ra', A(ar(3)))}
+    ${undo('qxl', `insert into mahjong.leagues (id, room_id, name, rule_set_id, owner_user_id, voided) values ('${U()}', ra, 'L', (select rule_set_id from mahjong.rooms where id = ra), us[2], true);
+      ${W('qx7', 3, 'ra', A(ar(2)))}`)}
+    ${W('qx8', 3, 'ra', A(ar(4)))}
+    ${undo('qxc', `update mahjong.mj_caps set cap = (select count(*) from mahjong.room_bans where room_id = ra) where tbl = 'room_bans' and scope = 'room';
+      ${W('qx9', 3, 'ra', A(ar(2)))}`)}`)}
   /* ⑨ 送り直し・部屋・last_seen */
   ${RS}
   ${W('rs1', 2, 'ra', A(O('extra_add', { table_id: TA, member_id: MA[2], kind: 'chip', add: 1 })), OPX)}
@@ -864,7 +978,7 @@ function check(out, lib, say) {
   ok('② session_add の league_id → bad', isErr('lg', 'bad', { at: 'league_id' }), J(R('lg')));
   ok('② 同じ名前（trim の後）→ dup・member_id と name を添える', isErr('dupn', 'dup') && R('dupn').member_id === MA[0] && R('dupn').name === '甲', J(R('dupn')));
   const ny = out.ny || {};
-  ok('② 19個の外の16個は全部 not_yet（i:0）', Object.keys(ny).length === 16 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
+  ok('② 24個の外の11個は全部 not_yet（i:0）', Object.keys(ny).length === 11 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
@@ -1106,6 +1220,54 @@ function check(out, lib, say) {
   ok('⑨ 無い部屋 → gone', isErr('nr', 'gone'), J(R('nr')));
   ok('⑨ last_seen：2時間前の行は now() に上がる', isOk('ls1') && out.ls1_v === true, J([R('ls1'), out.ls1_v]));
   ok('⑨ last_seen：5分前の行は動かない', isOk('ls2') && out.ls2_v === true, J([R('ls2'), out.ls2_v]));
+  /* ⑭ 2c-2b 人の op 5つ */
+  const ui = (x) => (x ? u.indexOf(x) + 1 : null);
+  const st = (k) => { const o = out[k] || {}; return { lu: (o.lu || []).map(ui), ra: Object.fromEntries(Object.entries(o.ra || {}).map(([a, b]) => [ui(a), b])),
+    bans: (o.bans || []).map(ui).sort((a, b) => a - b), cl: (o.cl || []).map(([m, x]) => [L.indexOf(m), ui(x)]).sort((a, b) => a[0] - b[0] || a[1] - b[1]) }; };
+  const r0 = (k) => JS((R(k).results || [])[0]);
+  ok('⑭ 用意（各節の頭で名簿 L0〜L9）→ ok', ['qr0', 'qa0', 'ql0', 'qu0', 'qe0', 'qs0', 'qx0'].every(isOk), J(['qr0', 'qa0', 'ql0', 'qu0', 'qe0', 'qs0', 'qx0'].map(R)));
+  ok('⑭ 役：入の member_relink・account_remove → mj_role need kan・何も書かない', isErr('qr1', 'mj_role', { i: 0, need: 'kan' }) && isErr('qr2', 'mj_role', { i: 0, need: 'kan' }) && has('qr1', rejNyu) && has('qr2', rejNyu),
+    J([R('qr1'), R('qr2'), d('qr1'), d('qr2')]));
+  ok('⑭ 役：管の role_set → mj_role need owner・何も書かない', isErr('qr3', 'mj_role', { i: 0, need: 'owner' }) && has('qr3', none), J([R('qr3'), d('qr3')]));
+  ok('⑭ 役：組の2つ目で足りない → mj_role i 1・1つ目も書かない', isErr('qr4', 'mj_role', { i: 1, need: 'kan' }) && has('qr4', none), J([R('qr4'), d('qr4')]));
+  ok('⑭ 入り直し：持ち主 OLD で role_set kan → mj_reauth within_min 10・役は nyu のまま', isErr('qa1', 'mj_reauth', { within_min: 10, i: 0 }) && st('qa1_s').ra[2] === 'nyu' && has('qa1', none), J([R('qa1'), st('qa1_s').ra]));
+  ok('⑭ 入り直し：amr 無し・空・字の timestamp・字の amr → mj_reauth', ['qa2', 'qa3', 'qa4', 'qa5'].every((k) => isErr(k, 'mj_reauth', { within_min: 10, i: 0 })), J(['qa2', 'qa3', 'qa4', 'qa5'].map(R)));
+  ok('⑭ 入り直し：FRESH（古い otp と新しい password＝max を見る）→ ok・kan に・履歴1', isOk('qa6') && st('qa6_s').ra[2] === 'kan' && has('qa6', { hc: 1, h: 1 }), J([R('qa6'), st('qa6_s').ra, d('qa6')]));
+  ok('⑭ 入り直し：amr 無しで nyu へ下げる → ok', isOk('qa7') && st('qa7_s').ra[2] === 'nyu', J([R('qa7'), st('qa7_s').ra]));
+  ok('⑭ link：空きへ → ok v2・履歴1', isOk('ql1') && r0('ql1') === JS({ i: 0, v: 2 }) && has('ql1', { hc: 1, h: 1 }), J([R('ql1'), d('ql1')]));
+  ok('⑭ link：二度 → ok・書かない', isOk('ql2') && r0('ql2') === JS({ i: 0, v: 2 }) && has('ql2', { hc: 0, h: 0 }), J([R('ql2'), d('ql2')]));
+  ok('⑭ link：別の人にもう一人 → linked member_id', isErr('ql3', 'linked', { i: 0, member_id: L[0] }), J(R('ql3')));
+  ok('⑭ link：他人の人 → ok claimed（v そのまま・名乗り1行・hc 0）・二度目も1行', isOk('ql4') && r0('ql4') === JS({ i: 0, v: 1, claimed: true }) && has('ql4', { hc: 0, h: 0, rc: 0 })
+    && isOk('ql5') && has('ql5', { hc: 0, h: 0 }) && J(st('ql5_s').cl) === J([[2, 3]]) && st('ql5_s').lu[2] === 8, J([R('ql4'), R('ql5'), d('ql4'), st('ql5_s')]));
+  ok('⑭ link：[unlink L0, link L1] で移れて L0 の名乗りが消える', isOk('ql6') && st('ql6_s').lu[0] === null && st('ql6_s').lu[1] === 2 && !st('ql6_s').cl.some((c) => c[0] === 0) && has('ql6', { hc: 2 }),
+    J([R('ql6'), st('ql6_s'), d('ql6')]));
+  ok('⑭ link：名乗った人が空きへつながると、その人の名乗りが全部消える（N3）', isOk('ql7') && st('ql7_s').lu[3] === 3 && !st('ql7_s').cl.some((c) => c[1] === 3), J([R('ql7'), st('ql7_s')]));
+  ok('⑭ link：1人4つ目 → full member_claims_user', ['ql8', 'ql9', 'ql10'].every((k) => isOk(k) && R(k).results?.[0]?.claimed === true) && isErr('ql11', 'full', { what: 'member_claims_user' }),
+    J(['ql8', 'ql9', 'ql10', 'ql11'].map(R)));
+  ok('⑭ link：部屋の cap → full member_claims', isErr('ql12', 'full', { what: 'member_claims' }), J([R('ql12'), out.qlc_err]));
+  ok('⑭ link：使わない印の人・よその部屋の人 → bad member_id', isErr('ql13', 'bad', { at: 'member_id' }) && isErr('ql14', 'bad', { at: 'member_id' }), J([R('ql13'), R('ql14')]));
+  ok('⑭ unlink：本人 → ok・履歴1', isOk('qu1') && st('qu_s').lu[0] === null && has('qu1', { hc: 1, h: 1 }), J([R('qu1'), d('qu1')]));
+  ok('⑭ unlink：管が他人の → ok', isOk('qu2') && st('qu_s').lu[1] === null, J(R('qu2')));
+  ok('⑭ unlink：入が他人の → mj_role need kan・外れない', isErr('qu3', 'mj_role', { i: 0, need: 'kan' }) && st('qu_s').lu[2] === 9, J([R('qu3'), st('qu_s')]));
+  ok('⑭ unlink：空 → ok・書かない', isOk('qu4') && has('qu4', { hc: 0, h: 0 }), J([R('qu4'), d('qu4')]));
+  ok('⑭ relink：付け替えで前の人が空く（hist 2）', isOk('qe1') && has('qe1', { hc: 2, h: 2 }) && st('qe1_s').lu[0] === null && st('qe1_s').lu[1] === 2, J([R('qe1'), d('qe1'), st('qe1_s')]));
+  ok('⑭ relink：部屋に居ない人 → bad user_id', isErr('qe2', 'bad', { at: 'user_id' }), J(R('qe2')));
+  ok('⑭ relink：出した人 → bad user_id', isErr('qe3', 'bad', { at: 'user_id' }), J(R('qe3')));
+  ok('⑭ relink：持ち主（room_accounts の行が無くても）→ ok', isOk('qe4') && st('qe4_s').lu[3] === 1, J([R('qe4'), out.qeo_err]));
+  ok('⑭ role_set：管5（持ち主＋us3＋xu1〜3）まで通る・xu4 で full admins', ['qs1', 'qs2', 'qs3'].every(isOk) && isErr('qs4', 'full', { what: 'admins' })
+    && [8, 9, 10].every((i) => st('qs_s').ra[i] === 'kan') && st('qs_s').ra[11] === 'nyu', J([...['qs1', 'qs2', 'qs3', 'qs4'].map(R), st('qs_s').ra]));
+  ok('⑭ role_set：同じ役 → ok・書かない', isOk('qs5') && has('qs5', { hc: 0, h: 0 }), J([R('qs5'), d('qs5')]));
+  ok('⑭ role_set：持ち主へ・出した人 → bad user_id', isErr('qs6', 'bad', { at: 'user_id' }) && isErr('qs7', 'bad', { at: 'user_id' }), J([R('qs6'), R('qs7')]));
+  ok("⑭ role_set：role 'boss' → bad at role", isErr('qs8', 'bad', { at: 'role' }), J(R('qs8')));
+  { const s = st('qx1_s');
+    ok('⑭ account_remove：管が入を出す → ok（印1・行0・つながり外れ・名乗り0・hc 3）', isOk('qx1') && has('qx1', { hc: 3, h: 3 }) && J(s.bans) === J([5]) && !(5 in s.ra) && s.lu[4] === null && s.lu[0] === 8
+      && !s.cl.some((c) => c[1] === 5 || c[0] === 4), J([R('qx1'), d('qx1'), s])); }
+  ok('⑭ account_remove：出した人の mj_write → gone・mj_room_join → removed', isErr('qx2', 'gone') && out.qx3?.err === 'removed', J([R('qx2'), out.qx3]));
+  ok('⑭ account_remove：二度目 → ok・書かない', isOk('qx4') && has('qx4', { hc: 0, h: 0 }), J([R('qx4'), d('qx4')]));
+  ok('⑭ account_remove：持ち主 → bad reason owner・管 → reason kan', isErr('qx5', 'bad', { at: 'user_id', reason: 'owner' }) && isErr('qx6', 'bad', { at: 'user_id', reason: 'kan' }), J([R('qx5'), R('qx6')]));
+  ok('⑭ account_remove：リーグの持ち主（取り消した行でも）→ reason league', isErr('qx7', 'bad', { at: 'user_id', reason: 'league' }), J([R('qx7'), out.qxl_err]));
+  ok('⑭ account_remove：行も印も無い → bad user_id', isErr('qx8', 'bad', { at: 'user_id' }), J(R('qx8')));
+  ok('⑭ account_remove：room_bans の cap → full room_bans', isErr('qx9', 'full', { what: 'room_bans' }), J([R('qx9'), out.qxc_err]));
   /* ⑩ 範囲の端の表（write-cases.json） */
   ok('⑩ 表の版1・case 84以上・rules は表の名だけ', WT.v === 1 && WT_CASES.length >= 84 && WT_CASES.every((c) => c.rules in WT.rules), J(WT_CASES.filter((c) => !(c.rules in WT.rules)).map((c) => c.id + ':' + c.rules)));
   ok('⑩ 表の部屋を作れて base_ops が当たった', WT_RK.every((k) => out['made_' + WT_ROOM[k]]?.ok === true && isOk('tb_' + WT_ROOM[k])), J(WT_RK.map((k) => [out['made_' + WT_ROOM[k]], R('tb_' + WT_ROOM[k])])));
@@ -1141,9 +1303,9 @@ function KARI() {
 }
 const fnText = (name) => {
   const a = SCHEMA.indexOf(`create or replace function ${name}(`);
-  const b = SCHEMA.indexOf('end $fn$;', a);
+  const b = SCHEMA.indexOf('$fn$;', SCHEMA.indexOf('$fn$', a) + 4);   // 終わり＝本体の閉じ（plpgsql の end $fn$; も language sql の $fn$; も）
   if (a < 0 || b < 0) throw new Error('関数が見つからない: ' + name);
-  return SCHEMA.slice(a, b + 'end $fn$;'.length);
+  return SCHEMA.slice(a, b + '$fn$;'.length);
 };
 /* [名, 関数, 壊す字, 替える字, 2つ目の替え（無ければ null）, 狙った試験の名の頭] */
 const WAZA = [
@@ -1218,6 +1380,21 @@ const WAZA = [
   ["やきとりで mj_w_changed を呼ばない", 'mahjong_private.mj_w_op', "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);\n    perform mahjong_private.mj_w_changed(h.id, p_me);", "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);", null, '⑬ ⑥ 締めた後の印'],
   ["yakitori_set に 'fresh' を付ける", 'mahjong_private.mj_w_op', "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id);", "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id, 'fresh', true);", null, '⑬ S3'],
   ["hstate がやきとりの端数を見ない", 'mahjong_private.mj_w_hstate', "mj_needs_order(rs, v_cells, h.yakitori) ?| array['tie', 'yaki']", "mj_needs_order(rs, v_cells, h.yakitori) ? 'tie'", null, '⑬ S1 split の端数'],
+  /* ⑭ 2c-2b 人の op 5つ（紙 write4_shiken_keikaku.md の13本） */
+  ["役の門を外す（kan の case）", 'mahjong_private.mj_w_need', "when p_who in ('kan', 'owner_or_kan') then case when mahjong_private.mj_w_is_kan(p_role) then null else 'kan' end", "when p_who in ('kan', 'owner_or_kan') then null", null, '⑭ 役：入の member_relink・account_remove'],
+  ["owner を kan で通す", 'mahjong_private.mj_w_need', "when p_who = 'owner' then case when p_role = 'owner' then null else 'owner' end", "when p_who = 'owner' then case when mahjong_private.mj_w_is_kan(p_role) then null else 'owner' end", null, '⑭ 役：管の role_set'],
+  ["入り直しの門を外す", 'public.mj_write', "if not v_ra then", "if false then", null, '⑭ 入り直し：持ち主 OLD'],
+  ["grant を「いつも」入り直しにする", 'public.mj_write', "(v_re = 'grant' and (p_ops -> v_i ->> 'op') = 'role_set' and (p_ops -> v_i ->> 'role') is not distinct from 'kan')", "v_re = 'grant'", null, '⑭ 入り直し：amr 無しで nyu へ下げる'],
+  ["名乗りを残さない", 'mahjong_private.mj_w_op', "insert into mahjong.member_claims (room_id, member_id, user_id) values (p_room, v_id, p_me);", "null;", null, '⑭ link：他人の人'],
+  ["linked を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'linked', 'i', p_i, 'member_id', v_id2));", "null;", null, '⑭ link：別の人にもう一人'],
+  ["admins の +1（持ち主）を外す", 'mahjong_private.mj_w_op', "+ 1 + 1 > v_cap2", "+ 1 > v_cap2", null, '⑭ role_set：管5'],
+  ["relink の付ける人の確かめを外す", 'mahjong_private.mj_w_op', "if not (coalesce(v_u = v_own, false) or exists (select 1 from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u))", "if not (true)", null, '⑭ relink：部屋に居ない人'],
+  ["account_remove のリーグの持ち主の確かめを外す", 'mahjong_private.mj_w_op', "if exists (select 1 from mahjong.leagues l where l.room_id = p_room and l.owner_user_id = v_u) then", "if false then", null, '⑭ account_remove：リーグの持ち主'],
+  ["account_remove で members.user_id を外さない", 'mahjong_private.mj_w_op', "m.user_id = v_u order by m.id for update loop", "m.user_id = v_u and false order by m.id for update loop", null, '⑭ account_remove：管が入を出す'],
+  ["account_remove で room_bans を足さない", 'mahjong_private.mj_w_op', "insert into mahjong.room_bans (room_id, user_id) values (p_room, v_u) on conflict (room_id, user_id) do nothing;", "null;", null, '⑭ account_remove：管が入を出す'],
+  ["amr が空・字で通す", 'mahjong_private.mj_w_reauth_ok', "return v_max is not null and v_max >=", "return v_max is null or v_max >=", null, '⑭ 入り直し：amr 無し・空・字'],
+  ["unlink で名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.member_id = v_id;", "null;", null, '⑭ link：[unlink L0, link L1]'],
+  ["つながった時に名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.member_id = v_id or (x.room_id = p_room and x.user_id = p_me);", "null;", null, '⑭ link：名乗った人が空きへつながると'],
 ];
 
 let exit = 0;

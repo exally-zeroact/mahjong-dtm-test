@@ -322,6 +322,19 @@ create table if not exists mahjong.room_bans (
   primary key (room_id, user_id)
 );
 
+-- ── 名乗り（2c-2b・write4_sekkei.md v1.1 S2・v1.2 N1〜N5）＝他の人がつないだ名簿の人へ member_link した印（v18 F の帯の元）──
+--   帯を出すのは読む側（mj_read・2d＝名乗った人が今その部屋の room_accounts に行が在り room_bans に無い時だけ）。履歴は書かない・P に数えない。
+--   消す：その member の user_id が変わった時（link・unlink・relink・account_remove）にその member の分を全部・つながった人／出した人のその部屋の分を全部。
+--   上限＝mj_caps member_claims/room 200・member_claims_user/room 3（1人が部屋の中で名乗れる数）
+create table if not exists mahjong.member_claims (
+  room_id   uuid not null references mahjong.rooms(id) on delete cascade,
+  member_id uuid not null references mahjong.members(id) on delete cascade,
+  user_id   uuid not null references auth.users(id) on delete cascade,
+  at        timestamptz not null default now(),
+  primary key (member_id, user_id)
+);
+create index if not exists member_claims_room_user on mahjong.member_claims(room_id, user_id);
+
 -- ── 送り直しの答え（部屋ごと7日・10,000件まで・4KB まで・行を書いた組だけ・同じ op_id で別の人には返さない＝K-7） ──
 create table if not exists mahjong.op_results (
   room_id uuid not null references mahjong.rooms(id) on delete cascade,
@@ -511,7 +524,7 @@ alter table mahjong.mj_ops add constraint mj_ops_who_ok check (
 
 -- ── 表ごとの行の上限（段6＝当てた後に実の数で見る・§3.2） ──────────────────
 --   scope: room＝部屋ごと／session＝開催日ごと／table＝卓ごと
---   '*' の room＝P（履歴・room_accounts・room_bans 以外の全部の行＝room_bans は自分の上限 200 で数える）・history の room＝F（要約の行も数える）
+--   '*' の room＝P（履歴・room_accounts・room_bans・member_claims 以外の全部の行＝room_bans と member_claims は自分の上限 200 で数える）・history の room＝F（要約の行も数える）
 --   ★op_results は P に数えない★（自分の上限 op_results/room 10,000＝越えたら mj_write が古い物から消す・mj_sweep が row_count を減らさずに消すため）
 create table if not exists mahjong.mj_caps (
   tbl   text not null,
@@ -534,6 +547,8 @@ insert into mahjong.mj_caps (tbl, scope, cap) values
   ('room_accounts', 'room',    200),     -- 1部屋の人（人×部屋の行）
   ('admins',        'room',    5),       -- 管の人（持ち主も数える）
   ('room_bans',     'room',    200),     -- 出した人の印（満ちたら account_remove を止める）
+  ('member_claims', 'room',    200),     -- 名乗り（2c-2b・P に数えない）
+  ('member_claims_user', 'room', 3),     -- 1人が1部屋で名乗れる数（2c-2b v1.2 N4）
   ('op_results',    'room',    10000),
   ('rooms',         'all',     200)      -- R（消した取り消し待ちも数える）
 on conflict (tbl, scope) do update set cap = excluded.cap
@@ -893,6 +908,7 @@ begin
            + (select pg_catalog.count(*) from (select 1 from mahjong.members z where z.room_id = v_room limit v_max + 1) q)
            + (select pg_catalog.count(*) from (select 1 from mahjong.leagues z where z.room_id = v_room limit v_max + 1) q)
            + (select pg_catalog.count(*) from (select 1 from mahjong.room_bans z where z.room_id = v_room limit v_max + 1) q)
+           + (select pg_catalog.count(*) from (select 1 from mahjong.member_claims z where z.room_id = v_room limit v_max + 1) q)   -- 2c-2b v1.2 N1
            + (select pg_catalog.count(*) from (select 1 from mahjong.devices z where z.room_id = v_room limit v_max + 1) q)
            + (select pg_catalog.count(*) from (select 1 from mahjong.rule_sets z where z.room_id = v_room limit v_max + 1) q);
       -- rule_sets も数える＝1-a の cascade で消える行も p_max の内（§3.2 手順ごとに最大100行）。版が多い部屋は 1-b ⓐ が枠ずつ消す（rooms が指す1行は残す＝taiketsu 止め S1）
@@ -904,6 +920,7 @@ begin
           delete from mahjong.tables z where z.room_id = v_room;
           delete from mahjong.sessions z where z.room_id = v_room;
           delete from mahjong.room_accounts z where z.room_id = v_room;
+          delete from mahjong.member_claims z where z.room_id = v_room;   -- 2c-2b v1.2 N1＝cascade に任せない
           delete from mahjong.devices z where z.room_id = v_room;
           delete from mahjong.rooms x where x.id = v_room;
           update mahjong.totals set rooms_all = greatest(rooms_all - 1, 0) where id = 1;
@@ -957,6 +974,10 @@ begin
         end if;
         if v_left > 0 then
           delete from mahjong.room_accounts z where z.ctid = any(array(select y.ctid from mahjong.room_accounts y where y.room_id = v_room limit v_left for update skip locked));
+          get diagnostics v_d = row_count; v_left := v_left - v_d;
+        end if;
+        if v_left > 0 then   -- 名乗り（2c-2b v1.2 N1）＝members の前に明に消す（cascade で枠の外の行を消さない）
+          delete from mahjong.member_claims z where z.ctid = any(array(select y.ctid from mahjong.member_claims y where y.room_id = v_room limit v_left for update skip locked));
           get diagnostics v_d = row_count; v_left := v_left - v_d;
         end if;
         if v_left > 0 then
@@ -1350,9 +1371,10 @@ revoke all on function public.mj_room_join(text, text, text, text) from public, 
 grant execute on function public.mj_room_join(text, text, text, text) to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
--- op は19個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・yakitori_set（2c-3c）・
+-- op は24個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・yakitori_set（2c-3c）・
 --   kyotaku_set・extra_add・settle_snap・hanchan_void・hanchan_unvoid＋2c-2a2 の直す op＝member_rename・member_active・
---   session_edit・table_edit・hanchan_seats・extra_set）。残り16個は not_yet（2c-2b 〜）。
+--   session_edit・table_edit・hanchan_seats・extra_set）＋2c-2b の人の op 5個（member_link・member_unlink・member_relink・role_set・account_remove）。
+--   残り11個は not_yet（2c-2c 〜）。2c-2b から役の門（mj_ops.who_plain）と入り直しの門（mj_ops.re・jwt の amr 10分）が全部の op に効く。
 -- ★2c-2（履歴のたたみ・op_results の掃除・room_secret・リーグの L）が済むまで本番の倉庫へ出さない★
 -- 段：⓪ 人 → ① 形（行を読まない）→ ② 部屋（rooms を for no key update で押さえる）→ ③ op_id → ④ 先見
 --   → ⑤ 塊（副取引＝op・組の終わりの出し直し・上限・数え・履歴・後見・op_results）→ ⑥ 数え（塊の外・limits は一番最後）
@@ -1786,6 +1808,42 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_over(uuid, uuid, text, int, int) from public, anon, authenticated;
 
+-- ── 2c-2b 役の門・入り直しの門の下請け（write4_sekkei.md §1・§2＋v1.1 C2＝例外を出さない字・塊の外で呼ぶ） ──
+-- 管か（who_plain の kan／self_or_kan の「管」・持ち主も管＝v1.1 O3）
+create or replace function mahjong_private.mj_w_is_kan(p_role text) returns boolean
+language sql immutable set search_path = '' as $fn$
+  select coalesce(p_role in ('kan', 'owner'), false);
+$fn$;
+revoke all on function mahjong_private.mj_w_is_kan(text) from public, anon, authenticated;
+-- 役の足りなさ（null＝通る・字＝足りない役）。知らない who_plain は閉じる（none・revert_rule は c_keys に無いので①で止まる）
+create or replace function mahjong_private.mj_w_need(p_who text, p_role text) returns text
+language sql immutable set search_path = '' as $fn$
+  select case
+    when p_who in ('nyu', 'self', 'self_or_kan') then null
+    when p_who in ('kan', 'owner_or_kan') then case when mahjong_private.mj_w_is_kan(p_role) then null else 'kan' end
+    when p_who = 'owner' then case when p_role = 'owner' then null else 'owner' end
+    else coalesce(p_who, 'none') end;
+$fn$;
+revoke all on function mahjong_private.mj_w_need(text, text) from public, anon, authenticated;
+-- 10分の内に入り直したか（K-6）＝jwt の amr の各 timestamp（数の物だけ）の最大が now() − 10分 以上。jwt が読めない・amr が配列でない・数の timestamp が無い＝false（閉じる側）
+--   ★refresh では amr が変わらない（I-7③）＝refresh だけの token は10分の外になる＝閉じる側★
+create or replace function mahjong_private.mj_w_reauth_ok() returns boolean
+language plpgsql stable set search_path = '' as $fn$
+declare v_j jsonb; v_max numeric;
+begin
+  begin
+    v_j := auth.jwt() -> 'amr';
+  exception when others then
+    return false;
+  end;
+  if v_j is null or pg_catalog.jsonb_typeof(v_j) <> 'array' then return false; end if;
+  select pg_catalog.max((t.e -> 'timestamp')::numeric) into v_max
+    from pg_catalog.jsonb_array_elements(v_j) t(e)
+   where pg_catalog.jsonb_typeof(t.e) = 'object' and pg_catalog.jsonb_typeof(t.e -> 'timestamp') = 'number';
+  return v_max is not null and v_max >= pg_catalog.date_part('epoch', pg_catalog.now()) - 600;
+end $fn$;
+revoke all on function mahjong_private.mj_w_reauth_ok() from public, anon, authenticated;
+
 -- 1つの op を当てる（§3）。返し＝{r:{i, v?}, made, hist, h?, t?, fresh?, cap?:{tbl, id}}
 create or replace function mahjong_private.mj_w_op(p_room uuid, p_me uuid, p_role text, p_gid uuid, p_i int, p_o jsonb) returns jsonb
 language plpgsql set search_path = '' as $fn$
@@ -1796,6 +1854,7 @@ declare
   v_j jsonb; v_j2 jsonb; v_j3 jsonb; v_rules jsonb; v_d date; v_rate int;
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
+  v_u uuid; v_own uuid; v_m2 mahjong.members; v_cap2 int;
 begin
   -- ── 作る op ──
   if v_op = 'member_add' then
@@ -2420,13 +2479,160 @@ begin
       pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'), 'value', null, pg_catalog.to_jsonb(v_x), 1);
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1, 't', t.id,
       'ek', pg_catalog.jsonb_build_object('table_id', t.id, 'member_id', v_id, 'kind', p_o ->> 'kind'));
+
+  -- ── 2c-2b 人の op 5つ（write4_sekkei.md §3＋v1.1 S1・S2＋v1.2 N3・N4）・役は mj_write の門が先に見た ──
+  elsif v_op = 'member_link' then
+    -- 本人＝いつも呼んだ人（user_id を引数に取らない）
+    v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
+    select * into v_m from mahjong.members m where m.id = v_id and m.room_id = p_room for update;
+    if not found or not v_m.active then perform mahjong_private.mj_w_bad(p_i, 'member_id'); end if;
+    if v_m.user_id = p_me then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version), 'made', 0, 'hist', 0); end if;
+    -- 自分が同じ部屋の別の人に既につながっている＝linked（先に member_unlink・同じ組に [unlink, link] で移れる）
+    select m.id into v_id2 from mahjong.members m where m.room_id = p_room and m.user_id = p_me and m.id <> v_id;
+    if found then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'linked', 'i', p_i, 'member_id', v_id2));
+    end if;
+    if v_m.user_id is not null then
+      -- 他の人がつないだ人＝名乗りを1行残して ok（claimed・つないだ人の id は返さない＝v1.1 S2）・二度目は足さない・履歴なし
+      if not exists (select 1 from mahjong.member_claims x where x.member_id = v_id and x.user_id = p_me) then
+        select m.cap into v_cap2 from mahjong.mj_caps m where m.tbl = 'member_claims' and m.scope = 'room';
+        if v_cap2 is null or (select pg_catalog.count(*) from mahjong.member_claims x where x.room_id = p_room) >= v_cap2 then
+          perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'member_claims'));
+        end if;
+        select m.cap into v_cap2 from mahjong.mj_caps m where m.tbl = 'member_claims_user' and m.scope = 'room';
+        if v_cap2 is null or (select pg_catalog.count(*) from mahjong.member_claims x where x.room_id = p_room and x.user_id = p_me) >= v_cap2 then
+          perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'member_claims_user'));
+        end if;
+        insert into mahjong.member_claims (room_id, member_id, user_id) values (p_room, v_id, p_me);
+      end if;
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version, 'claimed', true), 'made', 0, 'hist', 0);
+    end if;
+    update mahjong.members m set user_id = p_me, version = m.version + 1 where m.id = v_id;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'members', pg_catalog.jsonb_build_object('id', v_id), 'user_id',
+      null, pg_catalog.to_jsonb(p_me::text), v_m.version + 1);
+    -- つながった（N3）＝その人の分の名乗りを全部・その member の名乗りを全部消す
+    delete from mahjong.member_claims x where x.member_id = v_id or (x.room_id = p_room and x.user_id = p_me);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version + 1), 'made', 0, 'hist', 1);
+
+  elsif v_op = 'member_unlink' then
+    v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
+    select * into v_m from mahjong.members m where m.id = v_id and m.room_id = p_room for update;
+    if not found then perform mahjong_private.mj_w_bad(p_i, 'member_id'); end if;
+    if v_m.user_id is null then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version), 'made', 0, 'hist', 0); end if;
+    -- 本人か管（self_or_kan の「本人か」は対象を見て判じる）
+    if v_m.user_id <> p_me and not mahjong_private.mj_w_is_kan(p_role) then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', p_i, 'need', 'kan'));
+    end if;
+    update mahjong.members m set user_id = null, version = m.version + 1 where m.id = v_id;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'members', pg_catalog.jsonb_build_object('id', v_id), 'user_id',
+      pg_catalog.to_jsonb(v_m.user_id::text), null, v_m.version + 1);
+    delete from mahjong.member_claims x where x.member_id = v_id;
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version + 1), 'made', 0, 'hist', 1);
+
+  elsif v_op = 'member_relink' then
+    v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
+    select * into v_m from mahjong.members m where m.id = v_id and m.room_id = p_room for update;
+    if not found or not v_m.active then perform mahjong_private.mj_w_bad(p_i, 'member_id'); end if;
+    v_u := mahjong_private.mj_w_uuid(p_o, 'user_id', p_i);
+    select x.owner_user_id into v_own from mahjong.rooms x where x.id = p_room;
+    -- 付ける人＝部屋の持ち主（行が無い事がある）か、部屋に行が在る人・どちらも出した人は除く
+    if not (coalesce(v_u = v_own, false) or exists (select 1 from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u))
+       or exists (select 1 from mahjong.room_bans b where b.room_id = p_room and b.user_id = v_u) then
+      perform mahjong_private.mj_w_bad(p_i, 'user_id');
+    end if;
+    if v_m.user_id = v_u then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version), 'made', 0, 'hist', 0); end if;
+    v_n := 1;
+    -- 付け替え＝その人が同じ部屋の別の人につながっていれば先に外す（一意の索引 (room_id, user_id)）
+    select * into v_m2 from mahjong.members m where m.room_id = p_room and m.user_id = v_u and m.id <> v_id for update;
+    if found then
+      update mahjong.members m set user_id = null, version = m.version + 1 where m.id = v_m2.id;
+      perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'members', pg_catalog.jsonb_build_object('id', v_m2.id), 'user_id',
+        pg_catalog.to_jsonb(v_u::text), null, v_m2.version + 1);
+      delete from mahjong.member_claims x where x.member_id = v_m2.id;
+      v_n := 2;
+    end if;
+    update mahjong.members m set user_id = v_u, version = m.version + 1 where m.id = v_id;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'members', pg_catalog.jsonb_build_object('id', v_id), 'user_id',
+      pg_catalog.to_jsonb(v_m.user_id::text), pg_catalog.to_jsonb(v_u::text), v_m.version + 1);
+    -- その member の名乗りと、つながった人のその部屋の名乗りを消す（N3 と同じ）
+    delete from mahjong.member_claims x where x.member_id = v_id or (x.room_id = p_room and x.user_id = v_u);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version + 1), 'made', 0, 'hist', v_n);
+
+  elsif v_op = 'role_set' then
+    if pg_catalog.jsonb_typeof(p_o -> 'role') is distinct from 'string' or (p_o ->> 'role') not in ('kan', 'nyu') then
+      perform mahjong_private.mj_w_bad(p_i, 'role');
+    end if;
+    v_u := mahjong_private.mj_w_uuid(p_o, 'user_id', p_i);
+    select x.owner_user_id into v_own from mahjong.rooms x where x.id = p_room;
+    -- 持ち主の役は変えない（K-3 で継ぐ）
+    if v_u = v_own then perform mahjong_private.mj_w_bad(p_i, 'user_id'); end if;
+    select a.role into v_s from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u for update;
+    if not found or exists (select 1 from mahjong.room_bans b where b.room_id = p_room and b.user_id = v_u) then
+      perform mahjong_private.mj_w_bad(p_i, 'user_id');
+    end if;
+    if v_s = (p_o ->> 'role') then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 0); end if;
+    if (p_o ->> 'role') = 'kan' then
+      -- 管の数（v1.1 S1）＝持ち主でない kan の行＋持ち主の1・付けると cap を越える＝full admins・cap の行が無い＝full
+      select m.cap into v_cap2 from mahjong.mj_caps m where m.tbl = 'admins' and m.scope = 'room';
+      if v_cap2 is null or (select pg_catalog.count(*) from mahjong.room_accounts a
+                              where a.room_id = p_room and a.role = 'kan' and a.user_id is distinct from v_own) + 1 + 1 > v_cap2 then
+        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'admins'));
+      end if;
+    end if;
+    update mahjong.room_accounts a set role = p_o ->> 'role' where a.room_id = p_room and a.user_id = v_u;
+    -- room_accounts に版の列は無い（2c-2e の戻しは「今の role ＝ after_value」で比べる＝v1.1 C3②）
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_accounts',
+      pg_catalog.jsonb_build_object('room_id', p_room, 'user_id', v_u), 'role', pg_catalog.to_jsonb(v_s), p_o -> 'role', null);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 1);
+
+  elsif v_op = 'account_remove' then
+    v_u := mahjong_private.mj_w_uuid(p_o, 'user_id', p_i);
+    select x.owner_user_id into v_own from mahjong.rooms x where x.id = p_room;
+    if v_u = v_own then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'user_id', 'reason', 'owner'));
+    end if;
+    select a.role, a.joined_via, a.joined_at into c from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u for update;
+    if not found then
+      -- 行が無く出した印が在る＝二度押し（書かずに ok）・どちらも無い＝bad
+      if exists (select 1 from mahjong.room_bans b where b.room_id = p_room and b.user_id = v_u) then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 0); end if;
+      perform mahjong_private.mj_w_bad(p_i, 'user_id');
+    end if;
+    if c.role = 'kan' then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'user_id', 'reason', 'kan'));
+    end if;
+    -- その部屋のリーグの持ち主（取り消したリーグも＝v1.1 O2）＝先に league_owner_set
+    if exists (select 1 from mahjong.leagues l where l.room_id = p_room and l.owner_user_id = v_u) then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'user_id', 'reason', 'league'));
+    end if;
+    select m.cap into v_cap2 from mahjong.mj_caps m where m.tbl = 'room_bans' and m.scope = 'room';
+    if v_cap2 is null or (select pg_catalog.count(*) from mahjong.room_bans b where b.room_id = p_room) >= v_cap2 then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'room_bans'));
+    end if;
+    insert into mahjong.room_bans (room_id, user_id) values (p_room, v_u) on conflict (room_id, user_id) do nothing;
+    delete from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_accounts',
+      pg_catalog.jsonb_build_object('room_id', p_room, 'user_id', v_u), null,
+      pg_catalog.jsonb_build_object('role', c.role, 'joined_via', c.joined_via, 'joined_at', c.joined_at), null, null);
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_bans',
+      pg_catalog.jsonb_build_object('room_id', p_room, 'user_id', v_u), null, null, pg_catalog.jsonb_build_object('at', pg_catalog.now()), null);
+    v_n := 2;
+    -- その人につながった名簿の人を全部外す（v1 止め2・半荘は残る＝名前だけの人に戻る）
+    for v_m2 in select * from mahjong.members m where m.room_id = p_room and m.user_id = v_u order by m.id for update loop
+      update mahjong.members m set user_id = null, version = m.version + 1 where m.id = v_m2.id;
+      perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'members', pg_catalog.jsonb_build_object('id', v_m2.id), 'user_id',
+        pg_catalog.to_jsonb(v_u::text), null, v_m2.version + 1);
+      delete from mahjong.member_claims x where x.member_id = v_m2.id;
+      v_n := v_n + 1;
+    end loop;
+    delete from mahjong.member_claims x where x.room_id = p_room and x.user_id = v_u;
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', v_n);
   end if;
   raise exception 'mj_write: 当て方の無い op %', v_op;
 end $fn$;
 revoke all on function mahjong_private.mj_w_op(uuid, uuid, text, uuid, int, jsonb) from public, anon, authenticated;
 
 -- ── 入口3本目：書く ──
--- 返し：{ok:true, results:[{i, v?}]} ／ {ok:false, err:'mj_session'｜'bad'｜'too_many'｜'not_yet'｜'gone'｜'mj_op_other_user'｜
+-- 返し：{ok:true, results:[{i, v?, claimed?}]} ／ {ok:false, err:'mj_session'｜'bad'｜'too_many'｜'not_yet'｜'gone'｜'mj_op_other_user'｜'mj_role'（i・need）｜'mj_reauth'（within_min・i）｜'linked'（i・member_id）｜
 --   'busy'（what＝越えた窓・lock）｜'conflict'（i・at・cur）｜'range'｜'dup'｜'full'（what＝表）｜'internal', …}
 create or replace function public.mj_write(p_room_id uuid, p_op_id uuid, p_ops jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
@@ -2450,12 +2656,18 @@ declare
     "session_edit": ["session_id", "date", "place", "rate", "voided"],
     "table_edit": ["table_id", "label", "rate_mode", "rate", "voided"],
     "hanchan_seats": ["hanchan_id", "seats"],
-    "extra_set": ["table_id", "member_id", "kind", "value", "base_version"]}'::jsonb;
+    "extra_set": ["table_id", "member_id", "kind", "value", "base_version"],
+    "member_link": ["member_id"],
+    "member_unlink": ["member_id"],
+    "member_relink": ["member_id", "user_id"],
+    "role_set": ["user_id", "role"],
+    "account_remove": ["user_id"]}'::jsonb;
   v_me uuid; v_role text; v_ret jsonb; v_o jsonb; v_x jsonb; v_name text; v_k text; v_uid uuid; v_i int; v_len int;
   v_n int := 0; v_made int := 0; v_items jsonb := '[]'::jsonb; v_gid uuid := pg_catalog.gen_random_uuid();
   v_b0 jsonb := '{}'::jsonb; v_hs jsonb := '{}'::jsonb; v_fresh jsonb := '{}'::jsonb; v_ts jsonb := '{}'::jsonb; v_caps jsonb := '{}'::jsonb;
   v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text;
   v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record;
+  v_who text; v_re text; v_need text; v_ra boolean;
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -2515,6 +2727,29 @@ begin
     if v_uid is distinct from v_me then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_op_other_user'); end if;
     return v_x;
   end if;
+
+  -- ③' 役の門（2c-2b・write4_sekkei.md §1）＝送り直しの後・先見の前・塊の外（例外を出さない字）・組のどれか1つでも足りなければ全部を当てない
+  for v_i in 0 .. v_len - 1 loop
+    select m.who_plain into v_who from mahjong.mj_ops m where m.name = p_ops -> v_i ->> 'op';
+    v_need := mahjong_private.mj_w_need(v_who, v_role);
+    if v_need is not null then
+      perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, 0);
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', v_i, 'need', v_need);
+    end if;
+  end loop;
+  -- ③'' 入り直しの門（K-6・§2）＝役の門の後（役が足りない人に「入り直して」と言わない）・re＝yes いつも／owner 持ち主の時／grant 役を付ける時（role_set の role kan）
+  for v_i in 0 .. v_len - 1 loop
+    select m.re into v_re from mahjong.mj_ops m where m.name = p_ops -> v_i ->> 'op';
+    if v_re = 'yes' or (v_re = 'owner' and v_role = 'owner')
+       or (v_re = 'grant' and (p_ops -> v_i ->> 'op') = 'role_set' and (p_ops -> v_i ->> 'role') is not distinct from 'kan')
+       or v_re not in ('no', 'yes', 'owner', 'grant') then
+      if v_ra is null then v_ra := mahjong_private.mj_w_reauth_ok(); end if;
+      if not v_ra then
+        perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, 0);
+        return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_reauth', 'within_min', 10, 'i', v_i);
+      end if;
+    end if;
+  end loop;
 
   -- ④ 先見（越えるなら何も書かない）
   v_k := mahjong_private.mj_w_over(p_room_id, v_me, v_role, 1, 1);

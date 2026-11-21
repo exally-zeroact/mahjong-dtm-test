@@ -100,6 +100,12 @@ const CASES = [
   ['auth に居ない人は部屋の人にできない', false, `${ACC} values (:R,gen_random_uuid(),'nyu','pass')`, '23503'],
   ['同じ部屋の2人を同じ名簿の人につなぐと弾く', false, `${ACCM} values (:R,:U,'kan','create',:M); ${ACCM} values (:R,:U2,'nyu','pass',:M)`, 'room_accounts_member'],
   ['名簿の人に同じ部屋で同じアカウントを2回つなぐと弾く', false, `insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'乙','おつ',:U); insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'丙','へい',:U)`, 'members_user'],
+  /* 名乗り member_claims（2c-2b・write4_sekkei.md v1.1 S2・v1.2 N1） */
+  ['名乗りは通る', true, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U)`],
+  ['同じ人が同じ名簿の人に二度名乗ると弾く', false, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U); insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U)`, 'member_claims_pkey'],
+  ['同じ名簿の人に2人が名乗るのは通る', true, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U); insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U2)`],
+  ['名簿の人を消すと名乗りも消える（cascade）', true, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U); delete from mahjong.members where id = :M; if exists (select 1 from mahjong.member_claims where user_id = :U) then raise exception 'left'; end if`],
+  ['アカウントを消すと名乗りも消える（cascade）', true, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U2); delete from auth.users where id = :U2; if exists (select 1 from mahjong.member_claims where member_id = :M) then raise exception 'left'; end if`],
   ['auth に居ない人を名簿の人につなぐと弾く', false, `insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'乙','おつ',gen_random_uuid())`, '23503'],
   /* ── v18：リーグ・書いた人の列 ── */
   ['リーグは持ち主ありで通る', true, `${LEA} values (:R,'リーグ',:S,:U)`],
