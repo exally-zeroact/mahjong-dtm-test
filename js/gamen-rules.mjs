@@ -14,7 +14,8 @@ const DETAIL = [
   { key: 'round', label: '端数', vals: [['gosha', '五捨六入'], ['shisha', '四捨五入'], ['kirisute', '切り捨て'], ['none', '丸めない']] },
   { key: 'tie', label: '同じ点', vals: [['kamicha', '上家取り'], ['split', '分ける']] },
   { key: 'tobi_zero', label: '0点ちょうど', vals: [[true, '飛び'], [false, '飛びでない']] },
-  { key: 'tobi_from', label: '飛び賞を払う先', vals: [['busted', '飛ばした人'], ['all', '全員']] },
+  // 飛び賞を払う先は隠す（B2 tobi_chip_v3.md＝飛び賞は卓で人ごとに ±・払う先を選ばない）。鍵は残す＝保存は下の out で今の値をそのまま写す
+  { key: 'tobi_from', label: '飛び賞を払う先', vals: [['busted', '飛ばした人'], ['all', '全員']], hide: true },
   { key: 'hakoshita', label: '箱下', vals: [[true, 'あり'], [false, 'なし']] },
   { key: 'kyotaku_end', label: '終局の供託', vals: [['top', 'トップ'], ['kieru', '消える']] },
 ];
@@ -83,7 +84,7 @@ export function mountRules(el, { rules, readOnly }) {
     h += '</div><div class="list list-gap">';
     h += li('詳しいルール', '', { key: 'detail' });
     if (open.has('detail') || readOnly) {
-      for (const d of DETAIL) h += '<div class="li li-sub"><span>' + d.label + '</span><span class="li-v">' + mini('d-' + d.key, d.vals, r[d.key]) + '</span></div>';
+      for (const d of DETAIL) if (!d.hide) h += '<div class="li li-sub"><span>' + d.label + '</span><span class="li-v">' + mini('d-' + d.key, d.vals, r[d.key]) + '</span></div>';
     }
     h += '</div>';
     el.innerHTML = h;
