@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
-  kindOf, PERSON_OPS, WHO, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
+  kindOf, yakiUsed, PERSON_OPS, WHO, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
 import { readOps } from './mj-ops.test.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
@@ -736,8 +736,16 @@ console.log('■ ③-2 やきとり（extras の yaki）・合計0の自由な�
   ok('やきとりの合計が 0 でない卓は精算でも数えない（ten は半荘だけ）', (() => { const x = sessionSeisan(ngSt, 's1'); return x.ok && x.ten.m1 === s0.ten.m1; })());
   const off = tableView(mk({ ...R3, yakitori: false }, [X('m1', 'yaki', 2), X('m5', 'yaki', 1)]), 't1');
   ok('yakitori が true でない卓の yaki 行は数えない（missing 無し・pt 同じ）が、0 でない行の人は出す（m5）', off.extrasOk && !off.missing.some((m) => m.what) && W(off, 'm1').pt10 === W(p0, 'm1').pt10 && W(off, 'm1').yaki === 0 && !!W(off, 'm5'));
-  const z = tableView(mk({ ...R3, yakitori_pt: 0 }, [X('m1', 'yaki', 2), X('m4', 'yaki', -2)]), 't1');
-  ok('yakitori_pt 0 は枚を数えて額 0（合計は見る）', z.extrasOk && W(z, 'm1').pt10 === W(p0, 'm1').pt10 && W(z, 'm1').yaki === 2);
+  const z = tableView(mk({ ...R3, yakitori_pt: 0 }, [X('m1', 'yaki', 2), X('m4', 'yaki', -1)]), 't1');
+  ok('yakitori_pt 0 は使わない種（write6 v1.1 止め1）＝行は数えない（合計も見ない・missing 無し・pt 同じ・yaki 0）', z.extrasOk && !z.used.yaki && !z.missing.some((m) => m.what) && W(z, 'm1').pt10 === W(p0, 'm1').pt10 && W(z, 'm1').yaki === 0 && z.tableForSeisan.yaki_pt10 === null && z.tableForSeisan.yakis === undefined);
+  const ky = [
+    [{ yakitori: true, yakitori_pt: 2 }, 'sum0'], [{ yakitori: true, yakitori_pt: 1 }, 'sum0'], [{ yakitori: true, yakitori_pt: 0 }, null], [{ yakitori: false, yakitori_pt: 2 }, null],
+    [{ yakitori: 'true', yakitori_pt: 2 }, null], [{ yakitori: true, yakitori_pt: '2' }, null], [{ yakitori: true, yakitori_pt: 1.5 }, null], [{ yakitori: true }, null], [{}, null], [null, null], [undefined, null],
+  ];
+  ok('kindOf の yaki＝yakitori true かつ pt ≥1 の整数だけ sum0（' + ky.length + ' 通り）・yakiUsed と同じ', ky.every(([r, w]) => kindOf(r, 'yaki') === w && yakiUsed(r) === (w === 'sum0')), J(ky.map(([r, w], i) => (kindOf(r, 'yaki') === w ? null : i)).filter((x) => x !== null)));
+  const ea = (R, add) => applyOp(applyOps(base(R), [hs('h1', C0)]).state, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'yaki', add });
+  ok('extra_add yaki：使う卓は入る・pt 0／false の卓は bad at kind', ea(R3, 1).ok && ['bad:kind', 'bad:kind'].join() === [ea({ ...R3, yakitori_pt: 0 }, 1), ea({ ...R3, yakitori: false }, 1)].map((r) => r.err + ':' + r.at).join(), J(ea({ ...R3, yakitori_pt: 0 }, 1)));
+  ok('門：extras に yaki の行が在っても newer にならない（EXTRA_KINDS に yaki）', (() => { const g = roomGate(st, R3); return g.mode !== 'newer'; })(), J(roomGate(st, R3)));
   const nr = mk(R3, [X('m1', 'c:ba', 3)]);
   nr.tables[0].rate_mode = 'none';
   const nrs = sessionSeisan(nr, 's1');
