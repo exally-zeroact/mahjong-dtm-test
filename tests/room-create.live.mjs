@@ -42,7 +42,8 @@ const lit = (s) => q('v') + s + q('v');                     // 字はドルの�
 const hex = () => crypto.randomBytes(32).toString('hex');
 const uid = () => crypto.randomUUID();
 const MAIL = 'mj-room-create.invalid';
-const PASS = 'Zq9Pass';
+const PASS = '２７４１';   // 段C：パスは数字4つ（全角で打っても NFKC で 2741）
+const PKEY = '2741';
 const sec = (u) => JSON.stringify({ url_token_hash: u });
 const call = (op, name, pass, rules, secrets) =>
   `public.mj_room_create(${op === null ? 'null' : lit(op) + '::uuid'}, ${name === null ? 'null' : lit(name)}, ${pass === null ? 'null' : lit(pass)}, `
@@ -62,6 +63,10 @@ const BAD = [
   ['名前が null', call(uid(), null, PASS, '{"players":4}', sec(hex())), 'bad', 'name'],
   ['名前41字', call(uid(), 'あ'.repeat(41), PASS, '{"players":4}', sec(hex())), 'bad', 'name'],
   ['パス3字', call(uid(), '甲', 'abc', '{"players":4}', sec(hex())), 'bad', 'pass'],
+  ['段C パスが英字4つ', call(uid(), '甲', 'abcd', '{"players":4}', sec(hex())), 'bad', 'pass'],
+  ['段C パスが数字5つ', call(uid(), '甲', '12345', '{"players":4}', sec(hex())), 'bad', 'pass'],
+  ['段C パスが数字3つ', call(uid(), '甲', '123', '{"players":4}', sec(hex())), 'bad', 'pass'],
+  ['段C 名前がそろえると空（ゼロ幅の空白だけ）', call(uid(), '\u200b', '1234', '{"players":4}', sec(hex())), 'bad', 'name'],
   ['パス65字', call(uid(), '甲', 'x'.repeat(65), '{"players":4}', sec(hex())), 'bad', 'pass'],
   ['パスがそろえて73 byte 以上', call(uid(), '甲', '㍿'.repeat(7), '{"players":4}', sec(hex())), 'bad', 'pass'],
   ['パスが null', call(uid(), '甲', null, '{"players":4}', sec(hex())), 'bad', 'pass'],
@@ -114,7 +119,8 @@ const undo = (key, body) => `
   exception when others then
     if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('${key}_err', sqlerrm); end if;
   end;`;
-const fresh = () => call(uid(), '乙', PASS, '{"players":3}', sec(hex()));
+let FN = 0;
+const fresh = () => call(uid(), '乙' + (++FN), PASS, '{"players":3}', sec(hex()));   // 段C：同じ名前とパスは dup＝毎回名前を変える
 
 const sql = `do ${q('rc')} declare res jsonb := '{}'; r jsonb; c0 jsonb; c1 jsonb; cx jsonb; t jsonb; rid uuid; n int;
   v_u uuid := gen_random_uuid(); v_u2 uuid := gen_random_uuid(); v_u3 uuid := gen_random_uuid();
@@ -122,7 +128,7 @@ const sql = `do ${q('rc')} declare res jsonb := '{}'; r jsonb; c0 jsonb; c1 json
 begin
   /* 2b-2：khaw の前から在る古い行を先に掃く（掃除は ok の返しで走る＝表全体の数えが揺れない・塊の最後で全部戻る） */
   for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
-  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days' or (x.deleted_at is null and x.created_at < now() - interval '7 days' and (x.last_write_at is null or x.last_write_at < now() - interval '7 days') and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id) and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= now() - interval '7 days'))));
+  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days'));   -- 段C v10.1：掃除は ⓐ（消して7日）だけ
   insert into auth.users (id, email, aud, role, is_anonymous) values
     (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false),
     (v_u2, v_u2::text || '@${MAIL}', 'authenticated', 'authenticated', false),
@@ -151,11 +157,11 @@ begin
   rid := (r->>'room_id')::uuid;
   res := res || jsonb_build_object('r1', r, 'c0', c0, 'c1', c1,
     'room', (select to_jsonb(x) - 'pass_hash' from mahjong.rooms x where x.id = rid),
-    'room_text', (select to_jsonb(x)::text from mahjong.rooms x where x.id = rid),
+    'room_text', (select (to_jsonb(x) - 'id' - 'room_no' - 'url_token_hash' - 'channel_key' - 'owner_user_id' - 'rule_set_id')::text from mahjong.rooms x where x.id = rid),   -- 段C：4桁のパスが番号・hex に偶然在るのを外す
     'pass_prefix', (select substr(x.pass_hash, 1, 7) from mahjong.rooms x where x.id = rid),
-    'crypt_key', (select x.pass_hash = extensions.crypt(${lit(PASS.toLowerCase())}, x.pass_hash) from mahjong.rooms x where x.id = rid),
+    'crypt_key', (select x.pass_hash = extensions.crypt(${lit(PKEY)}, x.pass_hash) from mahjong.rooms x where x.id = rid),
     'crypt_raw', (select x.pass_hash = extensions.crypt(${lit(PASS)}, x.pass_hash) from mahjong.rooms x where x.id = rid),
-    'crypt_wide', (select x.pass_hash = extensions.crypt(mahjong_private.mj_pass_key(${lit('Ｚｑ９Ｐａｓｓ')}), x.pass_hash) from mahjong.rooms x where x.id = rid),
+    'crypt_wide', (select x.pass_hash = extensions.crypt(mahjong_private.mj_pass_key(${lit(PASS)}), x.pass_hash) from mahjong.rooms x where x.id = rid),
     'rs', (select jsonb_agg(jsonb_build_object('id', s.id, 'version', s.version, 'nkeys', (select count(*) from jsonb_object_keys(s.rules)), 'players', s.rules->'players')) from mahjong.rule_sets s where s.room_id = rid),
     'ra', (select jsonb_agg(jsonb_build_object('user_id', a.user_id, 'role', a.role, 'joined_via', a.joined_via, 'member_id', a.member_id)) from mahjong.room_accounts a where a.room_id = rid),
     'dev', (select count(*) from mahjong.devices d where d.room_id = rid),
@@ -163,7 +169,7 @@ begin
     'cr', (select to_jsonb(c) from mahjong.creates c where c.op_id = ${lit(OP1)}::uuid),
     'lim_kinds', (select jsonb_object_agg(k, s) from (select l.kind || ':' || case when l.key = v_u::text then 'U' else l.key end as k, sum(l.count) as s
        from mahjong.limits l where l.kind like 'create:%' group by 1) z));
-  r := ${call(OP1, '別の名前', 'otherpass9', '{"players":3}', S1)};
+  r := ${call(OP1, '別の名前', '9999', '{"players":3}', S1)};
   res := res || jsonb_build_object('r2', r, 'c2', ${CNT});
   t := '[]';
   ${BAD.map(([, c]) => `begin r := ${c}; exception when others then r := jsonb_build_object('raised', sqlerrm); end; t := t || jsonb_build_array(r);`).join('\n  ')}
@@ -252,7 +258,7 @@ if (out) {
   /* ① */
   const r1 = out.r1 || {};
   ok('① 作れた', r1.ok === true, JSON.stringify(r1));
-  ok('① 返しの鍵は ok・room_id・room_no・channel_key の4つ', Object.keys(r1).sort().join(',') === 'channel_key,ok,room_id,room_no', JSON.stringify(Object.keys(r1)));
+  ok('① 返しの鍵は ok・room_id・kind・room_no・channel_key の5つ（段C で kind）・kind shared', Object.keys(r1).sort().join(',') === 'channel_key,kind,ok,room_id,room_no' && r1.kind === 'shared', JSON.stringify(Object.keys(r1)));
   ok('① rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits +3（u1d +1）',
     same(d(out.c0, out.c1), { rooms: 1, rule_sets: 1, room_accounts: 1, creates: 1, accounts: 1, totals: 1, lim: 3, lim_u: 1, lim_rows: d(out.c0, out.c1).lim_rows }), JSON.stringify(d(out.c0, out.c1)));
   ok('① limits の create:u1d の鍵は作った人', out.lim_kinds && Number(out.lim_kinds['create:u1d:U']) === 1, JSON.stringify(out.lim_kinds));
@@ -310,8 +316,8 @@ if (out) {
   /* ⑨ */
   const fn = (out.funcs || []);
   const fc = fn.find((x) => x.name === 'mj_room_create');   // 段2c-1 から public.mj_* は3本（mj_room_join は room-join.live ⑮・mj_write は write.live ⓪）
-  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join・write の3本）', fn.filter((x) => x.name === 'mj_room_create').length === 1
-    && fn.map((x) => x.name).sort().join(',') === 'mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
+  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join・write・my_rooms の4本＝段C）', fn.filter((x) => x.name === 'mj_room_create').length === 1
+    && fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
   ok('⑨ definer・search_path 空・authenticated に EXECUTE・anon と PUBLIC に無し', fc && fc.definer === true
     && JSON.stringify(fc.config) === JSON.stringify(['search_path=""']) && !fc.anon && fc.auth && !fc.public, JSON.stringify(fc));
   ok('⑨ 部屋の関数は客から呼べない', Number(out.priv_anon) === 0, String(out.priv_anon));
@@ -361,7 +367,7 @@ if (isTest) {
   /* 残り：仮の人・捨てアカウント・その accounts の行・試験の部屋 */
   const lf = await mq(`select (select count(*)::int from auth.users where email like '%@${MAIL}') as u,
     (select count(*)::int from mahjong.accounts a left join auth.users x on x.id = a.user_id where x.id is null) as orphan,
-    (select count(*)::int from mahjong.rooms where name in ('甲の部屋', '乙')) as rooms`);
+    (select count(*)::int from mahjong.rooms where name = '甲の部屋' or name ~ '^乙[0-9]+$') as rooms`);
   let left = null; try { left = JSON.parse(lf.text)[0]; } catch (_) { /* 字 */ }
   ok('倉庫に試験の人・部屋が1つも残っていない', left && left.u === 0 && left.orphan === 0 && left.rooms === 0, lf.text.slice(0, 200));
 }

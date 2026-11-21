@@ -56,6 +56,21 @@ alter table mahjong.rooms add constraint rooms_owner_ok check (owner_user_id is 
 alter table mahjong.rooms drop constraint if exists rooms_no_admin_secret;
 alter table mahjong.rooms add constraint rooms_no_admin_secret check (admin_secret_hash is null);
 create index if not exists rooms_owner on mahjong.rooms(owner_user_id);
+-- 段C（heya_mirutoki_sadame.md v10・v10.1・v10.2）：部屋なし（solo）と みんなで見る部屋（shared）・終えた印・名前のそろえた字
+--   kind＝'shared'｜'solo'（既定 shared＝今在る部屋は全部 shared）／closed_at＝持ち主の［部屋を終える］（room_close）だけが付ける
+--   name_key＝shared で終えていない間だけ mj_name_key(name)（部屋なし・終えた部屋は null）＝名前で入る道と組の比べが引く（一意にしない＝パスは塩つき bf）
+--   部屋なしの行＝name '対局'・pass_hash '!solo'（欄を埋めるだけ・どの比べにも通さない）・room_no は今の式（返さない）
+alter table mahjong.rooms add column if not exists kind text not null default 'shared';
+alter table mahjong.rooms add column if not exists closed_at timestamptz;
+alter table mahjong.rooms add column if not exists name_key text;
+alter table mahjong.rooms drop constraint if exists rooms_kind_ok;
+alter table mahjong.rooms add constraint rooms_kind_ok check (kind in ('shared', 'solo'));
+alter table mahjong.rooms drop constraint if exists rooms_name_key_ok;
+alter table mahjong.rooms add constraint rooms_name_key_ok check (name_key is null or (kind = 'shared' and closed_at is null));
+alter table mahjong.rooms drop constraint if exists rooms_solo_open;
+alter table mahjong.rooms add constraint rooms_solo_open check (kind = 'shared' or closed_at is null);
+-- 索引＝名前の道と組の比べが引く（★紙 §2 は deleted_at is null も条件に置くが、組の比べは消した印の7日の部屋も引く＝下の mj_pair_bf の注★）
+create index if not exists rooms_name_key_open on mahjong.rooms(name_key) where name_key is not null and closed_at is null;
 
 -- ── ルールの1組（版ごとの行・変えると版を足す・卓が指す行は消さない） ──────
 create table if not exists mahjong.rule_sets (
@@ -315,7 +330,7 @@ create table if not exists mahjong.room_accounts (
   user_id      uuid not null references auth.users(id) on delete cascade,
   role         text not null check (role in ('kan', 'nyu')),
   member_id    uuid references mahjong.members(id) on delete set null,
-  joined_via   text not null check (joined_via in ('pass', 'url', 'create', 'import')),
+  joined_via   text not null,                                       -- 決まりは下の room_accounts_joined_via_ok（段C で 'name' を足した）
   joined_at    timestamptz not null default now(),
   last_seen    timestamptz not null default now(),
   win_start    timestamptz,                                         -- 人×部屋の1分
@@ -327,6 +342,17 @@ create table if not exists mahjong.room_accounts (
 create unique index if not exists room_accounts_member on mahjong.room_accounts(room_id, member_id) where member_id is not null;
 create index if not exists room_accounts_user on mahjong.room_accounts(user_id);
 create index if not exists room_accounts_seen on mahjong.room_accounts(room_id, last_seen);
+-- 段C：入り方に 'name'（部屋名＋パス）を足す＝create table の中の check は名前が倉庫の付けた名＝pg_constraint で引いて落としてから付け直す
+do $jvdo$
+declare v_c text;
+begin
+  for v_c in select c.conname from pg_catalog.pg_constraint c
+              where c.conrelid = 'mahjong.room_accounts'::regclass and c.contype = 'c'
+                and pg_catalog.pg_get_constraintdef(c.oid) like '%joined_via%' loop
+    execute pg_catalog.format('alter table mahjong.room_accounts drop constraint if exists %I', v_c);
+  end loop;
+end $jvdo$;
+alter table mahjong.room_accounts add constraint room_accounts_joined_via_ok check (joined_via in ('pass', 'url', 'create', 'import', 'name'));
 
 -- ── 部屋から出した人の印（案 room_join v1.1 N4）＝account_remove（2c）が足す・room_secret（2c・必ずパスと URL を全部変える）が部屋の分を全部消す ──
 --   mj_room_join は当たった後にここを見て removed（数えない）。上限＝mj_caps room_bans/room（満ちたら account_remove を止めて警告）
@@ -429,7 +455,7 @@ create table if not exists mahjong.limits (
 -- ── 倉庫全体の数（1行） ───────────────────────────────────────────────────
 create table if not exists mahjong.totals (
   id        smallint primary key check (id = 1),
-  rooms_all int not null default 0 check (rooms_all >= 0)   -- 消した取り消し待ちも入れた物理の部屋の数（≦R）
+  rooms_all int not null default 0 check (rooms_all >= 0)   -- 段C から＝kind shared かつ closed_at null の部屋の数（消した印の7日も入る・部屋なしと終えた部屋は入れない・≦R）
 );
 insert into mahjong.totals (id, rooms_all) values (1, 0) on conflict (id) do nothing;
 
@@ -518,6 +544,8 @@ insert into mahjong.mj_ops (name, who_plain, who_league, on_deleted, writes_hist
   ('room_secret',      'kan',          'same',            false, true,  'none',          false, 'yes'),
   ('room_delete',      'owner',        'same',            false, true,  'none',          false, 'yes'),
   ('room_undelete',    'owner_or_kan', 'same',            true,  true,  'none',          false, 'no'),
+  ('room_share',       'owner',        'same',            false, true,  'none',          false, 'no'),    -- 段C v10.1＝部屋なしをみんなで見る部屋に（何も壊さない＝入り直しは求めない）
+  ('room_close',       'owner',        'same',            false, true,  'none',          false, 'yes'),   -- 段C＝［部屋を終える］
   ('role_set',         'owner',        'same',            false, true,  'prev',          false, 'grant'),
   ('account_remove',   'kan',          'same',            false, true,  'none',          false, 'no'),
   ('league_owner_set', 'owner',        'owner',           false, true,  'prev',          false, 'yes')
@@ -565,7 +593,7 @@ insert into mahjong.mj_caps (tbl, scope, cap) values
   ('member_claims', 'room',    200),     -- 名乗り（2c-2b・P に数えない）
   ('member_claims_user', 'room', 3),     -- 1人が1部屋で名乗れる数（2c-2b v1.2 N4）
   ('op_results',    'room',    10000),
-  ('rooms',         'all',     200)      -- R（消した取り消し待ちも数える）
+  ('rooms',         'all',     200)      -- R＝開いた shared の数の上限（段C v10.1＝消した取り消し待ちも数える・部屋なしと終えた部屋は数えない）
 on conflict (tbl, scope) do update set cap = excluded.cap
   returning tbl, scope)
 delete from mahjong.mj_caps m where (m.tbl, m.scope) not in (select up.tbl, up.scope from up);
@@ -582,6 +610,16 @@ language sql immutable strict parallel safe set search_path = '' as $fn$
     'ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔゕゖゝゞabcdefghijklmnopqrstuvwxyz')
 $fn$;
 revoke all on function mahjong_private.mj_name_key(text) from public, anon, authenticated;
+
+-- 段C（§5・§2）当てる時の今の部屋：name_key の埋めは終えていない shared の null の行だけ（消した印の7日の部屋も埋める＝戻した部屋が名前の道と比べに出る）
+--   ＋rooms_all を新しい式（shared かつ closed_at null）で1回数え直す（何度当てても同じ）
+do $ncdo$
+begin
+  update mahjong.rooms x set name_key = nullif(mahjong_private.mj_name_key(x.name), '')
+   where x.kind = 'shared' and x.closed_at is null and x.name_key is null;
+  update mahjong.totals t set rooms_all = (select pg_catalog.count(*) from mahjong.rooms x where x.kind = 'shared' and x.closed_at is null)
+   where t.id = 1;
+end $ncdo$;
 
 -- ── ルールの鍵の表（★正本★・種は下の rk 札で囲んだ jsonb の字1本＝lib/rules.mjs の RULE_KEYS と同じ・tests/rules-keys.test.mjs が CI で比べる）──
 -- ★鍵を後から足す日は、新しい鍵の既定を「足す前の振る舞い」と同じ値に限る（古い rules_snapshot の pt を変えない）★
@@ -855,14 +893,101 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_me() from public, anon, authenticated;
 
+-- ── 段C §3 名前ごとの止め（kind 'join:nfail1h'・key＝name_key・15分の窓＝date_bin）──
+--   足す＝名前の道の外れ・create shared と room_share の dup（当たっても戻さない）。5 に着いたらその窓の終わりまで止め（読みは押さえない＝§6）
+create or replace function mahjong_private.mj_nfail_until(p_nk text) returns timestamptz
+language sql stable set search_path = '' as $fn$
+  select case when coalesce(pg_catalog.sum(l.count), 0) >= 5 then w.s + interval '15 minutes' end
+    from (select pg_catalog.date_bin('15 minutes', pg_catalog.now(), timestamptz '2000-01-01 00:00:00+00') as s) w
+    left join mahjong.limits l on l.kind = 'join:nfail1h' and l.key = p_nk and l.window_start = w.s
+   group by w.s
+$fn$;
+revoke all on function mahjong_private.mj_nfail_until(text) from public, anon, authenticated;
+create or replace function mahjong_private.mj_nfail_add(p_nk text) returns void
+language plpgsql set search_path = '' as $fn$
+begin
+  if p_nk is null then return; end if;
+  insert into mahjong.limits (kind, key, window_start, count)
+    values ('join:nfail1h', p_nk, pg_catalog.date_bin('15 minutes', pg_catalog.now(), timestamptz '2000-01-01 00:00:00+00'), 1)
+    on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+end $fn$;
+revoke all on function mahjong_private.mj_nfail_add(text) from public, anon, authenticated;
+
+-- ── 段C §3 組の比べ（mj_pair_check の bf の所）──
+--   相手＝同じ name_key の shared で終えていない部屋（自分の部屋 p_self は外す）。返し＝{busy, hit, n, nk, seen:{id:{s,h}}}
+--   busy＝相手が20以上（作ると21＝越える）＝bf しない。p_seen＝押さえる前の下見の seen（s＝pass_hash・deleted_at・closed_at の字が同じなら h を使い、
+--   違う・下見に無い部屋だけ bf する）＝押さえた後の引き直しはこの関数をもう一度呼ぶ（★引き直し★の行）。
+--   ★実装で紙と違えた所（v10.3 で叩く）★：相手に「消した印の7日の shared」も入れる＝消した部屋と同じ組は7日の間作れない。
+--     訳＝room_undelete は平文のパスを持たない（塩つき bf どうしは比べられない）＝紙 §3 の「room_undelete の比べ」は作れない。
+--     消した部屋の組を空けないでおけば、戻した時に同じ組が2つ開く事が起きない（room_undelete は比べずに通す）。
+create or replace function mahjong_private.mj_pair_bf(p_nk text, p_pk text, p_self uuid, p_seen jsonb) returns jsonb
+language plpgsql set search_path = '' as $fn$
+declare
+  v_seen jsonb := '{}'::jsonb; v_n int; v_hit boolean := false; v_h boolean; v_s text; v_old jsonb; x record;
+begin
+  select pg_catalog.count(*) into v_n from mahjong.rooms r
+   where r.name_key = p_nk and r.kind = 'shared' and r.closed_at is null
+     and (r.deleted_at is null or r.deleted_at >= pg_catalog.now() - interval '7 days') and r.id is distinct from p_self;
+  if v_n >= 20 then
+    return pg_catalog.jsonb_build_object('busy', true, 'hit', false, 'n', v_n, 'nk', p_nk, 'seen', '{}'::jsonb);
+  end if;
+  for x in select r.id, r.pass_hash, r.deleted_at, r.closed_at from mahjong.rooms r
+            where r.name_key = p_nk and r.kind = 'shared' and r.closed_at is null
+              and (r.deleted_at is null or r.deleted_at >= pg_catalog.now() - interval '7 days') and r.id is distinct from p_self
+            order by r.created_at, r.id loop
+    v_s := x.pass_hash || '|' || coalesce(x.deleted_at::text, '') || '|' || coalesce(x.closed_at::text, '');
+    v_old := coalesce(p_seen, '{}'::jsonb) -> (x.id::text);
+    if v_old is not null and (v_old ->> 's') = v_s then
+      v_h := (v_old ->> 'h')::boolean;
+    else
+      v_h := extensions.crypt(p_pk, x.pass_hash) = x.pass_hash;
+    end if;
+    v_seen := v_seen || pg_catalog.jsonb_build_object(x.id::text, pg_catalog.jsonb_build_object('s', v_s, 'h', v_h));
+    if v_h then v_hit := true; end if;
+  end loop;
+  return pg_catalog.jsonb_build_object('busy', false, 'hit', v_hit, 'n', v_n, 'nk', p_nk, 'seen', v_seen);
+end $fn$;
+revoke all on function mahjong_private.mj_pair_bf(text, text, uuid, jsonb) from public, anon, authenticated;
+
+-- mj_write の room_share・room_secret の下見（★押さえの外★＝② の部屋の行を押さえる前に bf を済ませる）。
+--   持ち主か管でない・形が違う・部屋なし／shared の取り違え・止め中は null（下見なし＝押さえた後に全部 bf）。平文のパスは返さない。
+create or replace function mahjong_private.mj_pair_pre(p_room uuid, p_me uuid, p_o jsonb) returns jsonb
+language plpgsql set search_path = '' as $fn$
+declare
+  c_trim constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
+  x record; v_nk text; v_pk text;
+begin
+  select r.kind, r.name_key, r.owner_user_id, r.closed_at, r.deleted_at into x from mahjong.rooms r where r.id = p_room;
+  if not found or x.deleted_at is not null or x.closed_at is not null then return null; end if;
+  if x.owner_user_id is distinct from p_me
+     and not exists (select 1 from mahjong.room_accounts a where a.room_id = p_room and a.user_id = p_me and a.role = 'kan'
+                       and not exists (select 1 from mahjong.room_bans b where b.room_id = p_room and b.user_id = p_me)) then
+    return null;
+  end if;
+  if pg_catalog.jsonb_typeof(p_o -> 'pass') is distinct from 'string' then return null; end if;
+  v_pk := mahjong_private.mj_pass_key(p_o ->> 'pass');
+  if v_pk is null or v_pk !~ '^[0-9]{4}$' then return null; end if;
+  if (p_o ->> 'op') = 'room_share' then
+    if x.kind <> 'solo' or pg_catalog.jsonb_typeof(p_o -> 'name') is distinct from 'string' then return null; end if;
+    v_nk := nullif(mahjong_private.mj_name_key(pg_catalog.btrim(p_o ->> 'name', c_trim)), '');
+    if v_nk is null or mahjong_private.mj_nfail_until(v_nk) is not null then return null; end if;
+  elsif (p_o ->> 'op') = 'room_secret' then
+    if x.kind <> 'shared' then return null; end if;
+    v_nk := x.name_key;
+  end if;
+  if v_nk is null then return null; end if;
+  return mahjong_private.mj_pair_bf(v_nk, v_pk, p_room, '{}'::jsonb);
+end $fn$;
+revoke all on function mahjong_private.mj_pair_pre(uuid, uuid, jsonb) from public, anon, authenticated;
+
 -- ── ついでの掃除（段2b-2・案 mahjong_tataki_2026-11-20/sweep_sekkei.md v1.2＝設計前 taiketsu 止め3→叩き直し 止め1→止め0）──
 -- 呼ぶのは入口（mj_room_create・mj_room_join）の ok:true を返す直前だけ（外側も begin … exception で包む＝掃除が落ちても入口の返しは変わらない）。
 -- ★待たない★＝取る行は全部 for update skip locked・関数に lock_timeout 50ms（取れない待ちは 55P03 でその手順の塊だけ戻る）。
 -- 手順（各々が別の塊・別の枠 p_max＝試験で切れ目を動かす・入口からは既定の 100）。順は本体の押さえる順（rooms→totals→limits）を崩さない：
---   1 部屋の物理の消し（いちばん古い1部屋）＝ⓐ 消して7日 ｜ ⓑ 空の部屋（7日誰も書かず・誰も来ず・半荘0）
---     1-a 子の行の合計（cells・tobi・rule_sets も入れる）が p_max 以下＝totals を skip locked で取れたら hanchans→tables→sessions→room_accounts→devices を明に消してから rooms（残りは cascade）・rooms_all −1
+--   1 部屋の物理の消し（いちばん古い1部屋）＝ⓐ 消して7日だけ（ⓑ 空・放置の部屋の消しは段C v10.1 で止めた＝後にした守り）
+--     1-a 子の行の合計（cells・tobi・rule_sets も入れる）が p_max 以下＝totals を skip locked で取れたら hanchans→tables→sessions→room_accounts→devices を明に消してから rooms（残りは cascade）・開いた shared だった時だけ rooms_all −1
 --         （sessions・tables・hanchans の rule_sets への外部キーは NO ACTION＝rooms の cascade に任せると順で落ちる＝v1.2）
---     1-b 大きい部屋＝ⓑ は deleted_at を付けるだけ（以後 gone・7日の間は戻せる）／ⓐ は子を決まった順に枠の数だけ消す（hanchans は cells・tobi が付く＝残り÷9・rule_sets は sessions の後で rooms が指す1行と開催日・卓・半荘が指す版を除く＝S1・1回の掃除は手順ごとに p_max 行まで＝設計図 §3.2）
+--     1-b 大きい部屋＝ⓐ は子を決まった順に枠の数だけ消す（hanchans は cells・tobi が付く＝残り÷9・rule_sets は sessions の後で rooms が指す1行と開催日・卓・半荘が指す版を除く＝S1・1回の掃除は手順ごとに p_max 行まで＝設計図 §3.2）
 --     塊が落ちた部屋は limits ('sweep:bad', 部屋, 今日) の印＝その日は飛ばす
 --   4 totals の数え直し（1日1回・印 sweep:recount）  2 入の room_accounts 180日（持ち主とその部屋のリーグの L は残す・members.user_id は残す）
 --   3 古い行＝op_results 7日・creates 2日・limits（kind の終わり 1m＝10分・1h＝2時間・1d／u1d／sweep:*＝2日・★他の kind は消さず log★）
@@ -871,18 +996,17 @@ language plpgsql security definer set search_path = '' set lock_timeout = '50ms'
 declare
   v_max  int := greatest(coalesce(p_max, 100), 1);
   v_room uuid; v_del timestamptz; v_rs uuid; v_rv int; v_n bigint; v_left bigint; v_d bigint; v_all int; v_real bigint;
+  v_open boolean;
   v_day  timestamptz := pg_catalog.date_trunc('day', pg_catalog.now());
 begin
   -- ── 1 部屋の物理の消し ──
   begin
-    select x.id, x.deleted_at, x.rule_set_id, x.rule_version into v_room, v_del, v_rs, v_rv from mahjong.rooms x
-     where (x.deleted_at < pg_catalog.now() - interval '7 days'
-            or (x.deleted_at is null and x.created_at < pg_catalog.now() - interval '7 days'
-                and (x.last_write_at is null or x.last_write_at < pg_catalog.now() - interval '7 days')
-                and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id)
-                and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= pg_catalog.now() - interval '7 days')))
+    -- 段C v10.1 止め1：ⓑ（空・放置の消し）は kind を問わず止めた＝終わるのは持ち主の［部屋を終える］だけ・消えるのは持ち主が消して7日だけ（ⓐ）
+    select x.id, x.deleted_at, x.rule_set_id, x.rule_version, (x.kind = 'shared' and x.closed_at is null)
+      into v_room, v_del, v_rs, v_rv, v_open from mahjong.rooms x
+     where x.deleted_at < pg_catalog.now() - interval '7 days'
        and not exists (select 1 from mahjong.limits l where l.kind = 'sweep:bad' and l.key = x.id::text and l.window_start = v_day)
-     order by coalesce(x.deleted_at, x.created_at), x.id
+     order by x.deleted_at, x.id
      limit 1 for update of x skip locked;
     if v_room is not null then
       -- 子の行の数（各表 v_max+1 で打ち切る＝数えも枠の内）
@@ -914,11 +1038,8 @@ begin
           delete from mahjong.member_claims z where z.room_id = v_room;   -- 2c-2b v1.2 N1＝cascade に任せない
           delete from mahjong.devices z where z.room_id = v_room;
           delete from mahjong.rooms x where x.id = v_room;
-          update mahjong.totals set rooms_all = greatest(rooms_all - 1, 0) where id = 1;
+          if v_open then update mahjong.totals set rooms_all = greatest(rooms_all - 1, 0) where id = 1; end if;   -- 段C：開いた shared の時だけ引く
         end if;
-      elsif v_del is null then
-        -- 1-b ⓑ 大きい空の部屋＝消した印だけ（入口は gone・7日の間は持ち主が戻せる）
-        update mahjong.rooms x set deleted_at = pg_catalog.now() where x.id = v_room;
       else
         -- 1-b ⓐ 消して7日の大きい部屋＝子を決まった順に枠の数だけ（rooms の行は次の回の 1-a で消す）
         v_left := v_max;
@@ -1013,7 +1134,7 @@ begin
         on conflict (kind, key, window_start) do nothing;
       get diagnostics v_d = row_count;
       if v_d = 1 then
-        select pg_catalog.count(*) into v_real from mahjong.rooms;
+        select pg_catalog.count(*) into v_real from mahjong.rooms x where x.kind = 'shared' and x.closed_at is null;   -- 段C の式
         if v_real <> v_all then
           raise log 'mj_sweep recount % -> %', v_all, v_real;
           update mahjong.totals set rooms_all = v_real where id = 1;
@@ -1068,9 +1189,11 @@ revoke all on function mahjong_private.mj_sweep(int) from public, anon, authenti
 -- ── 入口1本目：部屋を作る（設計図 §2・§3.0・§3.1・§3.2・案 v18_login_sekkei.md G＋前の叩き room_create_tome.txt 止め2直し5）──
 -- ⓪ 呼んだ人＝mj_me（null なら {ok:false, err:'mj_session'}＝画面は「ログインが切れました」・K-10）。作った人が持ち主で管。
 -- p_secrets＝{url_token_hash} の1つだけ（128bit 乱数の sha256＝小文字 hex 64字）。channel_key は倉庫が作る（16 byte の乱数の hex）。
--- 返し：{ok:true, room_id, room_no, channel_key} ／ {ok:false, err:'mj_session'｜'mj_op_other_user'｜'bad', what｜'range', key｜
---   'gone'｜'mismatch'｜'dup', what｜'full'｜'busy', what(all｜user｜room_no)}。
---   ★ok でない返しは creates・limits・totals・部屋に何も残さない★（S1・N2）＝残るのは mj_me の accounts の行だけ（人の印・数えではない）
+-- 返し：{ok:true, room_id, kind, room_no（shared だけ）, channel_key} ／ {ok:false, err:'mj_session'｜'mj_op_other_user'｜'bad', what｜'range', key｜
+--   'gone'｜'mismatch'｜'dup', what(…｜name_pass)｜'full'｜'busy', what(all｜user｜room_no｜name)｜'locked', until}。
+--   段C：名前もパスも null＝部屋なし（solo）＝R・人ごとの数え・組の比べを見ない。
+--   ★ok でない返しは creates・totals・部屋に何も残さない★（S1・N2）＝残るのは mj_me の accounts の行と、
+--   ★dup name_pass の時の名前ごとの止めの数え（join:nfail1h）だけ★（段C §3）
 -- 順（S1）：人 → 形 → ルール → よくあるパス → totals を for update（作るを全体で1列に並べる＝同じ op_id の2本目はここで待つ）
 --   → creates に在れば送り直しの返し（N1・別の人なら mj_op_other_user＝K-7）→ 一意の当たりを bf の前に見る → full（R−20）
 --   → busy（全体 1分20・24時間200 → 人ごと24時間5部屋＝足す前に cap を見る）→ 部屋番号 → 書く（unique_violation は塊ごと戻して dup）。
@@ -1082,9 +1205,10 @@ returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
   c_trim  constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
-  v_me    uuid; v_name text; v_key text; v_rules jsonb; v_url text;
+  v_me    uuid; v_name text; v_key text; v_rules jsonb; v_url text; v_kind text; v_nk text;
   v_all   int; v_cap int; v_room uuid; v_cuser uuid; v_rs uuid; v_no text; v_ch text;
   v_n     bigint; v_i int; v_m1 int; v_d1 int; v_u1 int; v_err text; v_cons text;
+  v_pre   jsonb; v_pair jsonb; v_until timestamptz;
   v_min   timestamptz := pg_catalog.date_trunc('minute', pg_catalog.now());
   v_hour  timestamptz := pg_catalog.date_trunc('hour', pg_catalog.now());
   r       record;
@@ -1093,18 +1217,21 @@ begin
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
 
-  -- ① 形（数えに入れない）
+  -- ① 形（数えに入れない）。段C：名前もパスも null＝部屋なし（solo）・片方だけ null は bad・shared のパスはそろえた後に数字4つ
   if p_op_id is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'op_id'); end if;
-  v_name := pg_catalog.btrim(coalesce(p_name, ''), c_trim);
-  if pg_catalog.char_length(v_name) not between 1 and 40 then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name');
-  end if;
-  if p_pass is null or pg_catalog.char_length(p_pass) not between 4 and 64 then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
-  end if;
-  v_key := mahjong_private.mj_pass_key(p_pass);
-  if pg_catalog.octet_length(v_key) > 72 or pg_catalog.char_length(v_key) not between 4 and 64 then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
+  if p_name is null and p_pass is null then
+    v_kind := 'solo'; v_name := '対局';
+  else
+    v_kind := 'shared';
+    v_name := pg_catalog.btrim(coalesce(p_name, ''), c_trim);
+    if pg_catalog.char_length(v_name) not between 1 and 40 then
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name');
+    end if;
+    v_nk := nullif(mahjong_private.mj_name_key(v_name), '');
+    if v_nk is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name'); end if;
+    if p_pass is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass'); end if;
+    v_key := mahjong_private.mj_pass_key(p_pass);
+    if v_key is null or v_key !~ '^[0-9]{4}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass'); end if;
   end if;
   if p_secrets is null or pg_catalog.jsonb_typeof(p_secrets) <> 'object'
      or (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_secrets)) <> 1 then
@@ -1124,20 +1251,29 @@ begin
     raise;
   end;
 
-  -- ③ よくあるパスの弾きは B0 で外した（どの4〜64字も通す）
+  -- ③ 段C §3 組の比べの下見（shared だけ・★押さえの外で bf★）＝名前の止め中は bf をせずに locked・送り直しは下見しない
+  if v_kind = 'shared' and not exists (select 1 from mahjong.creates c where c.op_id = p_op_id) then
+    v_until := mahjong_private.mj_nfail_until(v_nk);
+    if v_until is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'until', v_until); end if;
+    v_pre := mahjong_private.mj_pair_bf(v_nk, v_key, null, '{}'::jsonb);
+  end if;
 
   -- ④ 作るを全体で1列に並べる
   select t.rooms_all into v_all from mahjong.totals t where t.id = 1 for update;
 
-  -- ⑤ 送り直し（N1）＝同じ op_id は作らずに同じ返し（数えに入れない）・別の人の op_id は返さない（K-7）
+  -- ⑤ 送り直し（N1）＝同じ op_id は作らずに同じ返し（数えに入れない）・別の人の op_id は返さない（K-7）・kind が違えば bad kind（何も残さない）
   select c.room_id, c.user_id into v_room, v_cuser from mahjong.creates c where c.op_id = p_op_id;
   if found then
     if v_cuser is distinct from v_me then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_op_other_user'); end if;
-    select x.id, x.room_no, x.channel_key, x.url_token_hash, x.deleted_at into r from mahjong.rooms x where x.id = v_room;
+    select x.id, x.room_no, x.channel_key, x.url_token_hash, x.deleted_at, x.kind into r from mahjong.rooms x where x.id = v_room;
     if not found or r.deleted_at is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
+    if r.kind <> v_kind then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'kind'); end if;
     if r.url_token_hash <> v_url then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mismatch'); end if;
     begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
-    return pg_catalog.jsonb_build_object('ok', true, 'room_id', r.id, 'room_no', r.room_no, 'channel_key', r.channel_key);
+    if r.kind = 'solo' then
+      return pg_catalog.jsonb_build_object('ok', true, 'room_id', r.id, 'kind', r.kind, 'channel_key', r.channel_key);
+    end if;
+    return pg_catalog.jsonb_build_object('ok', true, 'room_id', r.id, 'kind', r.kind, 'room_no', r.room_no, 'channel_key', r.channel_key);
   end if;
 
   -- ⑥ 一意の当たりを bf の前に（S1）
@@ -1145,21 +1281,38 @@ begin
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what', 'url_token_hash');
   end if;
 
-  -- ⑦ 物理の部屋の数が R−20 に達したら作らない
-  select m.cap into v_cap from mahjong.mj_caps m where m.tbl = 'rooms' and m.scope = 'all';
-  if v_cap is null or v_all >= v_cap - 20 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'full'); end if;
+  if v_kind = 'shared' then
+    -- ⑥' 名前の止め（押さえた後にもう一度・読みは押さえない）
+    v_until := mahjong_private.mj_nfail_until(v_nk);
+    if v_until is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'until', v_until); end if;
+    -- ⑦ 開いた shared の数が R−20 に達したら作らない（部屋なしは R を見ない）
+    select m.cap into v_cap from mahjong.mj_caps m where m.tbl = 'rooms' and m.scope = 'all';
+    if v_cap is null or v_all >= v_cap - 20 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'full'); end if;
+  end if;
 
-  -- ⑧ 作るの数え（足す前に見る＝busy の時は何も足さない・N2）＝全体 → 人ごと（v18 G）
+  -- ⑧ 作るの数え（足す前に見る＝busy の時は何も足さない・N2）＝全体 → 人ごと（shared だけ・部屋なしの人ごとの数えは後にした守り＝§6）
   select coalesce(pg_catalog.sum(l.count), 0) into v_m1 from mahjong.limits l
    where l.kind = 'create:1m' and l.key = 'all' and l.window_start = v_min;
   select coalesce(pg_catalog.sum(l.count), 0) into v_d1 from mahjong.limits l
    where l.kind = 'create:1d' and l.key = 'all' and l.window_start > pg_catalog.now() - interval '24 hours';
   if v_m1 + 1 > 20 or v_d1 + 1 > 200 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'all'); end if;
-  select coalesce(pg_catalog.sum(l.count), 0) into v_u1 from mahjong.limits l
-   where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start > pg_catalog.now() - interval '24 hours';
-  if v_u1 + 1 > 5 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'user'); end if;
+  if v_kind = 'shared' then
+    select coalesce(pg_catalog.sum(l.count), 0) into v_u1 from mahjong.limits l
+     where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start > pg_catalog.now() - interval '24 hours';
+    if v_u1 + 1 > 5 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'user'); end if;
+  end if;
 
-  -- ⑨ 部屋番号＝4 byte の乱数（4,200,000,000 以上は引き直し＝偏りなし）の 1e8 の余りを8桁前0・最大8回
+  -- ⑧' 段C §3 組の比べ（totals を押さえた後に同じ name_key の集まりを丸ごと引き直し、下見で bf していない・変わった部屋だけ bf）
+  if v_kind = 'shared' then
+    v_pair := mahjong_private.mj_pair_bf(v_nk, v_key, null, coalesce(v_pre -> 'seen', '{}'::jsonb));   -- ★引き直し★
+    if (v_pair ->> 'busy')::boolean then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'name'); end if;
+    if (v_pair ->> 'hit')::boolean then
+      perform mahjong_private.mj_nfail_add(v_nk);   -- ★dup の数え★（名前ごとの止め・当たっても戻さない）
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what', 'name_pass');
+    end if;
+  end if;
+
+  -- ⑨ 部屋番号＝4 byte の乱数（4,200,000,000 以上は引き直し＝偏りなし）の 1e8 の余りを8桁前0・最大8回（部屋なしも今の式・返さない）
   for v_i in 1 .. 8 loop
     v_n := ('x' || '00000000' || pg_catalog.encode(extensions.gen_random_bytes(4), 'hex'))::bit(64)::bigint;
     continue when v_n >= 4200000000;
@@ -1175,21 +1328,25 @@ begin
   v_ch   := pg_catalog.encode(extensions.gen_random_bytes(16), 'hex');
   begin
     insert into mahjong.rooms (id, name, room_no, pass_hash, url_token_hash, owner_user_id, channel_key,
-                               rule_set_id, rule_version, row_count)
-    values (v_room, v_name, v_no, extensions.crypt(v_key, extensions.gen_salt('bf', 10)), v_url, v_me, v_ch, v_rs, 1, 1);
+                               rule_set_id, rule_version, row_count, kind, name_key)
+    values (v_room, v_name, v_no,
+            case when v_kind = 'solo' then '!solo' else extensions.crypt(v_key, extensions.gen_salt('bf', 10)) end,
+            v_url, v_me, v_ch, v_rs, 1, 1, v_kind, v_nk);
     insert into mahjong.rule_sets (id, version, room_id, rules) values (v_rs, 1, v_room, v_rules);
     insert into mahjong.room_accounts (room_id, user_id, role, joined_via) values (v_room, v_me, 'kan', 'create');
     insert into mahjong.creates (op_id, room_id, user_id) values (p_op_id, v_room, v_me);
-    update mahjong.totals set rooms_all = rooms_all + 1 where id = 1;
+    if v_kind = 'shared' then update mahjong.totals set rooms_all = rooms_all + 1 where id = 1; end if;
     delete from mahjong.limits l where l.kind = 'create:1m' and l.key = 'all' and l.window_start < v_min;
     delete from mahjong.limits l where l.kind = 'create:1d' and l.key = 'all' and l.window_start <= pg_catalog.now() - interval '24 hours';
-    delete from mahjong.limits l where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start <= pg_catalog.now() - interval '24 hours';
     insert into mahjong.limits (kind, key, window_start, count) values ('create:1m', 'all', v_min, 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
     insert into mahjong.limits (kind, key, window_start, count) values ('create:1d', 'all', v_hour, 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
-    insert into mahjong.limits (kind, key, window_start, count) values ('create:u1d', v_me::text, v_hour, 1)
-      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    if v_kind = 'shared' then
+      delete from mahjong.limits l where l.kind = 'create:u1d' and l.key = v_me::text and l.window_start <= pg_catalog.now() - interval '24 hours';
+      insert into mahjong.limits (kind, key, window_start, count) values ('create:u1d', v_me::text, v_hour, 1)
+        on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    end if;
   exception when unique_violation then
     get stacked diagnostics v_cons = constraint_name;
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'what',
@@ -1198,7 +1355,10 @@ begin
                   when 'creates_pkey' then 'op_id' else 'other' end);
   end;
   begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
-  return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'channel_key', v_ch);
+  if v_kind = 'solo' then
+    return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'kind', v_kind, 'channel_key', v_ch);
+  end if;
+  return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'kind', v_kind, 'room_no', v_no, 'channel_key', v_ch);
 end $fn$;
 revoke all on function public.mj_room_create(uuid, text, text, jsonb, jsonb) from public, anon, authenticated;
 grant execute on function public.mj_room_create(uuid, text, text, jsonb, jsonb) to authenticated;
@@ -1215,24 +1375,32 @@ grant execute on function public.mj_room_create(uuid, text, text, jsonb, jsonb) 
 -- 押さえる順（§3.2）＝accounts（mj_me）→ rooms（その1部屋）→ limits（(kind,key) の字の順＝join:fail1m → join:ok1h → join:ufail1m）。
 -- 残余：⑤は rooms を押さえない＝同時に account_remove・room_delete が通ると1回だけ again が返る（次の呼びで removed／gone）。
 -- ★平文のパス・token は どの表にも・raise の字にも入れない★
-create or replace function public.mj_room_join(p_way text, p_room_no text, p_key text, p_pass text)
+-- 段C（§5）：way 'name'（部屋名＋パス・p_name）を足した＝引数を5つにして古い4引数を落とす。部屋なし（solo）はどの道でも無い部屋と同じ返し。
+--   name の順＝形 → 人ごと 1分10・全体 1分100 → 名前の止め（入っている人も）→ name_key の開いた shared を作った順に1回ずつ bf
+--   → 当たり1＝その部屋で ⑤ 以降は url と同じ道／2以上＝ambiguous（数えない）／0＝wrong（名前の止めの数え +1）。部屋ごとの fail_count・locked_until は見ない。
+--   終えた部屋（closed_at）＝入っている人は {ok:true, again:true, closed:true}・入っていない人は {ok:false, err:'closed'}（数えない）・名前の道は引かない。
+drop function if exists public.mj_room_join(text, text, text, text);
+create or replace function public.mj_room_join(p_way text, p_room_no text, p_key text, p_pass text, p_name text default null)
 returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
   c_dummy constant text := '$2a$10$' || 'mjdummysaltmjdummysalt';   -- ふりの bf の塩（cost 10＝本物と同じ重さ・22字）
-  v_me   uuid; v_pk text; v_uh text; v_found boolean; v_ok boolean := false; v_role text;
+  c_trim  constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
+  v_me   uuid; v_pk text; v_uh text; v_found boolean := false; v_ok boolean := false; v_role text;
   v_room uuid; v_no text; v_name text; v_ch text; v_hash text; v_url text; v_del timestamptz; v_lock timestamptz;
+  v_kind text; v_closed timestamptz; v_nk text; v_hits int := 0; v_cands int := 0; v_until timestamptz;
   v_n    bigint; v_cap int;
   v_min  timestamptz := pg_catalog.date_trunc('minute', pg_catalog.now());
   v_5m   timestamptz := pg_catalog.date_bin('5 minutes', pg_catalog.now(), timestamptz '2000-01-01 00:00:00+00');
-  r      record;
+  r      record; cand record;
 begin
   -- ⓪ 人（K-10）
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
 
   -- ① 形（数えに入れない・何も残さない）＝使わない方の引数が在っても bad（取り違えを黙って通さない）
-  if p_way is null or p_way not in ('pass', 'url') then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'way'); end if;
+  if p_way is null or p_way not in ('pass', 'url', 'name') then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'way'); end if;
+  if p_way in ('pass', 'url') and p_name is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name'); end if;
   if p_way = 'pass' then
     if p_key is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'key'); end if;
     if p_room_no is null or p_room_no !~ '^[0-9]{8}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'room_no'); end if;
@@ -1244,41 +1412,101 @@ begin
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
     end if;
     -- ② 押さえずに引く
-    select x.id, x.room_no, x.name, x.channel_key, x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until
-      into v_room, v_no, v_name, v_ch, v_hash, v_url, v_del, v_lock
+    select x.id, x.room_no, x.name, x.channel_key, x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until, x.kind, x.closed_at
+      into v_room, v_no, v_name, v_ch, v_hash, v_url, v_del, v_lock, v_kind, v_closed
       from mahjong.rooms x where x.room_no = p_room_no;
-  else
+    v_found := found;
+  elsif p_way = 'url' then
     if p_room_no is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'room_no'); end if;
     if p_pass is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass'); end if;
     if p_key is null or p_key !~ '^[0-9a-f]{32}$' then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'key'); end if;
     v_uh := pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p_key, 'UTF8')), 'hex');
-    select x.id, x.room_no, x.name, x.channel_key, x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until
-      into v_room, v_no, v_name, v_ch, v_hash, v_url, v_del, v_lock
+    select x.id, x.room_no, x.name, x.channel_key, x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until, x.kind, x.closed_at
+      into v_room, v_no, v_name, v_ch, v_hash, v_url, v_del, v_lock, v_kind, v_closed
       from mahjong.rooms x where x.url_token_hash = v_uh;
+    v_found := found;
+  else
+    -- 段C §5 way 'name'＝部屋名（1〜40字）とパスだけ（パスの形は今の 4〜64字のまま）
+    if p_room_no is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'room_no'); end if;
+    if p_key is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'key'); end if;
+    if p_name is null or pg_catalog.char_length(p_name) not between 1 and 40 then
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name');
+    end if;
+    v_nk := nullif(mahjong_private.mj_name_key(pg_catalog.btrim(p_name, c_trim)), '');
+    if v_nk is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'name'); end if;
+    if p_pass is null or pg_catalog.char_length(p_pass) not between 4 and 64 then
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
+    end if;
+    v_pk := mahjong_private.mj_pass_key(p_pass);
+    if pg_catalog.octet_length(v_pk) > 72 or pg_catalog.char_length(v_pk) not between 4 and 64 then
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'pass');
+    end if;
   end if;
-  v_found := found;
+  -- 段C §5 部屋なし潰し：番号・url のどの道でも無い部屋と同じ返し（番号はふりの bf 1回・今の無い番号と同じ数え）
+  if v_found and v_kind = 'solo' then v_found := false; end if;   -- ★部屋なし潰し★
 
-  -- ⑤ 入っている人＝数えも bf も locked も見ない（S1）・fail_count は触らない（N3）・rooms は押さえない
-  if v_found then
-    select a.role into v_role from mahjong.room_accounts a where a.room_id = v_room and a.user_id = v_me;
-    if found then
-      if v_del is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
-      update mahjong.room_accounts a set last_seen = pg_catalog.now() where a.room_id = v_room and a.user_id = v_me;
-      begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
-      return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'name', v_name,
-        'channel_key', v_ch, 'role', v_role, 'again', true);
+  if p_way <> 'name' then
+    -- ⑤ 入っている人＝数えも bf も locked も見ない（S1）・fail_count は触らない（N3）・rooms は押さえない
+    if v_found then
+      select a.role into v_role from mahjong.room_accounts a where a.room_id = v_room and a.user_id = v_me;
+      if found then
+        if v_del is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
+        update mahjong.room_accounts a set last_seen = pg_catalog.now() where a.room_id = v_room and a.user_id = v_me;
+        begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
+        if v_closed is not null then
+          return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'name', v_name,
+            'channel_key', v_ch, 'role', v_role, 'again', true, 'closed', true);
+        end if;
+        return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'name', v_name,
+          'channel_key', v_ch, 'role', v_role, 'again', true);
+      end if;
+      -- 段C §5 終えた部屋に入っていない人＝closed（数えない）
+      if v_del is null and v_closed is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'closed'); end if;
     end if;
   end if;
 
-  -- ③ 人ごとの外れ 1分10（pass・url とも・bf の前）
+  -- ③ 人ごとの外れ 1分10（どの道も・bf の前）
   select coalesce(pg_catalog.sum(l.count), 0) into v_n from mahjong.limits l
    where l.kind = 'join:ufail1m' and l.key = v_me::text and l.window_start = v_min;
   if v_n >= 10 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'user'); end if;
-  -- ④ pass だけ：全体の外れ 1分100（URL は止めない）
-  if p_way = 'pass' then
+  -- ④ pass と name：全体の外れ 1分100（URL は止めない）
+  if p_way in ('pass', 'name') then   -- ★名前の道の1分100★
     select coalesce(pg_catalog.sum(l.count), 0) into v_n from mahjong.limits l
      where l.kind = 'join:fail1m' and l.key = 'all' and l.window_start = v_min;
     if v_n >= 100 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'all'); end if;
+  end if;
+
+  if p_way = 'name' then
+    -- 名前の止め（入っている人も止める）
+    v_until := mahjong_private.mj_nfail_until(v_nk);   -- ★名前の道の止め★
+    if v_until is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'until', v_until); end if;
+    -- name_key で開いた shared を作った順に1つずつ bf（1部屋1回・★押さえの外★）
+    for cand in select y.id, y.room_no, y.name, y.channel_key, y.pass_hash, y.url_token_hash, y.deleted_at, y.locked_until, y.kind, y.closed_at
+               from mahjong.rooms y
+              where y.name_key = v_nk and y.kind = 'shared' and y.deleted_at is null and y.closed_at is null
+              order by y.created_at, y.id loop
+      v_cands := v_cands + 1;
+      if extensions.crypt(v_pk, cand.pass_hash) = cand.pass_hash then   -- ★名前の道の比べ★
+        v_hits := v_hits + 1;
+        if v_hits = 1 then
+          v_room := cand.id; v_no := cand.room_no; v_name := cand.name; v_ch := cand.channel_key; v_hash := cand.pass_hash; v_url := cand.url_token_hash;
+          v_del := cand.deleted_at; v_lock := cand.locked_until; v_kind := cand.kind; v_closed := cand.closed_at;
+        end if;
+      end if;
+    end loop;
+    if v_cands = 0 then perform extensions.crypt(v_pk, c_dummy); end if;   -- 無い名前もふりの bf 1回（時間をそろえる）
+    if v_hits >= 2 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'ambiguous'); end if;   -- 段C前から在る同じ組（数えない）
+    if v_hits = 1 then
+      v_found := true; v_ok := true;   -- ★名前の道の当たり★
+      -- ⑤ 入っている人（url と同じ道）
+      select a.role into v_role from mahjong.room_accounts a where a.room_id = v_room and a.user_id = v_me;
+      if found then
+        update mahjong.room_accounts a set last_seen = pg_catalog.now() where a.room_id = v_room and a.user_id = v_me;
+        begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
+        return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'name', v_name,
+          'channel_key', v_ch, 'role', v_role, 'again', true);
+      end if;
+    end if;
   end if;
 
   if v_found then
@@ -1288,39 +1516,40 @@ begin
     if p_way = 'pass' and v_lock is not null and v_lock > pg_catalog.now() then
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'until', v_lock);
     end if;
-    -- ⑧ 比べ（★押さえの外★＝bf の間、同じ部屋の again・書き込みを待たせない）
+    -- ⑧ 比べ（★押さえの外★＝bf の間、同じ部屋の again・書き込みを待たせない）・名前の道は上で bf 済み
     if p_way = 'pass' then
       v_ok := extensions.crypt(v_pk, v_hash) = v_hash;
-    else
+    elsif p_way = 'url' then
       v_ok := true;
     end if;
-    -- 押さえて引き直す（v1.1 直し1・v1.2 直し1）
-    select x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until, x.fail_count into r
+    -- 押さえて引き直す（v1.1 直し1・v1.2 直し1・段C で closed_at も）
+    select x.pass_hash, x.url_token_hash, x.deleted_at, x.locked_until, x.fail_count, x.closed_at into r
       from mahjong.rooms x where x.id = v_room for no key update;
     if not found then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
-    if r.pass_hash <> v_hash or r.url_token_hash <> v_url or r.deleted_at is distinct from v_del then
-      return pg_catalog.jsonb_build_object('ok', false, 'err', 'wrong');            -- 間に room_secret・room_delete が通った＝数えない
+    if r.pass_hash <> v_hash or r.url_token_hash <> v_url or r.deleted_at is distinct from v_del or r.closed_at is distinct from v_closed then
+      return pg_catalog.jsonb_build_object('ok', false, 'err', 'wrong');            -- 間に room_secret・room_delete・room_close が通った＝数えない
     end if;
     if p_way = 'pass' and r.locked_until is not null and r.locked_until > pg_catalog.now() then
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'until', r.locked_until);
     end if;
   elsif p_way = 'pass' then
-    perform extensions.crypt(v_pk, c_dummy);                                          -- 無い番号もふりの bf 1回（時間をそろえる）
+    perform extensions.crypt(v_pk, c_dummy);                                          -- 無い番号（部屋なしも）もふりの bf 1回（時間をそろえる）
   end if;
 
-  -- 外れ＝数えを残す（この返しだけ）。rooms → limits の順・limits は (kind,key) の字の順
+  -- 外れ＝数えを残す（この返しだけ）。rooms → limits の順・limits は (kind,key) の字の順（join:fail1m → join:nfail1h → join:ufail1m）
   if not v_ok then
-    if v_found then
+    if v_found and p_way = 'pass' then
       update mahjong.rooms x set
         fail_count   = case when x.fail_count + 1 >= 5 then 0 else x.fail_count + 1 end,
         locked_until = case when x.fail_count + 1 >= 5 then pg_catalog.now() + interval '15 minutes' else x.locked_until end
        where x.id = v_room;
     end if;
-    if p_way = 'pass' then
+    if p_way in ('pass', 'name') then
       delete from mahjong.limits l where l.kind = 'join:fail1m' and l.key = 'all' and l.window_start < v_min;
       insert into mahjong.limits (kind, key, window_start, count) values ('join:fail1m', 'all', v_min, 1)
         on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
     end if;
+    if p_way = 'name' then perform mahjong_private.mj_nfail_add(v_nk); end if;
     delete from mahjong.limits l where l.kind = 'join:ufail1m' and l.key = v_me::text and l.window_start < v_min;
     insert into mahjong.limits (kind, key, window_start, count) values ('join:ufail1m', v_me::text, v_min, 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
@@ -1355,14 +1584,44 @@ begin
   return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'room_no', v_no, 'name', v_name,
     'channel_key', v_ch, 'role', 'nyu', 'again', false);
 end $fn$;
-revoke all on function public.mj_room_join(text, text, text, text) from public, anon, authenticated;
-grant execute on function public.mj_room_join(text, text, text, text) to authenticated;
+revoke all on function public.mj_room_join(text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.mj_room_join(text, text, text, text, text) to authenticated;
+
+-- ── 入口：自分の部屋の一覧（段C §5）──
+-- mj_session・p_limit 1〜50（他は bad what limit）・p_before_at と p_before_id は両方在るか両方 null（片方だけは bad what before）。
+-- 対象＝呼んだ人の room_accounts が在り deleted_at null の部屋（終えた部屋も）。並び＝(coalesce(last_write_at, created_at) desc, id desc)。
+-- 返し＝{ok:true, rooms:[{room_id, kind, name（shared だけ）, role, closed, created_at, last_write_at}]}。room_no は返さない。読むだけ（数えない）。
+create or replace function public.mj_my_rooms(p_before_at timestamptz, p_before_id uuid, p_limit int)
+returns jsonb
+language plpgsql security definer set search_path = '' as $fn$
+declare
+  v_me uuid; v_rooms jsonb;
+begin
+  v_me := mahjong_private.mj_me();
+  if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+  if p_limit is null or p_limit not between 1 and 50 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'limit'); end if;
+  if (p_before_at is null) <> (p_before_id is null) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'before'); end if;
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('room_id', q.id, 'kind', q.kind,
+           'name', case when q.kind = 'shared' then q.name end, 'role', q.role, 'closed', q.closed_at is not null,
+           'created_at', q.created_at, 'last_write_at', q.last_write_at) order by q.t desc, q.id desc), '[]'::jsonb)
+    into v_rooms
+    from (select x.id, x.kind, x.name, x.closed_at, x.created_at, x.last_write_at, a.role,
+                 coalesce(x.last_write_at, x.created_at) as t
+            from mahjong.room_accounts a join mahjong.rooms x on x.id = a.room_id
+           where a.user_id = v_me and x.deleted_at is null
+             and (p_before_at is null or (coalesce(x.last_write_at, x.created_at), x.id) < (p_before_at, p_before_id))
+           order by coalesce(x.last_write_at, x.created_at) desc, x.id desc
+           limit p_limit) q;
+  return pg_catalog.jsonb_build_object('ok', true, 'rooms', v_rooms);
+end $fn$;
+revoke all on function public.mj_my_rooms(timestamptz, uuid, int) from public, anon, authenticated;
+grant execute on function public.mj_my_rooms(timestamptz, uuid, int) to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
 -- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・
 --   kyotaku_set・extra_add・settle_snap・hanchan_void・hanchan_unvoid＋2c-2a2 の直す op＝member_rename・member_active・
 --   session_edit・table_edit・hanchan_seats・extra_set）＋2c-2b の人の op 5個（member_link・member_unlink・member_relink・role_set・account_remove）
---   ＋2c-2c の部屋の op 4個（room_leave・room_delete・room_undelete・room_secret＝組の中で1つだけ）。
+--   ＋2c-2c の部屋の op 4個（room_leave・room_delete・room_undelete・room_secret＝組の中で1つだけ）＋段C の room_share・room_close（同じく1つだけ）。
 --   残り7個は not_yet（2c-2d 〜）。2c-2c から K-3 の段1（持ち主のアカウントが消えていたら居る人の呼びで継ぐ）が全部の op に効く。2c-2b から役の門（mj_ops.who_plain）と入り直しの門（mj_ops.re・jwt の amr 10分）が全部の op に効く。
 -- ★2c-2（履歴のたたみ・op_results の掃除・room_secret・リーグの L）が済むまで本番の倉庫へ出さない★
 -- 段：⓪ 人 → ① 形（行を読まない）→ ② 部屋（rooms を for no key update で押さえる）→ ③ op_id → ④ 先見
@@ -1994,7 +2253,7 @@ declare
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
   v_u uuid; v_own uuid; v_m2 mahjong.members; v_cap2 int; v_us uuid[]; v_ids uuid[];
-  g mahjong.leagues; v_ra jsonb; v_d2 date; v_ida uuid; v_rv int; v_rva int; v_alt boolean; v_rk text;
+  g mahjong.leagues; v_ra jsonb; v_d2 date; v_ida uuid; v_rv int; v_rva int; v_alt boolean; v_rk text; v_s2 text;
 begin
   -- ── 作る op ──
   if v_op = 'member_add' then
@@ -2827,6 +3086,7 @@ begin
 
   elsif v_op = 'room_undelete' then
     -- 7日より前は ② が gone・消していない部屋は書かない
+    -- 段C：組を比べない（平文のパスを持たない＝比べられない）。消した印の7日の shared も組を持つ（mj_pair_bf）ので戻しても同じ組が2つ開かない
     select x.deleted_at into s from mahjong.rooms x where x.id = p_room;
     if s.deleted_at is null then return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 0); end if;
     update mahjong.rooms x set deleted_at = null where x.id = p_room;
@@ -2835,16 +3095,16 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 1);
 
   elsif v_op = 'room_secret' then
-    -- 形（mj_room_create と同じ）→ S1 の門（前と同じパス・今と同じ URL・他の部屋と同じ URL）＝どれも何も書かない
-    if pg_catalog.jsonb_typeof(p_o -> 'pass') is distinct from 'string' or pg_catalog.char_length(p_o ->> 'pass') not between 4 and 64 then
-      perform mahjong_private.mj_w_bad(p_i, 'pass');
-    end if;
+    -- 段C：部屋なしは bad kind（★パスを比べる前＝crypt に '!solo' を通さない★）
+    select x.pass_hash, x.url_token_hash, x.kind, x.name_key into s from mahjong.rooms x where x.id = p_room;
+    if s.kind <> 'shared' then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
+    -- 形（段C＝そろえた後に数字4つ）→ S1 の門（前と同じパス・今と同じ URL・他の部屋と同じ URL）＝どれも何も書かない
+    if pg_catalog.jsonb_typeof(p_o -> 'pass') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
     v_key := mahjong_private.mj_pass_key(p_o ->> 'pass');
-    if pg_catalog.octet_length(v_key) > 72 or pg_catalog.char_length(v_key) not between 4 and 64 then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
+    if v_key is null or v_key !~ '^[0-9]{4}$' then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
     v_s := case when pg_catalog.jsonb_typeof(p_o -> 'url_token_hash') = 'string' then p_o ->> 'url_token_hash' end;
     if v_s is null or v_s !~ '^[0-9a-f]{64}$' then perform mahjong_private.mj_w_bad(p_i, 'url_token_hash'); end if;
     -- よくあるパスの弾きは B0 で外した
-    select x.pass_hash, x.url_token_hash into s from mahjong.rooms x where x.id = p_room;
     if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'pass', 'reason', 'same'));
     end if;
@@ -2852,6 +3112,11 @@ begin
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'url_token_hash', 'reason', 'same'));
     end if;
     if exists (select 1 from mahjong.rooms x where x.url_token_hash = v_s and x.id <> p_room) then perform mahjong_private.mj_w_bad(p_i, 'url_token_hash'); end if;
+    -- 段C §3 組の比べ（部屋の行 → totals を押さえて引き直し・下見で bf していない／変わった部屋だけ bf）
+    perform 1 from mahjong.totals tt where tt.id = 1 for update;
+    v_j := mahjong_private.mj_pair_bf(s.name_key, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = s.name_key then p_o -> '_pre' -> 'seen' else '{}'::jsonb end);   -- ★room_secret の比べ★
+    if (v_j ->> 'busy')::boolean then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'i', p_i, 'what', 'name')); end if;
+    if (v_j ->> 'hit')::boolean then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'i', p_i, 'at', 'name_pass')); end if;
     v_kd := pg_catalog.encode(extensions.gen_random_bytes(16), 'hex');
     update mahjong.rooms x set pass_hash = extensions.crypt(v_key, extensions.gen_salt('bf', 10)), url_token_hash = v_s, channel_key = v_kd,
       last_secret_at = pg_catalog.now(), fail_count = 0, locked_until = null where x.id = p_room;
@@ -2870,6 +3135,76 @@ begin
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_accounts', pg_catalog.jsonb_build_object('room_id', p_room), null, null,
       pg_catalog.jsonb_build_object('removed', pg_catalog.cardinality(v_us), 'unlinked', pg_catalog.cardinality(v_ids), 'unbanned', v_x), null);
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'channel_key', v_kd), 'made', 0, 'hist', 2);
+
+  -- ── 段C の部屋の op 2つ（heya_mirutoki_sadame.md §4・v10.1 決まらない3）──
+  elsif v_op = 'room_share' then
+    -- 順＝kind（開いた部屋なしだけ）→ 形 → url（今と同じ・他の部屋と同じ）→ 名前の止め → totals を押さえて R−20・作るの数え 3つ → 組の比べ
+    select x.kind, x.url_token_hash into s from mahjong.rooms x where x.id = p_room;
+    if s.kind <> 'solo' then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
+    if pg_catalog.jsonb_typeof(p_o -> 'name') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    v_s := pg_catalog.btrim(p_o ->> 'name', c_trim);
+    if pg_catalog.char_length(v_s) not between 1 and 40 then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    v_rk := nullif(mahjong_private.mj_name_key(v_s), '');
+    if v_rk is null then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    if pg_catalog.jsonb_typeof(p_o -> 'pass') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
+    v_key := mahjong_private.mj_pass_key(p_o ->> 'pass');
+    if v_key is null or v_key !~ '^[0-9]{4}$' then perform mahjong_private.mj_w_bad(p_i, 'pass'); end if;
+    v_kd := case when pg_catalog.jsonb_typeof(p_o -> 'url_token_hash') = 'string' then p_o ->> 'url_token_hash' end;
+    if v_kd is null or v_kd !~ '^[0-9a-f]{64}$' then perform mahjong_private.mj_w_bad(p_i, 'url_token_hash'); end if;
+    if v_kd = s.url_token_hash then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'url_token_hash', 'reason', 'same'));
+    end if;
+    if exists (select 1 from mahjong.rooms x where x.url_token_hash = v_kd and x.id <> p_room) then perform mahjong_private.mj_w_bad(p_i, 'url_token_hash'); end if;
+    if mahjong_private.mj_nfail_until(v_rk) is not null then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'locked', 'i', p_i, 'until', mahjong_private.mj_nfail_until(v_rk)));
+    end if;
+    -- 部屋の行 → totals（★新しく押さえる★）・R−20・作るの数え（全体 1分20・24時間200・人ごと24時間5＝足す前に見る）
+    select tt.rooms_all into v_n from mahjong.totals tt where tt.id = 1 for update;
+    select m.cap into v_cap2 from mahjong.mj_caps m where m.tbl = 'rooms' and m.scope = 'all';
+    if v_cap2 is null or v_n >= v_cap2 - 20 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'i', p_i, 'what', 'rooms')); end if;
+    if (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l
+         where l.kind = 'create:1m' and l.key = 'all' and l.window_start = pg_catalog.date_trunc('minute', pg_catalog.now())) + 1 > 20
+       or (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l
+            where l.kind = 'create:1d' and l.key = 'all' and l.window_start > pg_catalog.now() - interval '24 hours') + 1 > 200 then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'i', p_i, 'what', 'all'));
+    end if;
+    if (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l   -- ★room_share の人ごとの数え★
+         where l.kind = 'create:u1d' and l.key = p_me::text and l.window_start > pg_catalog.now() - interval '24 hours') + 1 > 5 then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'i', p_i, 'what', 'user'));
+    end if;
+    -- 組の比べ（押さえた後の引き直し）
+    v_j := mahjong_private.mj_pair_bf(v_rk, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = v_rk then p_o -> '_pre' -> 'seen' else '{}'::jsonb end);   -- ★引き直し★
+    if (v_j ->> 'busy')::boolean then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'i', p_i, 'what', 'name')); end if;
+    if (v_j ->> 'hit')::boolean then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'dup', 'i', p_i, 'at', 'name_pass')); end if;
+    v_s2 := pg_catalog.encode(extensions.gen_random_bytes(16), 'hex');
+    update mahjong.rooms x set kind = 'shared', name = v_s, name_key = v_rk, pass_hash = extensions.crypt(v_key, extensions.gen_salt('bf', 10)),
+      url_token_hash = v_kd, channel_key = v_s2, fail_count = 0, locked_until = null where x.id = p_room;
+    update mahjong.totals set rooms_all = rooms_all + 1 where id = 1;
+    delete from mahjong.limits l where l.kind = 'create:1m' and l.key = 'all' and l.window_start < pg_catalog.date_trunc('minute', pg_catalog.now());
+    delete from mahjong.limits l where l.kind = 'create:1d' and l.key = 'all' and l.window_start <= pg_catalog.now() - interval '24 hours';
+    delete from mahjong.limits l where l.kind = 'create:u1d' and l.key = p_me::text and l.window_start <= pg_catalog.now() - interval '24 hours';
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:1d', 'all', pg_catalog.date_trunc('hour', pg_catalog.now()), 1)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:1m', 'all', pg_catalog.date_trunc('minute', pg_catalog.now()), 1)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:u1d', p_me::text, pg_catalog.date_trunc('hour', pg_catalog.now()), 1)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+    -- ★履歴に pass・hash・channel_key を書かない★（名前だけ）
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'rooms', pg_catalog.jsonb_build_object('id', p_room), 'kind',
+      pg_catalog.to_jsonb('solo'::text), pg_catalog.jsonb_build_object('kind', 'shared', 'name', v_s), null);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'channel_key', v_s2), 'made', 0, 'hist', 1);
+
+  elsif v_op = 'room_close' then
+    -- 開いた shared だけ（部屋なし＝bad kind・終えた部屋は mj_write の閉じた門が bad closed）
+    select x.kind, x.closed_at into s from mahjong.rooms x where x.id = p_room;
+    if s.kind <> 'shared' then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
+    if s.closed_at is not null then perform mahjong_private.mj_w_bad(p_i, 'closed'); end if;
+    perform 1 from mahjong.totals tt where tt.id = 1 for update;   -- 部屋の行 → totals
+    update mahjong.rooms x set closed_at = pg_catalog.now(), name_key = null where x.id = p_room;
+    update mahjong.totals set rooms_all = greatest(rooms_all - 1, 0) where id = 1;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'rooms', pg_catalog.jsonb_build_object('id', p_room), 'closed_at',
+      null, pg_catalog.to_jsonb(pg_catalog.now()), null);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', 1);
   end if;
   -- ── リーグの op（2c-2d1・write7_league_sadame_v11.md） ──
   if v_op = 'league_create' then
@@ -3057,6 +3392,8 @@ declare
     "room_delete": [],
     "room_undelete": [],
     "room_secret": ["pass", "url_token_hash"],
+    "room_share": ["name", "pass", "url_token_hash"],
+    "room_close": [],
     "league_create": ["league_id", "name", "date_from", "date_to", "rank_by", "min_games", "players_main", "rules", "rules_alt"],
     "league_save": ["league_id", "base_version", "name", "date_from", "date_to", "rank_by", "min_games", "rules", "rules_alt"],
     "league_owner_set": ["league_id"]}'::jsonb;
@@ -3066,6 +3403,7 @@ declare
   v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text;
   v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record;
   v_who text; v_re text; v_need text; v_ra boolean; v_wl text; v_lg record;
+  v_pre jsonb; v_op0 text;
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -3091,7 +3429,7 @@ begin
       end if;
       if not (c_keys ? v_name) then v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'not_yet', 'i', v_i); exit; end if;
       -- 2c-2c 決めた事1：部屋の op は組の中で1つだけ（他の op と混ぜない）
-      if v_len > 1 and v_name in ('room_leave', 'room_delete', 'room_undelete', 'room_secret') then
+      if v_len > 1 and v_name in ('room_leave', 'room_delete', 'room_undelete', 'room_secret', 'room_share', 'room_close') then
         v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', v_i, 'at', 'op'); exit;
       end if;
       select t.k into v_k from pg_catalog.jsonb_object_keys(v_o) t(k) where t.k <> 'op' and not ((c_keys -> v_name) ? t.k) order by t.k limit 1;
@@ -3099,9 +3437,19 @@ begin
     end loop;
   end if;
   if v_ret is not null then perform mahjong_private.mj_w_count(null, v_me, null, 0); return v_ret; end if;
+  v_op0 := p_ops -> 0 ->> 'op';
+
+  -- ①' 段C §3 組の比べの下見（room_share・room_secret＝★部屋の行を押さえる前に bf★・持ち主か管でなければ下見しない）
+  if v_op0 in ('room_share', 'room_secret') then
+    begin
+      v_pre := mahjong_private.mj_pair_pre(p_room_id, v_me, p_ops -> 0);
+    exception when others then
+      v_pre := null;
+    end;
+  end if;
 
   -- ② 部屋（同じ文で押さえる＝同じ部屋の書き込みは1列に並ぶ）
-  select x.id, x.owner_user_id, x.deleted_at, x.row_count, x.history_count into r
+  select x.id, x.owner_user_id, x.deleted_at, x.row_count, x.history_count, x.kind, x.closed_at into r
     from mahjong.rooms x where x.id = p_room_id for no key update;
   if not found then
     perform mahjong_private.mj_w_count(null, v_me, null, 0);
@@ -3123,7 +3471,7 @@ begin
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone');
     end if;
     update mahjong.rooms x set history_count = x.history_count + v_n where x.id = p_room_id;
-    select x.id, x.owner_user_id, x.deleted_at, x.row_count, x.history_count into r from mahjong.rooms x where x.id = p_room_id;
+    select x.id, x.owner_user_id, x.deleted_at, x.row_count, x.history_count, x.kind, x.closed_at into r from mahjong.rooms x where x.id = p_room_id;
     if r.owner_user_id = v_me then v_role := 'owner'; end if;
     v_n := 0;
   end if;
@@ -3158,9 +3506,10 @@ begin
   if found then
     perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, 0);
     if v_uid is distinct from v_me then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_op_other_user'); end if;
-    -- 2c-2c S2：room_secret の答え（op 名で決める）は channel_key を今の rooms から読み直して足す・もう管でなければ役で止める
-    if (p_ops -> 0 ->> 'op') = 'room_secret' and (v_x ->> 'ok') = 'true' then
-      if not mahjong_private.mj_w_is_kan(v_role) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', 0, 'need', 'kan'); end if;
+    -- 2c-2c S2：room_secret・room_share（段C v10.2）の答え（op 名で決める）は channel_key を今の rooms から読み直して足す・もう役が足りなければ役で止める
+    if v_op0 in ('room_secret', 'room_share') and (v_x ->> 'ok') = 'true' then
+      v_need := mahjong_private.mj_w_need((select m.who_plain from mahjong.mj_ops m where m.name = v_op0), v_role);
+      if v_need is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', 0, 'need', v_need); end if;
       return pg_catalog.jsonb_set(v_x, '{results,0,channel_key}', pg_catalog.to_jsonb((select x.channel_key from mahjong.rooms x where x.id = p_room_id)));
     end if;
     return v_x;
@@ -3190,6 +3539,13 @@ begin
     end if;
   end loop;
 
+  -- ④' 段C §3 room_secret は1部屋1日3回（secret:r1d・key＝room_id）＝4回目は busy what secret（塊の外・数えない）
+  if v_op0 = 'room_secret' and (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l
+       where l.kind = 'secret:r1d' and l.key = p_room_id::text and l.window_start > pg_catalog.now() - interval '24 hours') >= 3 then
+    perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, 0);
+    return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'secret');
+  end if;
+
   -- ④ 先見（越えるなら何も書かない）
   v_k := mahjong_private.mj_w_over(p_room_id, v_me, v_role, 1, 1);
   if v_k is not null then
@@ -3199,8 +3555,14 @@ begin
 
   -- ⑤ 塊（副取引）
   begin
+    -- 段C §4 終えた shared で通る op＝room_leave・room_export・room_delete・room_undelete だけ（他は塊ごと bad closed）
+    if r.closed_at is not null and exists (select 1 from pg_catalog.jsonb_array_elements(p_ops) t(o)
+                                            where (t.o ->> 'op') not in ('room_leave', 'room_export', 'room_delete', 'room_undelete')) then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'at', 'closed'));
+    end if;
     for v_i in 0 .. v_len - 1 loop
       v_o := p_ops -> v_i;
+      if v_i = 0 and v_pre is not null then v_o := v_o || pg_catalog.jsonb_build_object('_pre', v_pre); end if;   -- 下見の答え（倉庫の中だけ・① の鍵の門の後）
       -- 組の初めの飛んだ席（その半荘を初めて触る前に取る）
       v_hid := v_o ->> 'hanchan_id';
       if v_hid is not null and v_hid ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
@@ -3299,7 +3661,7 @@ begin
     -- 送り直しの答え（履歴の行を書いた組だけ・部屋で cap を越えたら古い物から消す＝full にしない）
     if v_n > 0 then
       insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id,
-        case when (p_ops -> 0 ->> 'op') = 'room_secret' then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end, v_me);   -- 2c-2c S2
+        case when v_op0 in ('room_secret', 'room_share') then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end, v_me);   -- 2c-2c S2・段C v10.2
       select m.cap into v_cap from mahjong.mj_caps m where m.tbl = 'op_results' and m.scope = 'room';
       if v_cap is null then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'op_results')); end if;
       select pg_catalog.count(*) into v_c from mahjong.op_results o where o.room_id = p_room_id;
@@ -3318,7 +3680,16 @@ begin
       v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;
   end;
 
-  -- ⑥ 数え（塊の外＝戻らない・limits は一番最後）
+  -- ⑥ 数え（塊の外＝戻らない・limits は一番最後・(kind,key) の字の順＝join:nfail1h → secret:r1d → write:*）
+  --   段C §3：room_share の dup name_pass＝名前の止め +1／room_secret の ok と dup name_pass＝secret:r1d +1（塊が戻っても残る）
+  if v_op0 = 'room_share' and (v_ret ->> 'err') = 'dup' and (v_ret ->> 'at') = 'name_pass' then
+    perform mahjong_private.mj_nfail_add(nullif(mahjong_private.mj_name_key(pg_catalog.btrim(p_ops -> 0 ->> 'name', ' ' || chr(9) || chr(10) || chr(13) || chr(12288))), ''));   -- ★room_share の dup の数え★
+  end if;
+  if v_op0 = 'room_secret' and ((v_ret ->> 'ok') = 'true' or ((v_ret ->> 'err') = 'dup' and (v_ret ->> 'at') = 'name_pass')) then
+    delete from mahjong.limits l where l.kind = 'secret:r1d' and l.key = p_room_id::text and l.window_start <= pg_catalog.now() - interval '24 hours';
+    insert into mahjong.limits (kind, key, window_start, count) values ('secret:r1d', p_room_id::text, pg_catalog.date_trunc('hour', pg_catalog.now()), 1)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+  end if;
   perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);
   return v_ret;
 end $fn$;

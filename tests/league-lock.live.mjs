@@ -75,7 +75,7 @@ async function race(label) {
     await mq(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${me}', '${me}@${MAIL}', 'authenticated', 'authenticated', false);
       insert into auth.sessions (id, user_id) values ('${ss}', '${me}');`);
     for (const [k, opid] of [['a', ops[0]], ['b', ops[1]]]) {
-      const rr = await mq(`select public.mj_room_create('${opid}'::uuid, ${lit('w-lock-' + k)}, ${lit('Zq9Lock' + k)}, '{"players":4}'::jsonb,
+      const rr = await mq(`select public.mj_room_create('${opid}'::uuid, ${lit('w-lock-' + k)}, ${lit('2741')}, '{"players":4}'::jsonb,
         jsonb_build_object('url_token_hash', md5(random()::text) || md5(random()::text))) as r from (select set_config('request.jwt.claims', ${claims}, true)) c`);
       const rid = rr[0]?.r?.room_id;
       if (!rid) throw new Error('部屋を作れない: ' + JSON.stringify(rr).slice(0, 300));

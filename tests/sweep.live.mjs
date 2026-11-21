@@ -6,7 +6,7 @@
  *  ① 古い limits（1m・1h・1d・u1d・sweep:* の境目の前後）・creates・op_results → join の ok で消える・内側は残る・知らない kind は残る
  *     1手順で p_max を超えない（150 入れて 100 → 50 残る）
  *  ② room_accounts：入 181日 消える／入 179日 残る／管 181日・持ち主 181日・L 181日 残る／members.user_id は残る
- *  ③ 空の部屋：8日・半荘0・誰も来ない・小さい→物理で消え rooms_all −1／昨日 last_seen→残る／半荘1→残る／子が p_max 超え→deleted_at だけ
+ *  ③ 空の部屋（段C v10.1 で ⓑ を止めた）：8日・半荘0・誰も来ない・小さい→★消えない★／昨日 last_seen→残る／半荘1→残る／子が p_max 超え→★印も付かない★
  *  ④-0 小さい消した部屋（rule_sets 2版を sessions・tables・hanchans が指す）が1回で消え、set constraints all immediate で赤0
  *  ④ 消して8日の大きい部屋を p_max 1〜13 で回し、毎回 set constraints all immediate → 赤0で減り最後に消える・rooms_all −1・消して6日は残る
  *  ⑤ totals を +3 ずらす→印の無い日に直る・同じ日の2回目は直さない
@@ -42,7 +42,7 @@ const D = '$';
 const q = (t) => D + t + D;
 const lit = (s) => q('v') + s + q('v');
 const MAIL = 'mj-sweep.invalid';
-const PASS = 'Zq9Pass';
+const PASS = '2741';   // 段C：作るパスは数字4つ
 const TOK = newToken();
 const TOKH = await tokenHash(TOK);
 const N_U = 6;
@@ -121,10 +121,7 @@ const sql = `do ${q('sw')} declare res jsonb := '{}'; r jsonb; i int; kc int; n 
 begin
   /* khaw の前から在る古い行を先に掃く（掃除は ok の返しでも走る＝自分の行の数えが揺れない・塊の最後で全部戻る） */
   for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
-  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days'
-    or (x.deleted_at is null and x.created_at < now() - interval '7 days' and (x.last_write_at is null or x.last_write_at < now() - interval '7 days')
-        and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id)
-        and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= now() - interval '7 days'))));
+  res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days'));   -- 段C v10.1：掃除は ⓐ だけ
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
   insert into auth.users (id, email, aud, role, is_anonymous)
     select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
@@ -253,10 +250,10 @@ begin
   ${undo('tot', `delete from mahjong.limits where kind = 'sweep:recount' and window_start = date_trunc('day', now());
     update mahjong.totals set rooms_all = rooms_all + 3 where id = 1;
     ${SW(100)}
-    res := res || jsonb_build_object('tot1', ${ALL} - (select count(*) from mahjong.rooms));
+    res := res || jsonb_build_object('tot1', ${ALL} - (select count(*) from mahjong.rooms where kind = 'shared' and closed_at is null));   -- 段C の式
     update mahjong.totals set rooms_all = rooms_all + 3 where id = 1;
     ${SW(100)}
-    res := res || jsonb_build_object('tot2', ${ALL} - (select count(*) from mahjong.rooms),
+    res := res || jsonb_build_object('tot2', ${ALL} - (select count(*) from mahjong.rooms where kind = 'shared' and closed_at is null),
       'tot_mark', exists (select 1 from mahjong.limits where kind = 'sweep:recount' and window_start = date_trunc('day', now())));`)}
   raise exception 'MJRESULT%', res::text;
 end ${q('sw')};`;
@@ -312,10 +309,10 @@ if (out) {
   ok('② リーグの L（入・181日）は残る', ra['5'] === true, J(ra));
   ok('② members.user_id は残る', out.ra_member === true, String(out.ra_member));
   /* ③ */
-  ok('③ 8日・半荘0・誰も来ない・小さい → 物理で消え rule_sets も消え rooms_all −1', out.e1 && out.e1.room === false && out.e1.rs === false && Number(out.e1.all) === -1, J(out.e1));
+  ok('③ 8日・半荘0・誰も来ない・小さい → ★消えない★（段C v10.1 ⓑ を止めた）・rule_sets も残り rooms_all そのまま', out.e1 && out.e1.room === true && out.e1.rs === true && Number(out.e1.all) === 0, J(out.e1));
   ok('③ 昨日 last_seen → 残る（印も付かない）', out.e2 && out.e2.room === true && out.e2.del === false && Number(out.e2.all) === 0, J(out.e2));
   ok('③ 半荘1 → 残る', out.e3 && out.e3.room === true && out.e3.del === false && Number(out.e3.all) === 0, J(out.e3));
-  ok('③ 子が p_max を超える → deleted_at が付くだけ（子はそのまま・rooms_all そのまま）', out.e4 && out.e4.room === true && out.e4.del === true && Number(out.e4.all) === 0 && Number(out.e4.kids) === 7, J(out.e4));
+  ok('③ 子が p_max を超える → ★消した印も付かない★（段C v10.1・子はそのまま・rooms_all そのまま）', out.e4 && out.e4.room === true && out.e4.del === false && Number(out.e4.all) === 0 && Number(out.e4.kids) === 7, J(out.e4));
   /* ④ */
   ok('④-0 小さい消した部屋（2版を開催日・卓・半荘が指す）が1回で消える・rooms_all −1', out.s0 && out.s0.room === false && Number(out.s0.rs) === 0 && Number(out.s0.han) === 0 && Number(out.s0.all) === -1, J(out.s0));
   ok('④-0 外部キーをその場で見て赤0', out.s0 && out.s0.fk === 'ok', out.s0 && out.s0.fk);

@@ -20,7 +20,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COLS = ['who_plain', 'who_league', 'on_deleted', 'writes_history', 'revert', 'versioned', 're'];
 const o = true, x = false;
 export const FIXED = {
-  count: 35,
+  count: 37,
   /* 種に書いてはいけない v15 の列（倉庫では空だけ＝mj_ops_old_empty） */
   oldEmpty: ['kan', 'nyu', 'needs_secret'],
   rows: {
@@ -56,6 +56,8 @@ export const FIXED = {
     room_secret:      ['kan',          'same',            x, o, 'none',          x, 'yes'],
     room_delete:      ['owner',        'same',            x, o, 'none',          x, 'yes'],
     room_undelete:    ['owner_or_kan', 'same',            o, o, 'none',          x, 'no'],
+    room_share:       ['owner',        'same',            x, o, 'none',          x, 'no'],    // 段C v10.1
+    room_close:       ['owner',        'same',            x, o, 'none',          x, 'yes'],   // 段C
     role_set:         ['owner',        'same',            x, o, 'prev',          x, 'grant'],
     account_remove:   ['kan',          'same',            x, o, 'none',          x, 'no'],
     league_owner_set: ['owner',        'owner',           x, o, 'prev',          x, 'yes'],
@@ -123,8 +125,8 @@ if (DIRECT && process.argv.includes('--self-test')) {
   T('hanchan_seats のリーグの日を nyu に', (c) => { row(c, 'hanchan_seats').who_league = 'nyu'; });
   T('account_remove を持ち主だけに', (c) => { row(c, 'account_remove').who_plain = 'owner'; });
   T('league_owner_set のリーグの日を L に', (c) => { row(c, 'league_owner_set').who_league = 'L'; });
-  T('行を1つ消す（34）', (c) => { c.pop(); });
-  T('知らない操作を足す（36）', (c) => { c.push({ ...c[0], name: 'room_merge' }); });
+  T('行を1つ消す（36）', (c) => { c.pop(); });
+  T('知らない操作を足す（38）', (c) => { c.push({ ...c[0], name: 'room_merge' }); });
   T('列を1つ書き忘れる（re 抜け）', (c) => { delete row(c, 'member_link').re; });
   T('v15 の kan 列に値を入れる', (c) => { row(c, 'cell_set').kan = true; });
   console.log('\n' + p + ' passed, ' + f + ' failed');

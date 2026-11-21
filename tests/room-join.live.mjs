@@ -44,7 +44,8 @@ const D = '$';
 const q = (t) => D + t + D;
 const lit = (s) => q('v') + s + q('v');
 const MAIL = 'mj-room-join.invalid';
-const PASS = 'Zq9Pass';
+const PASS = '２７４１';                       // 段C：作るパスは数字4つ（全角で打っても NFKC で 2741・入るパスの形は今の 4〜64字のまま）
+const RNAME = '甲の部屋' + crypto.randomBytes(3).toString('hex');   // 段C：同じ名前とパスは dup＝回りごとに名前を変える
 const BADPASS = 'Wr0ngPass';
 const TOK = newToken();                       // ★lib で作る★（自分で作って自分で hash しない）
 const TOKH = await tokenHash(TOK);
@@ -141,7 +142,7 @@ begin
   insert into auth.sessions (id, user_id) values (sa, va);
   /* 部屋（人 1 が作る・URL の hash は lib の物） */
   ${asWho(1)}
-  r := public.mj_room_create(gen_random_uuid(), ${lit('甲の部屋')}, ${lit(PASS)}, '{"players":4}'::jsonb, jsonb_build_object('url_token_hash', ${lit(TOKH)}));
+  r := public.mj_room_create(gen_random_uuid(), ${lit(RNAME)}, ${lit(PASS)}, '{"players":4}'::jsonb, jsonb_build_object('url_token_hash', ${lit(TOKH)}));
   res := res || jsonb_build_object('made', r);
   rid := (r->>'room_id')::uuid; v_no := r->>'room_no';
   loop
@@ -312,7 +313,7 @@ if (out) {
   });
   /* ② */
   ok('② パスで入れた＝again:false・nyu・返しの鍵7つ', okRet('p1', false), JSON.stringify(R('p1')));
-  ok('② 返しの room_no・name・channel_key が部屋の物', R('p1').room_no === out.made.room_no && R('p1').name === '甲の部屋' && R('p1').channel_key === out.made.channel_key);
+  ok('② 返しの room_no・name・channel_key が部屋の物', R('p1').room_no === out.made.room_no && R('p1').name === RNAME && R('p1').channel_key === out.made.channel_key);
   ok('② room_accounts に nyu・pass の行', out.p1_row && out.p1_row.role === 'nyu' && out.p1_row.joined_via === 'pass' && out.p1_row.member_id === null, JSON.stringify(out.p1_row));
   ok('② 入って room_accounts +1・ok1h +1・外れの数えは増えない', same(delta('p1'), { ra: 1, fail: 0, lock: 'false→false', f1m: 0, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('p1')));
   ok('② 同じ人＝again:true', okRet('p2', true), JSON.stringify(R('p2')));
@@ -389,8 +390,8 @@ if (out) {
   ok('⑭ 平文のパス・外れのパス・token が rooms・room_accounts・limits の字に無い', pl.rooms && hits.length === 0, hits.join(','));
   /* ⑮ */
   const fn = out.funcs || [];
-  ok('⑮ public.mj_* は mj_room_create・mj_room_join・mj_write の3本（段2c-1）', fn.map((x) => x.name).join(',') === 'mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
-  ok('⑮ 3本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 3 && fn.every((x) => x.definer === true
+  ok('⑮ public.mj_* は mj_my_rooms・mj_room_create・mj_room_join・mj_write の4本（段C）', fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
+  ok('⑮ 4本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 4 && fn.every((x) => x.definer === true
     && JSON.stringify(x.config) === JSON.stringify(['search_path=""']) && !x.anon && x.auth && !x.public), JSON.stringify(fn));
   const errs = Object.keys(out).filter((k) => k.endsWith('_err'));
   ok('塊の中で思わぬ例外が無い', errs.length === 0, errs.map((k) => k + '=' + out[k]).join(' / '));
@@ -463,7 +464,7 @@ if (isTest) {
   }
   const lf = await mq(`select (select count(*)::int from auth.users where email like '%@${MAIL}') as u,
     (select count(*)::int from mahjong.accounts a left join auth.users x on x.id = a.user_id where x.id is null) as orphan,
-    (select count(*)::int from mahjong.rooms where name = '甲の部屋') as rooms,
+    (select count(*)::int from mahjong.rooms where name = ${lit(RNAME)}) as rooms,
     (select count(*)::int from mahjong.limits where kind like 'join:%') as lim`);
   let left = null; try { left = JSON.parse(lf.text)[0]; } catch (_) { /* 字 */ }
   ok('倉庫に試験の人・部屋・join の数えが1つも残っていない', left && left.u === 0 && left.orphan === 0 && left.rooms === 0 && left.lim === 0, lf.text.slice(0, 200));
