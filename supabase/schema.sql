@@ -265,7 +265,7 @@ begin
   end loop;
 end $exck$;
 alter table mahjong.extras drop constraint if exists extras_kind_ok;
-alter table mahjong.extras add constraint extras_kind_ok check (kind in ('chip', 'shugi', 'yaki') or kind ~ '^c:[a-z0-9]{1,8}$');  -- 2c-3c'：やきとり 'yaki' を足した
+alter table mahjong.extras add constraint extras_kind_ok check (kind in ('chip', 'shugi', 'yaki', 'tobi') or kind ~ '^c:[a-z0-9]{1,8}$');  -- 2c-3c'：やきとり 'yaki'・B2：飛び賞 'tobi' を足した
 
 -- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から＝飛んだ人が他の全員に tobi_pt ずつ・分けない＝v15.9） ──
 create table if not exists mahjong.tobi (
@@ -1610,8 +1610,8 @@ begin
     v_st := 'ng'; v_why := 'sum';
   elsif mahjong_private.mj_needs_order(rs, v_cells) ? 'tie' and h.ton_order is null then
     v_st := 'input'; v_why := 'order';
-  elsif exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then
-    v_st := 'input'; v_why := 'tobi';
+  -- B2 段1（tobi_chip_v3.md）：④ 飛び賞の受け取りを待つ（why 'tobi'）は外した＝飛び賞は extras の種 'tobi'（チップと同じ ±）
+  --   mj_w_busted・mj_w_tobi_fix・op tobi_set・列 tobi_to は写しの鍵消しと対なので今のまま（段3 で決める）
   else
     v_st := 'ok'; v_why := null;
   end if;
@@ -1625,7 +1625,7 @@ revoke all on function mahjong_private.mj_w_hstate(uuid) from public, anon, auth
 do $yr$
 declare r record;
 begin
-  for r in select x.id from mahjong.hanchans x where x.state_reason = 'yaki' loop
+  for r in select x.id from mahjong.hanchans x where x.state_reason in ('yaki', 'tobi') loop  -- B2 段1：④を外した＝why 'tobi' の半荘も出し直す
     perform mahjong_private.mj_w_hstate(r.id);
   end loop;
 end $yr$;
@@ -1640,6 +1640,16 @@ language sql immutable set search_path = '' as $fn$
               then ((p_rules -> 'yakitori_pt')::numeric) % 1 = 0 and ((p_rules -> 'yakitori_pt')::numeric) >= 1 else false end
 $fn$;
 revoke all on function mahjong_private.mj_w_yaki_used(jsonb) from public, anon, authenticated;
+
+-- 飛び賞を使う卓か（B2 段1・tobi_chip_v3.md）＝ルールの tobi が JSON の true かつ tobi_pt が1以上の整数（lib の tobiUsed と同じ・pt 0 は使わない種）
+create or replace function mahjong_private.mj_w_tobi_used(p_rules jsonb) returns boolean
+language sql immutable set search_path = '' as $fn$
+  select coalesce(p_rules -> 'tobi' = 'true'::jsonb, false)
+     and coalesce(pg_catalog.jsonb_typeof(p_rules -> 'tobi_pt') = 'number', false)
+     and case when pg_catalog.jsonb_typeof(p_rules -> 'tobi_pt') = 'number'
+              then ((p_rules -> 'tobi_pt')::numeric) % 1 = 0 and ((p_rules -> 'tobi_pt')::numeric) >= 1 else false end
+$fn$;
+revoke all on function mahjong_private.mj_w_tobi_used(jsonb) from public, anon, authenticated;
 
 -- 種の確かめ（2c-3b・write3_sekkei.md §3）：卓のルール p_rules で種 p_kind を見て 'sum0'（合計0の種）／'out'（外へ払う種）／null（弾く）
 --   'yaki'（2c-3c'）＝mj_w_yaki_used が true の時だけ 'sum0'・でなければ null
@@ -1658,6 +1668,9 @@ begin
   end if;
   if v_k = 'yaki' then
     return case when mahjong_private.mj_w_yaki_used(p_rules) then 'sum0' end;
+  end if;
+  if v_k = 'tobi' then  -- B2 段1
+    return case when mahjong_private.mj_w_tobi_used(p_rules) then 'sum0' end;
   end if;
   if v_k !~ '^c:[a-z0-9]{1,8}$' or pg_catalog.jsonb_typeof(p_rules -> 'tane_custom') is distinct from 'array' then return null; end if;
   select q.e into v_t from pg_catalog.jsonb_array_elements(p_rules -> 'tane_custom') q(e)
@@ -1688,6 +1701,8 @@ begin
                      case when pg_catalog.jsonb_typeof(rs -> 'tane_custom') = 'array' then rs -> 'tane_custom' else '[]'::jsonb end) with ordinality q(e, n)
                    where q.e -> 'sum0' is distinct from 'false'::jsonb order by q.n);
   -- 2c-3c'：使うやきとりは合計0の種の先頭（reason の順＝yaki → c:<id>）
+  -- B2 段1：使う飛び賞も合計0の種（reason の順＝yaki → tobi → c:<id>）
+  if mahjong_private.mj_w_tobi_used(rs) then v_sum0 := array['tobi'] || v_sum0; end if;
   if mahjong_private.mj_w_yaki_used(rs) then v_sum0 := array['yaki'] || v_sum0; end if;
   select u.k into v_why from pg_catalog.unnest(v_sum0) with ordinality u(k, n)
    where coalesce((select pg_catalog.sum(e.value) from mahjong.extras e where e.table_id = p_tid and e.kind = u.k), 0) <> 0
