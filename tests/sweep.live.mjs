@@ -73,7 +73,7 @@ const mkPlay = (v, rs, ver, s, t, n, league = 'null') => `
 const bigKids = (v, rs) => `
   insert into mahjong.rule_sets (id, version, room_id, rules) values (${rs}, 2, ${v}, '{"players":4}'), (${rs}, 3, ${v}, '{"players":4}');
   lg := gen_random_uuid();
-  insert into mahjong.leagues (id, room_id, name, rule_set_id, owner_user_id) values (lg, ${v}, 'L', ${rs}, us[1]);
+  insert into mahjong.leagues (id, room_id, name, rule_set_id, rule_version, owner_user_id) values (lg, ${v}, 'L', ${rs}, 2, us[1]);
   ${mkPlay(v, rs, 1, 's1', 't1', 15)}
   ${mkPlay(v, rs, 3, 's2', 't2', 15, 'lg')}
   insert into mahjong.tobi (hanchan_id, busted_seat, receiver) select h.id, 0, 1 from mahjong.hanchans h where h.table_id = t2 limit 5;
@@ -168,7 +168,7 @@ begin
   insert into mahjong.room_accounts (room_id, user_id, role, joined_via, last_seen) values
     (r0, us[3], 'kan', 'pass', now() - interval '181 days'), (r0, us[4], 'nyu', 'pass', now() - interval '179 days'),
     (r0, us[5], 'nyu', 'pass', now() - interval '181 days');
-  insert into mahjong.leagues (room_id, name, rule_set_id, owner_user_id) values (r0, 'L', gen_random_uuid(), us[5]);
+  insert into mahjong.leagues (room_id, name, rule_set_id, rule_version, owner_user_id) values (r0, 'L', gen_random_uuid(), 1, us[5]);
   ${SW(100)}
   res := res || jsonb_build_object('ra', (select jsonb_object_agg(k, exists (select 1 from mahjong.room_accounts a where a.room_id = r0 and a.user_id = us[k])) from generate_series(1, 5) k),
     'ra_member', (select user_id = us[2] from mahjong.members where id = m));

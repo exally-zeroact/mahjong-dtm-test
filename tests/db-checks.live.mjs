@@ -28,7 +28,7 @@ const OPS = `insert into mahjong.mj_ops(name,who_plain,who_league,on_deleted,wri
 const HIS = `insert into mahjong.history(room_id,group_id,op,tbl`;
 const ACC = `insert into mahjong.room_accounts(room_id,user_id,role,joined_via)`;
 const ACCM = `insert into mahjong.room_accounts(room_id,user_id,role,joined_via,member_id)`;
-const LEA = `insert into mahjong.leagues(room_id,name,rule_set_id,owner_user_id)`;
+const LEA = `insert into mahjong.leagues(room_id,name,rule_set_id,rule_version,owner_user_id)`;
 
 /* [名前, 通るべきか, SQL, 弾く決まり（名か sqlstate）]。前置きで仮の人 U・U2（auth.users）・部屋 R（持ち主 U）・
    ルール S（4人・トップ取り）・S3（3人・消える）・開催日 D・卓 T・半荘 H・人 M を作る */
@@ -101,8 +101,14 @@ const CASES = [
   ['アカウントを消すと名乗りも消える（cascade）', true, `insert into mahjong.member_claims(room_id,member_id,user_id) values (:R,:M,:U2); delete from auth.users where id = :U2; if exists (select 1 from mahjong.member_claims where member_id = :M) then raise exception 'left'; end if`],
   ['auth に居ない人を名簿の人につなぐと弾く', false, `insert into mahjong.members(room_id,name,name_key,user_id) values (:R,'乙','おつ',gen_random_uuid())`, '23503'],
   /* ── v18：リーグ・書いた人の列 ── */
-  ['リーグは持ち主ありで通る', true, `${LEA} values (:R,'リーグ',:S,:U)`],
-  ['リーグの持ち主が空は弾く', false, `${LEA} values (:R,'リーグ',:S,null)`, 'leagues_owner_ok'],
+  ['リーグは持ち主ありで通る', true, `${LEA} values (:R,'リーグ',:S,1,:U)`],
+  ['リーグの持ち主が空は弾く', false, `${LEA} values (:R,'リーグ',:S,1,null)`, 'leagues_owner_ok'],
+  /* ── 2c-2d1（write7 v1.1）：リーグのルールの版 ── */
+  ['リーグの版が空は弾く', false, `insert into mahjong.leagues(room_id,name,rule_set_id,owner_user_id) values (:R,'リーグ',:S,:U)`, '23502'],
+  ['リーグの版 0 は弾く', false, `${LEA} values (:R,'リーグ',:S,0,:U)`, 'leagues_rule_version_ok'],
+  ['alt の id だけで版が空は弾く', false, `insert into mahjong.leagues(room_id,name,rule_set_id,rule_version,rule_set_id_alt,owner_user_id) values (:R,'リーグ',:S,1,:S3,:U)`, 'leagues_rule_version_ok'],
+  ['alt の版だけで id が空は弾く', false, `insert into mahjong.leagues(room_id,name,rule_set_id,rule_version,rule_version_alt,owner_user_id) values (:R,'リーグ',:S,1,1,:U)`, 'leagues_rule_version_ok'],
+  ['alt の id と版がそろえば通る', true, `insert into mahjong.leagues(room_id,name,rule_set_id,rule_version,rule_set_id_alt,rule_version_alt,owner_user_id) values (:R,'リーグ',:S,1,:S3,1,:U)`],
   ['送り直しの答えに人が空は弾く', false, `insert into mahjong.op_results(room_id,op_id,result) values (:R,gen_random_uuid(),'{}')`, 'op_results_user_ok'],
   ['作るの控えに人が空は弾く', false, `insert into mahjong.creates(op_id,room_id) values (gen_random_uuid(),:R)`, 'creates_user_ok'],
   ['マスに端末を書いたら弾く', false, `insert into mahjong.cells(hanchan_id,seat,value,updated_by_device) values (:H,2,0,gen_random_uuid())`, 'cells_no_device'],

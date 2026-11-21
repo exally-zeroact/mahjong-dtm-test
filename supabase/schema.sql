@@ -132,6 +132,21 @@ alter table mahjong.leagues add column if not exists owner_user_id uuid;
 alter table mahjong.leagues add column if not exists voided boolean not null default false;
 alter table mahjong.leagues drop constraint if exists leagues_owner_ok;
 alter table mahjong.leagues add constraint leagues_owner_ok check (owner_user_id is not null);
+-- 2c-2d1（write7 v1.1）：作った人 created_by（人ごと24時間5本の数え・変えない・null＝前の行・外部キー無し）と
+--   リーグのルールの版（rooms の rule_set_id／rule_version と同じ持ち方・★外部キーは付けない★＝掃除が rule_sets を leagues より先に消す）
+alter table mahjong.leagues add column if not exists created_by uuid;
+alter table mahjong.leagues add column if not exists rule_version int;
+alter table mahjong.leagues add column if not exists rule_version_alt int;
+update mahjong.leagues g set rule_version = coalesce((select pg_catalog.max(r.version) from mahjong.rule_sets r where r.id = g.rule_set_id), 1)
+ where g.rule_version is null;
+update mahjong.leagues g set rule_version_alt = coalesce((select pg_catalog.max(r.version) from mahjong.rule_sets r where r.id = g.rule_set_id_alt), 1)
+ where g.rule_set_id_alt is not null and g.rule_version_alt is null;
+update mahjong.leagues g set rule_version_alt = null where g.rule_set_id_alt is null and g.rule_version_alt is not null;
+alter table mahjong.leagues alter column rule_version set not null;
+alter table mahjong.leagues drop constraint if exists leagues_rule_version_ok;
+alter table mahjong.leagues add constraint leagues_rule_version_ok check (rule_version >= 1
+  and (rule_set_id_alt is null) = (rule_version_alt is null) and (rule_version_alt is null or rule_version_alt >= 1));
+create index if not exists leagues_created_by on mahjong.leagues(created_by, created_at);
 
 -- ── 開催日 ─────────────────────────────────────────────────────────────
 create table if not exists mahjong.sessions (
@@ -1483,34 +1498,34 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_hist(uuid, uuid, text, uuid, text, text, jsonb, text, jsonb, jsonb, int) from public, anon, authenticated;
 
--- 卓を引いて押さえる（違う部屋・無い → bad／リーグの日 → not_yet＝who_league は 2c-2）
-create or replace function mahjong_private.mj_w_t(p_room uuid, p_tid uuid, p_i int) returns mahjong.tables
+-- 卓を引いて押さえる（違う部屋・無い → bad）＋役（2c-2d1＝開催日のリーグで mj_w_role・取り消したリーグの日は bad at league）
+--   ★前の3つの引数の版は落とす（残すと役を見ない道が残る）★
+drop function if exists mahjong_private.mj_w_t(uuid, uuid, int);
+create or replace function mahjong_private.mj_w_t(p_room uuid, p_tid uuid, p_i int, p_op text, p_me uuid, p_role text) returns mahjong.tables
 language plpgsql set search_path = '' as $fn$
-declare t mahjong.tables;
+declare t mahjong.tables; v_l uuid;
 begin
   select x.* into t from mahjong.tables x where x.id = p_tid and x.room_id = p_room for update;
   if not found then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
-  if exists (select 1 from mahjong.sessions s where s.id = t.session_id and s.league_id is not null) then
-    perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet');
-  end if;
+  select s.league_id into v_l from mahjong.sessions s where s.id = t.session_id;
+  perform mahjong_private.mj_w_role(p_room, p_op, v_l, null, p_me, p_role, p_i);
   return t;
 end $fn$;
-revoke all on function mahjong_private.mj_w_t(uuid, uuid, int) from public, anon, authenticated;
+revoke all on function mahjong_private.mj_w_t(uuid, uuid, int, text, uuid, text) from public, anon, authenticated;
 
 -- 半荘を引いて押さえる（同じ決め）
-create or replace function mahjong_private.mj_w_h(p_room uuid, p_hid uuid, p_i int) returns mahjong.hanchans
+drop function if exists mahjong_private.mj_w_h(uuid, uuid, int);
+create or replace function mahjong_private.mj_w_h(p_room uuid, p_hid uuid, p_i int, p_op text, p_me uuid, p_role text) returns mahjong.hanchans
 language plpgsql set search_path = '' as $fn$
-declare h mahjong.hanchans;
+declare h mahjong.hanchans; v_l uuid;
 begin
   select x.* into h from mahjong.hanchans x where x.id = p_hid and x.room_id = p_room for update;
   if not found then perform mahjong_private.mj_w_bad(p_i, 'hanchan_id'); end if;
-  if exists (select 1 from mahjong.tables t join mahjong.sessions s on s.id = t.session_id
-              where t.id = h.table_id and s.league_id is not null) then
-    perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet');
-  end if;
+  select s.league_id into v_l from mahjong.tables t join mahjong.sessions s on s.id = t.session_id where t.id = h.table_id;
+  perform mahjong_private.mj_w_role(p_room, p_op, v_l, null, p_me, p_role, p_i);
   return h;
 end $fn$;
-revoke all on function mahjong_private.mj_w_h(uuid, uuid, int) from public, anon, authenticated;
+revoke all on function mahjong_private.mj_w_h(uuid, uuid, int, text, uuid, text) from public, anon, authenticated;
 
 -- 席の並び（member_id の配列）を確かめる：長さ n・部屋の active な人・重なり無し（seats と比べる時は p_set）
 create or replace function mahjong_private.mj_w_people(p_room uuid, a jsonb, p_n int, p_i int, p_at text, p_set jsonb default null) returns jsonb
@@ -1830,6 +1845,77 @@ language sql immutable set search_path = '' as $fn$
     else coalesce(p_who, 'none') end;
 $fn$;
 revoke all on function mahjong_private.mj_w_need(text, text) from public, anon, authenticated;
+-- 2c-2d1（write7 v1.1 止め1）役の見方＝op の中で対象が分かった所で呼ぶ（③' は who_league が same か who_plain と同じ op だけを見る）
+--   p_league＝対象のリーグの日のリーグ（null＝リーグでない日）・p_member＝owner_or_sole_L の op の名簿の人
+--   リーグでない日＝who_plain（mj_w_need）／リーグの日＝who_league：same＝who_plain・nyu＝通る・L＝そのリーグの L が自分・owner＝部屋の持ち主
+--   owner_or_sole_L＝その人が出たリーグ（取り消した半荘・卓・開催日・リーグも数える）が無ければ who_plain・在れば部屋の持ち主か、その全部の L が自分
+--   取り消したリーグの日＝bad at league（member の op は数えるだけ）。足りない＝MJ001 {ok:false, err:'mj_role', i, need}（数えは ③' と同じ v_n 0）
+create or replace function mahjong_private.mj_w_role(p_room uuid, p_op text, p_league uuid, p_member uuid, p_me uuid, p_role text, p_i int) returns void
+language plpgsql set search_path = '' as $fn$
+declare v_wp text; v_wl text; v_need text; g mahjong.leagues; v_ls uuid[];
+begin
+  select m.who_plain, m.who_league into v_wp, v_wl from mahjong.mj_ops m where m.name = p_op;
+  if v_wp is null or v_wl is null then perform mahjong_private.mj_w_bad(p_i, 'op'); end if;
+  if v_wl = 'owner_or_sole_L' then
+    select pg_catalog.array_agg(distinct z.league_id) into v_ls
+      from mahjong.hanchans x join mahjong.tables y on y.id = x.table_id join mahjong.sessions z on z.id = y.session_id
+     where x.room_id = p_room and z.league_id is not null
+       and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) q where q.value = p_member::text);
+    if v_ls is null then v_need := mahjong_private.mj_w_need(v_wp, p_role);
+    elsif p_role = 'owner' then v_need := null;
+    elsif not exists (select 1 from mahjong.leagues l where l.id = any(v_ls) and l.owner_user_id is distinct from p_me) then v_need := null;
+    else v_need := 'owner_or_sole_L';
+    end if;
+  elsif p_league is null then
+    v_need := mahjong_private.mj_w_need(v_wp, p_role);
+  else
+    select l.* into g from mahjong.leagues l where l.id = p_league and l.room_id = p_room;
+    if not found or g.voided then perform mahjong_private.mj_w_bad(p_i, 'league'); end if;
+    v_need := case v_wl
+      when 'same'  then mahjong_private.mj_w_need(v_wp, p_role)
+      when 'nyu'   then null
+      when 'L'     then case when g.owner_user_id = p_me then null else 'L' end
+      when 'owner' then mahjong_private.mj_w_need('owner', p_role)
+      else coalesce(v_wl, 'none') end;
+  end if;
+  if v_need is not null then
+    perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', p_i, 'need', v_need));
+  end if;
+end $fn$;
+revoke all on function mahjong_private.mj_w_role(uuid, text, uuid, uuid, uuid, text, int) from public, anon, authenticated;
+
+-- 2c-2d1 ルールを確かめてそろえる（弾く＝bad at p_at・key に鍵の名）
+create or replace function mahjong_private.mj_w_rules(p_rules jsonb, p_at text, p_i int) returns jsonb
+language plpgsql set search_path = '' as $fn$
+declare v jsonb; e text;
+begin
+  begin
+    v := mahjong_private.mj_rules_ok(p_rules);
+  exception when others then
+    e := sqlerrm;
+    perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', p_at,
+      'key', case when e like 'mj\_range:%' then pg_catalog.substr(e, 10) else null end));
+  end;
+  return v;
+end $fn$;
+revoke all on function mahjong_private.mj_w_rules(jsonb, text, int) from public, anon, authenticated;
+
+-- 2c-2d1 日付（無い・null＝null／'YYYY-MM-DD' でなければ bad at k）
+create or replace function mahjong_private.mj_w_date(a jsonb, k text, p_i int) returns date
+language plpgsql set search_path = '' as $fn$
+declare d date;
+begin
+  if a -> k is null or a -> k = 'null'::jsonb then return null; end if;
+  if pg_catalog.jsonb_typeof(a -> k) <> 'string' then perform mahjong_private.mj_w_bad(p_i, k); end if;
+  begin
+    d := (a ->> k)::date;
+  exception when others then
+    d := null;
+  end;
+  if d is null or pg_catalog.to_char(d, 'YYYY-MM-DD') <> (a ->> k) then perform mahjong_private.mj_w_bad(p_i, k); end if;
+  return d;
+end $fn$;
+revoke all on function mahjong_private.mj_w_date(jsonb, text, int) from public, anon, authenticated;
 -- 10分の内に入り直したか（K-6）＝jwt の amr の各 timestamp（数の物だけ）の最大が now() − 10分 以上。jwt が読めない・amr が配列でない・数の timestamp が無い＝false（閉じる側）
 --   ★refresh では amr が変わらない（I-7③）＝refresh だけの token は10分の外になる＝閉じる側★
 create or replace function mahjong_private.mj_w_reauth_ok() returns boolean
@@ -1891,6 +1977,7 @@ declare
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
   v_u uuid; v_own uuid; v_m2 mahjong.members; v_cap2 int; v_us uuid[]; v_ids uuid[];
+  g mahjong.leagues; v_ra jsonb; v_d2 date; v_ida uuid; v_rv int; v_rva int; v_alt boolean; v_rk text;
 begin
   -- ── 作る op ──
   if v_op = 'member_add' then
@@ -1944,12 +2031,25 @@ begin
       end if;
       v_s := p_o ->> 'place';
     end if;
-    select x.rule_set_id, x.rule_version into s from mahjong.rooms x where x.id = p_room;
+    -- 2c-2d1：リーグの日＝その部屋の取り消していないリーグ（bad at league_id）・役は L・ルールはリーグの主の版（rooms の版でない）
+    v_id2 := null;
+    if p_o -> 'league_id' is not null and p_o -> 'league_id' <> 'null'::jsonb then
+      v_id2 := mahjong_private.mj_w_uuid(p_o, 'league_id', p_i);
+      select x.* into g from mahjong.leagues x where x.id = v_id2 and x.room_id = p_room for share;
+      if not found or g.voided then perform mahjong_private.mj_w_bad(p_i, 'league_id'); end if;
+    end if;
+    perform mahjong_private.mj_w_role(p_room, v_op, v_id2, null, p_me, p_role, p_i);
+    if v_id2 is null then
+      select x.rule_set_id, x.rule_version into s from mahjong.rooms x where x.id = p_room;
+    else
+      select g.rule_set_id, g.rule_version into s;
+    end if;
     if s.rule_set_id is null then perform mahjong_private.mj_w_bad(p_i, 'rules'); end if;
-    insert into mahjong.sessions (id, room_id, date, place, rate, rule_set_id, rule_version)
-      values (v_id, p_room, v_d, v_s, v_rate, s.rule_set_id, s.rule_version);
+    insert into mahjong.sessions (id, room_id, league_id, date, place, rate, rule_set_id, rule_version)
+      values (v_id, p_room, v_id2, v_d, v_s, v_rate, s.rule_set_id, s.rule_version);
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'sessions', pg_catalog.jsonb_build_object('id', v_id), null, null,
-      pg_catalog.jsonb_build_object('date', v_d, 'rate', v_rate, 'place', v_s), 1);
+      pg_catalog.jsonb_build_object('date', v_d, 'rate', v_rate, 'place', v_s)
+        || case when v_id2 is null then '{}'::jsonb else pg_catalog.jsonb_build_object('league_id', v_id2) end, 1);
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1,
       'cap', pg_catalog.jsonb_build_object('tbl', 'sessions', 'id', p_room));
 
@@ -1964,7 +2064,7 @@ begin
     select x.* into s from mahjong.sessions x where x.id = v_id2 and x.room_id = p_room;
     if not found then perform mahjong_private.mj_w_bad(p_i, 'session_id'); end if;
     if s.voided then perform mahjong_private.mj_w_bad(p_i, 'session_id'); end if;
-    if s.league_id is not null then perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet'); end if;
+    perform mahjong_private.mj_w_role(p_room, v_op, s.league_id, null, p_me, p_role, p_i);
     if pg_catalog.jsonb_typeof(p_o -> 'label') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'label'); end if;
     v_s := pg_catalog.btrim(p_o ->> 'label', c_trim);
     if pg_catalog.char_length(v_s) not between 1 and 20 then perform mahjong_private.mj_w_bad(p_i, 'label'); end if;
@@ -1983,7 +2083,7 @@ begin
       if v_r <> p_room then perform mahjong_private.mj_w_bad(p_i, 'hanchan_id'); end if;
       return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 0, 'hist', 0);
     end if;
-    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
+    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
     if t.voided then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
     select r.rules into v_rules from mahjong.rule_sets r where r.id = t.rule_set_id and r.version = t.rule_version;
     v_n := t.players;
@@ -2033,7 +2133,7 @@ begin
 
   -- ── 版つきの op ──
   elsif v_op = 'cell_set' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     k := mahjong_private.mj_w_int(p_o, 'seat', p_i);
     if k < 0 or k >= h.players then perform mahjong_private.mj_w_bad(p_i, 'seat'); end if;
     v_x := mahjong_private.mj_w_int(p_o, 'value', p_i);
@@ -2059,7 +2159,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', c.version + 1), 'made', 0, 'hist', 1, 'h', h.id);
 
   elsif v_op = 'hanchan_order' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     v_j := mahjong_private.mj_w_people(p_room, p_o -> 'ton_order', h.players, p_i, 'ton_order', h.seats);
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
     if h.ton_order is not distinct from v_j then
@@ -2079,7 +2179,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.order_version + 1), 'made', 0, 'hist', 1, 'h', h.id);
 
   elsif v_op = 'kyotaku_set' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     v_x := mahjong_private.mj_w_int(p_o, 'value', p_i);
     if v_x not between 0 and 20000 or v_x % 1000 <> 0 or (v_x <> 0 and coalesce(h.rules_snapshot ->> 'kyotaku_end', '') <> 'kieru') then
       perform mahjong_private.mj_w_bad(p_i, 'value', 'range');
@@ -2102,7 +2202,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.version + 1), 'made', 0, 'hist', 1, 'h', h.id);
 
   elsif v_op = 'tobi_set' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     v_j := p_o -> 'tobi_to';
     if not coalesce(mahjong_private.mj_tobi_ok(v_j, h.players), false) then perform mahjong_private.mj_w_bad(p_i, 'tobi_to'); end if;
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
@@ -2126,7 +2226,7 @@ begin
 
 
   elsif v_op = 'hanchan_void' or v_op = 'hanchan_unvoid' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     if h.voided = (v_op = 'hanchan_void') then
       return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.version), 'made', 0, 'hist', 0, 'h', h.id, 't', h.table_id);
     end if;
@@ -2142,7 +2242,7 @@ begin
   elsif v_op = 'extra_add' then
     -- 確かめの順（2c-2a1・写しとそろえる）：kind → unused（使わない種）→ member（人・取り消した卓と開催日）→ add の range
     --   席にいない人の足しは組の終わりの正味の門（v1510:195①）で見る
-    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
+    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
     -- 種（2c-3b）：chip・shugi・卓のルールの tane_custom に在る c:<id> だけ・使わない種も bad at kind（mj_w_kind）
     v_kd := mahjong_private.mj_w_kind((select r.rules from mahjong.rule_sets r where r.id = t.rule_set_id and r.version = t.rule_version), p_o -> 'kind');
     if v_kd is null then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
@@ -2182,7 +2282,7 @@ begin
     v_id := mahjong_private.mj_w_uuid(p_o, 'session_id', p_i);
     select x.* into s from mahjong.sessions x where x.id = v_id and x.room_id = p_room for update;
     if not found then perform mahjong_private.mj_w_bad(p_i, 'session_id'); end if;
-    if s.league_id is not null then perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet'); end if;
+    perform mahjong_private.mj_w_role(p_room, v_op, s.league_id, null, p_me, p_role, p_i);
     v_x := mahjong_private.mj_w_int(p_o, 'rev', p_i);
     if v_x < 1 then perform mahjong_private.mj_w_bad(p_i, 'rev'); end if;
     if pg_catalog.jsonb_typeof(p_o -> 'content') is distinct from 'object' then perform mahjong_private.mj_w_bad(p_i, 'content'); end if;
@@ -2215,12 +2315,8 @@ begin
     v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
     select x.* into v_m from mahjong.members x where x.id = v_id and x.room_id = p_room for update;
     if not found then perform mahjong_private.mj_w_bad(p_i, 'member_id'); end if;
-    -- リーグの日に出た人（取り消した半荘・卓・開催日も含む）＝who_league（owner_or_sole_L）は 2c-2 の後
-    if exists (select 1 from mahjong.hanchans x join mahjong.tables y2 on y2.id = x.table_id join mahjong.sessions z on z.id = y2.session_id
-                where x.room_id = p_room and z.league_id is not null
-                  and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) q where q.value = v_id::text)) then
-      perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet');
-    end if;
+    -- リーグの日に出た人（取り消した半荘・卓・開催日・リーグも含む）＝owner_or_sole_L・出ていなければ who_plain（2c-2d1 mj_w_role）
+    perform mahjong_private.mj_w_role(p_room, v_op, null, v_id, p_me, p_role, p_i);
     if v_op = 'member_rename' then
       if pg_catalog.jsonb_typeof(p_o -> 'name') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
       v_s := pg_catalog.btrim(p_o ->> 'name', c_trim);
@@ -2266,7 +2362,7 @@ begin
     v_id := mahjong_private.mj_w_uuid(p_o, 'session_id', p_i);
     select x.* into v_ss from mahjong.sessions x where x.id = v_id and x.room_id = p_room for update;
     if not found then perform mahjong_private.mj_w_bad(p_i, 'session_id'); end if;
-    if v_ss.league_id is not null then perform mahjong_private.mj_w_bad(p_i, 'league', 'not_yet'); end if;
+    perform mahjong_private.mj_w_role(p_room, v_op, v_ss.league_id, null, p_me, p_role, p_i);
     -- 在る鍵だけ session_add と同じ確かめ（date は null 不可・place と rate は null で消す）
     v_d := v_ss.date; v_s := v_ss.place; v_rate := v_ss.rate; v_b := v_ss.voided;
     if p_o ? 'date' then
@@ -2332,7 +2428,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_ss.version + 1), 'made', 0, 'hist', v_n);
 
   elsif v_op = 'table_edit' then
-    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
+    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
     v_s := t.label; v_mode := t.rate_mode; v_rate := t.rate; v_b := t.voided;
     if p_o ? 'label' then
       if pg_catalog.jsonb_typeof(p_o -> 'label') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'label'); end if;
@@ -2389,7 +2485,7 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', t.version + 1), 'made', 0, 'hist', v_n);
 
   elsif v_op = 'hanchan_seats' then
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
+    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     if h.voided then perform mahjong_private.mj_w_bad(p_i, 'hanchan_id'); end if;
     -- 席の確かめ（mj_w_people は全員 active を見る＝ここは inactive も部屋の人・今の席にいない inactive だけ bad）
     v_j := p_o -> 'seats';
@@ -2439,7 +2535,7 @@ begin
 
   elsif v_op = 'extra_set' then
     -- 確かめの順は extra_add と同じ（kind → unused → member → 取り消した卓・開催日 → value の range）→ base_version
-    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i);
+    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
     -- 種（2c-3b）：extra_add と同じ（mj_w_kind）
     v_kd := mahjong_private.mj_w_kind((select r2.rules from mahjong.rule_sets r2 where r2.id = t.rule_set_id and r2.version = t.rule_version), p_o -> 'kind');
     if v_kd is null then perform mahjong_private.mj_w_bad(p_i, 'kind'); end if;
@@ -2721,6 +2817,153 @@ begin
       pg_catalog.jsonb_build_object('removed', pg_catalog.cardinality(v_us), 'unlinked', pg_catalog.cardinality(v_ids), 'unbanned', v_x), null);
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'channel_key', v_kd), 'made', 0, 'hist', 2);
   end if;
+  -- ── リーグの op（2c-2d1・write7_league_sadame_v11.md） ──
+  if v_op = 'league_create' then
+    v_id := mahjong_private.mj_w_uuid(p_o, 'league_id', p_i);
+    select x.room_id into v_r from mahjong.leagues x where x.id = v_id;
+    if found then
+      if v_r <> p_room then perform mahjong_private.mj_w_bad(p_i, 'league_id'); end if;
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 0, 'hist', 0);
+    end if;
+    if pg_catalog.jsonb_typeof(p_o -> 'name') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    v_s := pg_catalog.btrim(p_o ->> 'name', c_trim);
+    if pg_catalog.char_length(v_s) not between 1 and 40 then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    v_d := mahjong_private.mj_w_date(p_o, 'date_from', p_i);
+    v_d2 := mahjong_private.mj_w_date(p_o, 'date_to', p_i);
+    if v_d > v_d2 then perform mahjong_private.mj_w_bad(p_i, 'date_to'); end if;
+    v_rk := 'pt';
+    if p_o -> 'rank_by' is not null and p_o -> 'rank_by' <> 'null'::jsonb then
+      if pg_catalog.jsonb_typeof(p_o -> 'rank_by') <> 'string' or (p_o ->> 'rank_by') not in ('pt', 'avg_rank', 'avg_pt') then
+        perform mahjong_private.mj_w_bad(p_i, 'rank_by');
+      end if;
+      v_rk := p_o ->> 'rank_by';
+    end if;
+    v_x := 0;
+    if p_o -> 'min_games' is not null and p_o -> 'min_games' <> 'null'::jsonb then
+      v_x := mahjong_private.mj_w_int(p_o, 'min_games', p_i);
+      if v_x not between 0 and 9999 then perform mahjong_private.mj_w_bad(p_i, 'min_games'); end if;
+    end if;
+    if pg_catalog.jsonb_typeof(p_o -> 'players_main') is distinct from 'number' or (p_o ->> 'players_main') not in ('3', '4') then
+      perform mahjong_private.mj_w_bad(p_i, 'players_main');
+    end if;
+    v_n := (p_o ->> 'players_main')::int;
+    v_rules := mahjong_private.mj_w_rules(p_o -> 'rules', 'rules', p_i);
+    if (v_rules ->> 'players')::int is distinct from v_n then perform mahjong_private.mj_w_bad(p_i, 'rules'); end if;
+    v_ra := null;
+    if p_o -> 'rules_alt' is not null and p_o -> 'rules_alt' <> 'null'::jsonb then
+      v_ra := mahjong_private.mj_w_rules(p_o -> 'rules_alt', 'rules_alt', p_i);
+      if (v_ra ->> 'players')::int is distinct from 7 - v_n then perform mahjong_private.mj_w_bad(p_i, 'rules_alt'); end if;
+    end if;
+    -- 人ごと24時間5本（全部屋・取り消しも数える）＝人の鍵で並べる（部屋→人の順・1呼び1部屋＝輪にならない・止め5）
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mj_league_create:' || p_me::text, 0));
+    if (select pg_catalog.count(*) from mahjong.leagues x where x.created_by = p_me and x.created_at > pg_catalog.now() - interval '24 hours') >= 5 then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'too_many', 'i', p_i, 'what', 'league_create'));
+    end if;
+    v_ida := pg_catalog.gen_random_uuid();
+    insert into mahjong.rule_sets (id, version, room_id, rules) values (v_ida, 1, p_room, v_rules);
+    v_id2 := null;
+    if v_ra is not null then
+      v_id2 := pg_catalog.gen_random_uuid();
+      insert into mahjong.rule_sets (id, version, room_id, rules) values (v_id2, 1, p_room, v_ra);
+    end if;
+    insert into mahjong.leagues (id, room_id, name, date_from, date_to, rank_by, min_games, players_main,
+                                 rule_set_id, rule_version, rule_set_id_alt, rule_version_alt, owner_user_id, created_by)
+      values (v_id, p_room, v_s, v_d, v_d2, v_rk, v_x, v_n, v_ida, 1, v_id2, case when v_id2 is null then null else 1 end, p_me, p_me);
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'leagues', pg_catalog.jsonb_build_object('id', v_id), null, null,
+      pg_catalog.jsonb_build_object('name', v_s, 'date_from', v_d, 'date_to', v_d2, 'rank_by', v_rk, 'min_games', v_x, 'players_main', v_n,
+        'alt', v_id2 is not null), 1);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', case when v_id2 is null then 2 else 3 end, 'hist', 1,
+      'cap', pg_catalog.jsonb_build_object('tbl', 'leagues', 'id', p_room), 'cap2', pg_catalog.jsonb_build_object('tbl', 'rule_sets', 'id', p_room));
+
+  elsif v_op = 'league_save' then
+    v_id := mahjong_private.mj_w_uuid(p_o, 'league_id', p_i);
+    select x.* into g from mahjong.leagues x where x.id = v_id and x.room_id = p_room for update;
+    if not found then perform mahjong_private.mj_w_bad(p_i, 'league_id'); end if;
+    perform mahjong_private.mj_w_role(p_room, v_op, v_id, null, p_me, p_role, p_i);   -- L・取り消したリーグ＝bad at league
+    v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
+    -- 在る鍵だけ替える（session_edit と同じ・null で消せるのは date_from／date_to／rules_alt）・bad が conflict より先
+    v_s := g.name;
+    if p_o ? 'name' then
+      if pg_catalog.jsonb_typeof(p_o -> 'name') is distinct from 'string' then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+      v_s := pg_catalog.btrim(p_o ->> 'name', c_trim);
+      if pg_catalog.char_length(v_s) not between 1 and 40 then perform mahjong_private.mj_w_bad(p_i, 'name'); end if;
+    end if;
+    v_d := g.date_from; v_d2 := g.date_to;
+    if p_o ? 'date_from' then v_d := mahjong_private.mj_w_date(p_o, 'date_from', p_i); end if;
+    if p_o ? 'date_to' then v_d2 := mahjong_private.mj_w_date(p_o, 'date_to', p_i); end if;
+    if v_d > v_d2 then perform mahjong_private.mj_w_bad(p_i, 'date_to'); end if;
+    v_rk := g.rank_by;
+    if p_o ? 'rank_by' then
+      if pg_catalog.jsonb_typeof(p_o -> 'rank_by') is distinct from 'string' or (p_o ->> 'rank_by') not in ('pt', 'avg_rank', 'avg_pt') then
+        perform mahjong_private.mj_w_bad(p_i, 'rank_by');
+      end if;
+      v_rk := p_o ->> 'rank_by';
+    end if;
+    v_x := g.min_games;
+    if p_o ? 'min_games' then
+      v_x := mahjong_private.mj_w_int(p_o, 'min_games', p_i);
+      if v_x not between 0 and 9999 then perform mahjong_private.mj_w_bad(p_i, 'min_games'); end if;
+    end if;
+    v_rules := null;
+    if p_o ? 'rules' then
+      v_rules := mahjong_private.mj_w_rules(p_o -> 'rules', 'rules', p_i);
+      if (v_rules ->> 'players')::int is distinct from g.players_main then perform mahjong_private.mj_w_bad(p_i, 'rules'); end if;
+    end if;
+    v_alt := p_o ? 'rules_alt'; v_ra := null;
+    if v_alt and p_o -> 'rules_alt' <> 'null'::jsonb then
+      v_ra := mahjong_private.mj_w_rules(p_o -> 'rules_alt', 'rules_alt', p_i);
+      if (v_ra ->> 'players')::int is distinct from 7 - g.players_main then perform mahjong_private.mj_w_bad(p_i, 'rules_alt'); end if;
+    end if;
+    if v_bv <> g.version then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'conflict', 'i', p_i,
+        'at', pg_catalog.jsonb_build_object('league_id', v_id, 'what', 'league'), 'cur', pg_catalog.jsonb_build_object('version', g.version)));
+    end if;
+    -- ルールの版（替えた時だけ同じ id の次の版・済んだ開催日／卓／半荘の版は変えない＝新しい開催日から効く）
+    v_n := 0; v_rv := g.rule_version; v_ida := g.rule_set_id_alt; v_rva := g.rule_version_alt;
+    if v_rules is not null and v_rules is distinct from (select r.rules from mahjong.rule_sets r where r.id = g.rule_set_id and r.version = g.rule_version) then
+      select pg_catalog.max(r.version) + 1 into v_rv from mahjong.rule_sets r where r.id = g.rule_set_id;
+      insert into mahjong.rule_sets (id, version, room_id, rules) values (g.rule_set_id, v_rv, p_room, v_rules);
+      v_n := v_n + 1;
+    end if;
+    if v_alt then
+      if v_ra is null then
+        v_ida := null; v_rva := null;
+      elsif v_ida is null then
+        v_ida := pg_catalog.gen_random_uuid(); v_rva := 1;
+        insert into mahjong.rule_sets (id, version, room_id, rules) values (v_ida, 1, p_room, v_ra);
+        v_n := v_n + 1;
+      elsif v_ra is distinct from (select r.rules from mahjong.rule_sets r where r.id = v_ida and r.version = v_rva) then
+        select pg_catalog.max(r.version) + 1 into v_rva from mahjong.rule_sets r where r.id = v_ida;
+        insert into mahjong.rule_sets (id, version, room_id, rules) values (v_ida, v_rva, p_room, v_ra);
+        v_n := v_n + 1;
+      end if;
+    end if;
+    v_j := pg_catalog.jsonb_build_object('name', g.name, 'date_from', g.date_from, 'date_to', g.date_to, 'rank_by', g.rank_by, 'min_games', g.min_games,
+      'rule_version', g.rule_version, 'rule_set_id_alt', g.rule_set_id_alt, 'rule_version_alt', g.rule_version_alt);
+    v_j2 := pg_catalog.jsonb_build_object('name', v_s, 'date_from', v_d, 'date_to', v_d2, 'rank_by', v_rk, 'min_games', v_x,
+      'rule_version', v_rv, 'rule_set_id_alt', v_ida, 'rule_version_alt', v_rva);
+    if v_j = v_j2 then
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version), 'made', 0, 'hist', 0);
+    end if;
+    update mahjong.leagues x set name = v_s, date_from = v_d, date_to = v_d2, rank_by = v_rk, min_games = v_x,
+      rule_version = v_rv, rule_set_id_alt = v_ida, rule_version_alt = v_rva, version = x.version + 1 where x.id = v_id;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'leagues', pg_catalog.jsonb_build_object('id', v_id), null, v_j, v_j2, g.version + 1);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version + 1), 'made', v_n, 'hist', 1)
+      || case when v_n > 0 then pg_catalog.jsonb_build_object('cap2', pg_catalog.jsonb_build_object('tbl', 'rule_sets', 'id', p_room)) else '{}'::jsonb end;
+
+  elsif v_op = 'league_owner_set' then
+    -- 押せるのは部屋の持ち主（③'・入り直し10分）＝L を自分に。もう自分＝書かない
+    v_id := mahjong_private.mj_w_uuid(p_o, 'league_id', p_i);
+    select x.* into g from mahjong.leagues x where x.id = v_id and x.room_id = p_room for update;
+    if not found then perform mahjong_private.mj_w_bad(p_i, 'league_id'); end if;
+    if g.owner_user_id = p_me then
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version), 'made', 0, 'hist', 0);
+    end if;
+    update mahjong.leagues x set owner_user_id = p_me, version = x.version + 1 where x.id = v_id;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'leagues', pg_catalog.jsonb_build_object('id', v_id), 'owner_user_id',
+      pg_catalog.to_jsonb(g.owner_user_id::text), pg_catalog.to_jsonb(p_me::text), g.version + 1);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version + 1), 'made', 0, 'hist', 1);
+  end if;
   raise exception 'mj_write: 当て方の無い op %', v_op;
 end $fn$;
 revoke all on function mahjong_private.mj_w_op(uuid, uuid, text, uuid, int, jsonb) from public, anon, authenticated;
@@ -2733,7 +2976,7 @@ language plpgsql security definer set search_path = '' as $fn$
 declare
   c_keys constant jsonb := '{
     "member_add": ["member_id", "name"],
-    "session_add": ["session_id", "date", "rate", "place"],
+    "session_add": ["session_id", "date", "rate", "place", "league_id"],
     "table_add": ["table_id", "session_id", "label"],
     "hanchan_start": ["hanchan_id", "table_id", "seats", "cells", "ton_order", "lost", "tobi_to"],
     "hanchan_order": ["hanchan_id", "ton_order", "base_version"],
@@ -2758,13 +3001,16 @@ declare
     "room_leave": [],
     "room_delete": [],
     "room_undelete": [],
-    "room_secret": ["pass", "url_token_hash"]}'::jsonb;
+    "room_secret": ["pass", "url_token_hash"],
+    "league_create": ["league_id", "name", "date_from", "date_to", "rank_by", "min_games", "players_main", "rules", "rules_alt"],
+    "league_save": ["league_id", "base_version", "name", "date_from", "date_to", "rank_by", "min_games", "rules", "rules_alt"],
+    "league_owner_set": ["league_id"]}'::jsonb;
   v_me uuid; v_role text; v_ret jsonb; v_o jsonb; v_x jsonb; v_name text; v_k text; v_uid uuid; v_i int; v_len int;
   v_n int := 0; v_made int := 0; v_items jsonb := '[]'::jsonb; v_gid uuid := pg_catalog.gen_random_uuid();
   v_b0 jsonb := '{}'::jsonb; v_hs jsonb := '{}'::jsonb; v_fresh jsonb := '{}'::jsonb; v_ts jsonb := '{}'::jsonb; v_caps jsonb := '{}'::jsonb;
   v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text;
   v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record;
-  v_who text; v_re text; v_need text; v_ra boolean;
+  v_who text; v_re text; v_need text; v_ra boolean; v_wl text; v_lg record;
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -2826,6 +3072,23 @@ begin
     if r.owner_user_id = v_me then v_role := 'owner'; end if;
     v_n := 0;
   end if;
+  -- 2c-2d1（write7 v1.1）消えた L の継ぎ＝K-3 段1の後・塊の外：L のアカウントが消えたリーグ（取り消しも）を部屋の持ち主へ・1リーグ1行の履歴・同じ group_id
+  if v_role is not null then
+    for v_lg in select l.id, l.owner_user_id, l.version from mahjong.leagues l
+                 where l.room_id = p_room_id and l.owner_user_id <> r.owner_user_id
+                   and not exists (select 1 from auth.users u where u.id = l.owner_user_id)
+                 order by l.id for update loop
+      update mahjong.leagues l set owner_user_id = r.owner_user_id, version = l.version + 1 where l.id = v_lg.id;
+      perform mahjong_private.mj_w_hist(p_room_id, v_gid, 'league_inherit', v_me, v_role, 'leagues', pg_catalog.jsonb_build_object('id', v_lg.id),
+        'owner_user_id', pg_catalog.to_jsonb(v_lg.owner_user_id::text), pg_catalog.to_jsonb(r.owner_user_id::text), v_lg.version + 1);
+      v_n := v_n + 1;
+    end loop;
+    if v_n > 0 then
+      update mahjong.rooms x set history_count = x.history_count + v_n where x.id = p_room_id;
+      r.history_count := r.history_count + v_n;
+      v_n := 0;
+    end if;
+  end if;
   if v_role is null or r.deleted_at < pg_catalog.now() - interval '7 days'
      or (r.deleted_at is not null and exists (select 1 from pg_catalog.jsonb_array_elements(p_ops) t(o)
                                                join mahjong.mj_ops m on m.name = t.o ->> 'op' where not m.on_deleted)) then
@@ -2849,9 +3112,10 @@ begin
   end if;
 
   -- ③' 役の門（2c-2b・write4_sekkei.md §1）＝送り直しの後・先見の前・塊の外（例外を出さない字）・組のどれか1つでも足りなければ全部を当てない
+  --   2c-2d1：ここで見るのは who_league が same か who_plain と同じ op だけ。他は op の中で対象が分かった所で mj_w_role（同じ組で作った開催日も見える）
   for v_i in 0 .. v_len - 1 loop
-    select m.who_plain into v_who from mahjong.mj_ops m where m.name = p_ops -> v_i ->> 'op';
-    v_need := mahjong_private.mj_w_need(v_who, v_role);
+    select m.who_plain, m.who_league into v_who, v_wl from mahjong.mj_ops m where m.name = p_ops -> v_i ->> 'op';
+    v_need := case when v_wl = 'same' or v_wl = v_who then mahjong_private.mj_w_need(v_who, v_role) end;
     if v_need is not null then
       perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, 0);
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_role', 'i', v_i, 'need', v_need);
@@ -2899,6 +3163,7 @@ begin
       if v_x ? 't' then v_ts := v_ts || pg_catalog.jsonb_build_object(v_x ->> 't', true); end if;
       if v_x ? 'ek' then v_ei := v_ei || pg_catalog.jsonb_build_object((v_x -> 'ek')::text, v_i); end if;
       if v_x ? 'cap' then v_caps := v_caps || pg_catalog.jsonb_build_object((v_x -> 'cap' ->> 'tbl') || '|' || (v_x -> 'cap' ->> 'id'), true); end if;
+      if v_x ? 'cap2' then v_caps := v_caps || pg_catalog.jsonb_build_object((v_x -> 'cap2' ->> 'tbl') || '|' || (v_x -> 'cap2' ->> 'id'), true); end if;
     end loop;
 
     -- 組の終わりの出し直し（§4）：飛びの古い受け取り → 半荘のそろった → 卓のチップ・祝儀
@@ -2952,8 +3217,11 @@ begin
         when 'members'  then (select pg_catalog.count(*) from mahjong.members x where x.room_id = v_rid)
         when 'sessions' then (select pg_catalog.count(*) from mahjong.sessions x where x.room_id = v_rid)
         when 'tables'   then (select pg_catalog.count(*) from mahjong.tables x where x.session_id = v_rid)
-        when 'hanchans' then (select pg_catalog.count(*) from mahjong.hanchans x where x.table_id = v_rid) end;
-      if v_cap is null or v_c > v_cap then
+        when 'hanchans' then (select pg_catalog.count(*) from mahjong.hanchans x where x.table_id = v_rid)
+        when 'leagues'  then (select pg_catalog.count(*) from mahjong.leagues x where x.room_id = v_rid)
+        when 'rule_sets' then (select pg_catalog.count(*) from mahjong.rule_sets x where x.room_id = v_rid) end;
+      -- 2c-2d1 止め4：数えの無い表（v_c null）も full＝閉じる側
+      if v_cap is null or v_c is null or v_c > v_cap then
         perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', v_tbl));
       end if;
     end loop;
