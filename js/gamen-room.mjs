@@ -160,7 +160,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
         const c = r.by[p.member_id];
         if (!c) { h += '<td class="r-na">—</td>'; continue; }
         const big = r.ok && c.pt10 !== null ? '<b class="' + sign(c.pt10) + '">' + fmtPt(c.pt10) + '</b>' : '<b class="zero">—</b>';
-        const small = (c.rank !== null ? (c.rank + 1) + '位 ' : '') + c.cell.toLocaleString('ja-JP');
+        const small = (c.rank !== null ? (c.rank + 1) + '位 ' : '') + boxNum(c.cell);
         h += '<td>' + big + '<small>' + small + '</small></td>';
       }
       h += '</tr>';

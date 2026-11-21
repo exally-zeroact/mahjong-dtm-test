@@ -24,12 +24,13 @@ const toPt10 = (s) => { const t = String(s).trim().replace(/[０-９．]/g, (c) 
 // 整数でない値（空・崩れ＝NaN）は表示に NaN を出さない：行の字は「—」・打つ箱は空（司さん 11-21「NaN」）
 const okInt = (v) => Number.isInteger(v);
 const n0 = (v) => (okInt(v) ? v.toLocaleString('ja-JP') : '—');
-const bv = (v) => (okInt(v) ? String(v) : '');
+const sgn = (v) => (v < 0 ? '−' + -v : String(v)); // 画面の − は全角に揃える（読む側 toInt は − も読む）
+const bv = (v) => (okInt(v) ? sgn(v) : '');
 const pt1 = (pt10) => (pt10 / 10).toFixed(1);
 
 export function umaText(uma) {
   if (uma.length === 4 && uma.every(okInt) && uma[0] === -uma[3] && uma[1] === -uma[2]) return uma[1] + ' − ' + uma[0];
-  return uma.map((u) => (okInt(u) ? String(u) : '—')).join('／');
+  return uma.map((u) => (okInt(u) ? sgn(u) : '—')).join('／');
 }
 
 export function mountRules(el, { rules, readOnly }) {
