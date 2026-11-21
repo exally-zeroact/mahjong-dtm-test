@@ -73,6 +73,8 @@ async function doCreate() {
   if (np.err) { show('vChoose'); $('cErr0').textContent = np.err; return; }
   const { name, pass } = np;
   const rules = rulesCtl.read(); // 倉庫に送るのはルール設定の画面に出ている鍵だけ（残りは倉庫が既定で埋める）
+  // やきとりの門（gamen_32b_sadame.md v1.1 止め1）＝rulesOk は pt 0 を通す（古い部屋のため）＝画面からは on で 1〜999 の整数でない部屋を作らせない（黙って0円の種にしない）
+  if (rules.yakitori === true && !(Number.isInteger(rules.yakitori_pt) && rules.yakitori_pt >= 1 && rules.yakitori_pt <= 999)) { $('cErr').textContent = 'やきとり1枚の pt は 1〜999 です（整数）。'; return; }
   const chk = rulesOk(rules);
   if (!chk.ok) { $('cErr').textContent = RULE_ERR[chk.err] || ('ルールの「' + chk.err + '」が入れられません。'); return; }
   // 送り直しの印：同じ中身なら同じ op_id と token（返事が切れた時に部屋を2つ作らない）

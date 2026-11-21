@@ -165,12 +165,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     for (const w of v.windows) {
       const big = ten ? fmt(w.big) : fmtPt(w.big) + '<small>pt</small>';
       h += '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div>' +
-        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="' + (v.custWait || (v.cust || []).some((c) => c.ng) ? 'チップ・祝儀・自由な項目のどれかが合わないか数えられません' : 'チップか祝儀の合計が合いません') + '">!</span>' : '') + '</div>';
-      for (const kind of ['chip', 'shugi']) {
+        '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="' + (v.custWait || (v.cust || []).some((c) => c.ng) ? 'チップ・祝儀・やきとり・自由な項目のどれかが合わないか数えられません' : 'チップ・祝儀・やきとりのどれかの合計が合いません') + '">!</span>' : '') + '</div>';
+      // ③-2：やきとりはチップと同じ行（chip → shugi → yaki）。1枚の pt10 は lib の tableForSeisan.yaki_pt10（lib と同じ数）
+      for (const kind of ['chip', 'shugi', 'yaki']) {
         if (!v.used[kind]) continue;
-        const label = kind === 'chip' ? 'チップ' : '祝儀';
-        const per = kind === 'chip' ? R.chip_pt10 : R.shugi_pt10;
-        const val = kind === 'chip' ? (ten ? w.chipBig : w.chipPt10) : (ten ? w.shugiBig : w.shugiPt10);
+        const label = kind === 'chip' ? 'チップ' : kind === 'shugi' ? '祝儀' : 'やきとり';
+        const per = kind === 'chip' ? R.chip_pt10 : kind === 'shugi' ? R.shugi_pt10 : v.tableForSeisan.yaki_pt10;
+        const val = kind === 'chip' ? (ten ? w.chipBig : w.chipPt10) : kind === 'shugi' ? (ten ? w.shugiBig : w.shugiPt10) : (ten ? w.yakiBig : w.yakiPt10);
         const valText = val === 0 ? '0' : (ten ? fmt(val) : fmtPt(val));
         h += '<div class="r-w-k">' + label + '<span>1枚＝' + unit(per) + '</span></div><div class="r-w-row">' +
           '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="-1" aria-label="' + esc(w.name) + 'の' + label + 'を減らす">−</button>' +
@@ -186,6 +187,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const bad = [];
     if (v.used.chip && v.chipSum !== 0) bad.push('チップの合計が ' + fmtCnt(v.chipSum) + ' 合いません');
     if (v.used.shugi && v.shugiSum !== 0) bad.push('祝儀の合計が ' + fmtCnt(v.shugiSum) + ' 合いません');
+    if (v.used.yaki && v.yakiSum !== 0) bad.push('やきとりの合計が ' + fmtCnt(v.yakiSum) + ' 合いません');
     // 自由な項目（2c-3b）：合わない・この版で数えられない物が在る間は緑の ✓ を出さない
     for (const c of v.cust || []) {
       if (c.ng) bad.push(c.name + 'の合計が ' + fmtCnt(c.sum) + ' 合いません');
@@ -195,6 +197,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const okParts = [];
     if (v.used.chip) okParts.push('チップの合計 0');
     if (v.used.shugi) okParts.push('祝儀の合計 0');
+    if (v.used.yaki) okParts.push('やきとりの合計 0');
     okParts.push('合計 0');
     return '<p class="r-check ok">✓ ' + okParts.join('・') + '</p>';
   }
@@ -431,7 +434,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       const nm = typeof m.name === 'string' ? m.name : m.what;
       return pre + (m.why === 'not_yet' ? nm + 'はこの版では精算に入れられません' : nm + 'の合計が ' + fmtCnt(m.diff) + ' で合いません');
     }
-    return pre + (m.what === 'chip' ? 'チップ' : '祝儀') + 'の合計が ' + fmtCnt(m.diff) + ' で合いません（チップ・祝儀を入れていません）';
+    // 名を知る種だけ名で呼ぶ（知らない what は名前を当てない＝v1.1 任意5）
+    const KN = { chip: 'チップ', shugi: '祝儀', yaki: 'やきとり' };
+    if (Object.prototype.hasOwnProperty.call(KN, m.what)) return pre + KN[m.what] + 'の合計が ' + fmtCnt(m.diff) + ' で合いません（' + (m.what === 'yaki' ? 'やきとり' : 'チップ・祝儀') + 'を入れていません）';
+    return pre + '知らない項目（' + String(m.what) + '）の合計が合いません';
   }
   // ①［対局終了］（shuuryou_v1.md v4〜v4.3・司さん 11-21「対局終了にしろ」）
   // ★入っていない物が1件でもある間（今か、終えた時の控えに）は、お金の数を1つも出さない（止めて警告）★＝partial の1つの判じを下の全部が見る
@@ -473,7 +479,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     if (!viewSnap) {
       h += goBtn;
       if (!partial) {
-        if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + '</p>';
+        if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + (d.used.yaki ? '・やきとり0' : '') + '</p>';
         else h += '<div class="r-red"><b>レートなしの卓は点に入れていません（pt で下に別に出します）</b></div>';
       }
     }
@@ -494,7 +500,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
           const parts = ['半荘 ' + b.n + '回 ' + fmtPt(b.han)];
           if (d.used.chip) parts.push('チップ ' + fmtCnt(b.chip) + '枚 ' + fmtPt(b.chip10));
           if (d.used.shugi) parts.push('祝儀 ' + fmtCnt(b.shugi) + '枚 ' + fmtPt(b.shugi10));
-          const total10 = b.han + b.chip10 + b.shugi10;
+          if (d.used.yaki) parts.push('やきとり ' + fmtCnt(b.yaki) + '枚 ' + fmtPt(b.yaki10));
+          const total10 = b.han + b.chip10 + b.shugi10 + b.yaki10 + b.cust10; // lib の kei と同じ足し方
           h += head + '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
         }
       }

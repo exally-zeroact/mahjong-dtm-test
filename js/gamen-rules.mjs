@@ -71,6 +71,12 @@ export function mountRules(el, { rules, readOnly }) {
       if (readOnly) h += li(label, on ? '1枚 ＝ <b>' + v + '</b> pt' : 'なし');
       else h += '<div class="li"><span>' + label + '</span><span class="li-v">1枚 ＝ ' + box(id, v, 'decimal') + ' pt ' + sw(id + 'On', on) + '</span></div>';
     }
+    // ③-2 やきとり（gamen_32b_sadame.md v1.1）＝チップと同じ ±・合計0・1枚＝yakitori_pt pt（整数）。true で pt 0 の部屋は「数えません」と見せる（黙って「あり」にしない）
+    {
+      const on = r.yakitori === true, p = r.yakitori_pt, okP = Number.isInteger(p) && p >= 1 && p <= 999;
+      if (readOnly) h += li('やきとり', !on ? 'なし' : okP ? '1枚 ＝ <b>' + p + '</b> pt' : 'あり・1枚 0 pt＝数えません');
+      else h += '<div class="li"><span>やきとり</span><span class="li-v">1枚 ＝ ' + box('rYaki', on || okP ? String(p) : '5', 'numeric') + ' pt ' + sw('rYakiOn', on) + '</span></div>';
+    }
     h += '</div><div class="list list-gap">';
     h += li('詳しいルール', '', { key: 'detail' });
     if (open.has('detail') || readOnly) {
@@ -91,6 +97,13 @@ export function mountRules(el, { rules, readOnly }) {
     for (const [k, id] of [['chip_pt10', 'rChip'], ['shugi_pt10', 'rShugi']]) {
       const on = el.querySelector('#' + id + 'On');
       if (on) r[k] = on.getAttribute('aria-checked') === 'true' ? toPt10(v(id)) : null;
+    }
+    // やきとり：on＝打った字のまま（崩れは NaN＝作る時の門で止める）／off＝正しい数ならそれ・他は 0（NaN を残さない）
+    const yOn = el.querySelector('#rYakiOn');
+    if (yOn) {
+      const p = toInt(v('rYaki'));
+      r.yakitori = yOn.getAttribute('aria-checked') === 'true';
+      r.yakitori_pt = r.yakitori ? p : (Number.isInteger(p) && p >= 1 && p <= 999 ? p : 0);
     }
   }
   function wire() {
@@ -116,7 +129,8 @@ export function mountRules(el, { rules, readOnly }) {
   return {
     read() {
       readBoxes();
-      const out = { players: r.players, rate: r.rate, start_pts: r.start_pts, return_pts: r.return_pts, uma: r.uma.slice(), tobi_pt: r.tobi_pt, chip_pt10: r.chip_pt10, shugi_pt10: r.shugi_pt10 };
+      const out = { players: r.players, rate: r.rate, start_pts: r.start_pts, return_pts: r.return_pts, uma: r.uma.slice(), tobi_pt: r.tobi_pt, chip_pt10: r.chip_pt10, shugi_pt10: r.shugi_pt10,
+        yakitori: r.yakitori === true, yakitori_pt: r.yakitori_pt === undefined ? 0 : r.yakitori_pt };
       for (const d of DETAIL) out[d.key] = r[d.key];
       return out;
     },
