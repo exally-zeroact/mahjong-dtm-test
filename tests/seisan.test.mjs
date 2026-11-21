@@ -59,7 +59,27 @@ err('レートが10の倍数でない', [{ rate: 105, hanchans: [H([500, 100, -2
 err('同じ人が2席', [{ rate: 100, hanchans: [{ members: ['A', 'A', 'C', 'D'], pt10: [500, 100, -200, -400] }] }], 'hanchan');
 err('pt10 が小数', [{ rate: 100, hanchans: [H([50.5, 100, -200, 49.5])] }], 'hanchan');
 err('並びでない', 'x', 'table');
-ok('卓が0', J(seisan([])) === J({ ok: true, pt10: {}, ten: {}, pt10NoRate: {}, pay: [] }));
+ok('卓が0', J(seisan([])) === J({ ok: true, pt10: {}, ten: {}, pt10NoRate: {}, pay: [], out: {}, outPt10NoRate: {} }));
+
+console.log('■ ③-2 やきとり・合計0の自由な項目・外へ払う種（場代）');
+{
+  // A=+50.0・B=+10.0・C=−20.0・D=−40.0 の半荘1つ。やきとり 1枚 2pt（20）：A+1 D−1／コイン 1枚 0.5pt（5）：B+4 C−4／場代 1枚 1pt（10）：A1 B2
+  const base = { rate: 100, hanchans: [H([500, 100, -200, -400])] };
+  const g = seisan([{ ...base, yaki_pt10: 20, yakis: { A: 1, D: -1 }, customs: [{ pt10: 5, counts: { B: 4, C: -4 } }], outs: [{ pt10: 10, counts: { A: 1, B: 2 } }] }]);
+  ok('pt10＝半荘＋やきとり＋コイン（場代は入れない）', g.ok && J(sortKeys(g.pt10)) === J({ A: 520, B: 120, C: -220, D: -420 }), J(g));
+  ok('ten＝pt10×100÷10（場代は入れない）', g.ok && J(sortKeys(g.ten)) === J({ A: 5200, B: 1200, C: -2200, D: -4200 }));
+  ok('out＝場代の点（A 1枚×1pt×100＝100・B 200）・outPt10NoRate は空', g.ok && J(sortKeys(g.out)) === J({ A: 100, B: 200 }) && J(g.outPt10NoRate) === '{}');
+  ok('払いは ten だけから（場代は混ぜない）', g.ok && sum(g.pay.map((x) => x.ten)) === 6400);
+  const n = seisan([{ ...base, rate: null, outs: [{ pt10: 10, counts: { A: 3 } }] }]);
+  ok('レートの無い卓の場代＝outPt10NoRate に pt10（30）・out は空', n.ok && J(n.outPt10NoRate) === J({ A: 30 }) && J(n.out) === '{}' && J(n.ten) === '{}');
+  ok('場代の 0 枚の行は出さない', J(seisan([{ ...base, outs: [{ pt10: 10, counts: { A: 0 } }] }]).out) === '{}');
+}
+err('やきとりの合計が0でない', [{ rate: 100, yaki_pt10: 20, hanchans: [H([500, 100, -200, -400])], yakis: { A: 1 } }], 'yaki_sum');
+err('やきとりを使わない卓に枚', [{ rate: 100, yaki_pt10: null, hanchans: [H([500, 100, -200, -400])], yakis: { A: 1, B: -1 } }], 'yaki_off');
+err('合計0の自由な項目の合計が0でない', [{ rate: 100, hanchans: [H([500, 100, -200, -400])], customs: [{ pt10: 5, counts: { A: 2, B: -1 } }] }], 'cust_sum');
+err('場代の枚が負', [{ rate: 100, hanchans: [H([500, 100, -200, -400])], outs: [{ pt10: 10, counts: { A: -1 } }] }], 'out_neg');
+err('場代の pt10 が整数でない', [{ rate: 100, hanchans: [H([500, 100, -200, -400])], outs: [{ pt10: null, counts: { A: 1 } }] }], 'out_off');
+err('outs が並びでない', [{ rate: 100, hanchans: [H([500, 100, -200, -400])], outs: {} }], 'table');
 
 console.log('■ 乱数の卓（決まった種）＝合計0・払いの合計が貸し借りと同じ・払う回数は人数−1 まで');
 let seed = 20261120;

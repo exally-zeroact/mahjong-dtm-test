@@ -112,7 +112,7 @@ console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫�
   const v1b = tv([{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ko', add: 3 }]);
   ok('2c-3b：c:ko だけ合わない（chip・shugi は合う）→ extrasOk false（倉庫の extra_state ng）・missing は c:ko の1件', v1b && !v1b.extrasOk && J(v1b.missing.filter((m) => m.what)) === J([{ what: 'c:ko', name: 'コイン', diff: 3 }]), J(v1b && v1b.missing));
   const v2 = tv([{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'c:ko', add: 3 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'c:ko', add: -3 }]);
-  ok('2c-3b：合計0の種が合っていても 0 でない行が在れば not_yet の1件（ng ではない＝extrasOk true・dim）', v2 && v2.extrasOk && J(v2.missing.filter((m) => m.what)) === J([{ what: 'c:ko', name: 'コイン', why: 'not_yet' }]) && v2.windows.every((w) => w.dim), J(v2 && v2.missing));
+  ok('③-2：合計0の種が合っていれば数える（missing 無し・extrasOk・dim なし・m1 custPt10 +15・m2 −15）', v2 && v2.extrasOk && !v2.custWait && !v2.missing.some((m) => m.what) && v2.windows.every((w) => !w.dim) && v2.windows.find((w) => w.member_id === 'm1').custPt10 === 15 && v2.windows.find((w) => w.member_id === 'm2').custPt10 === -15, J(v2 && v2.missing));
   const v3 = tv(Object.assign([], { extraRaw: [{ table_id: 't1', member_id: 'm5', kind: 'c:qq', value: 4, version: 1 }] }));
   ok('2c-3b：tane_custom に無い c:qq の行は数えない（missing 無し・人にも入れない・dim なし）', v3 && v3.extrasOk && !v3.missing.some((m) => m.what) && !v3.people.some((p) => p.member_id === 'm5') && v3.windows.every((w) => !w.dim), J(v3 && v3.missing));
   const v4 = tv(Object.assign([], { extraRaw: [{ table_id: 't1', member_id: 'm5', kind: 'c:ba', value: 1, version: 1 }] }));
@@ -704,6 +704,44 @@ console.log('■ 2c-3c’ やきとり（op yakitori_set は外した＝やき�
   }
   const grY = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'gamen-room.mjs'), 'utf8');
   ok('画面の字：控えの used に yakitori_version', /yakitori_version: h\.yakitori_version \?\? 1/.test(grY));
+}
+
+console.log('■ ③-2 やきとり（extras の yaki）・合計0の自由な項目・外へ払う種（場代）＝チップと同じ所（司さん 11-21）');
+{
+  // やきとり 1枚 2pt（20）・コイン 1枚 0.5pt（5・合計0）・場代 1枚 1pt（10・外へ払う）・開催のレート 100＝点は pt10×10
+  const TC = [{ id: 'ko', name: 'コイン', pt10: 5, sum0: true }, { id: 'ba', name: '場代', pt10: 10, sum0: false }];
+  const R3 = { ...rules, yakitori: true, yakitori_pt: 2, tane_custom: TC };
+  const C0 = [40000, 30000, 20000, 10000];
+  const X = (m, kind, value) => ({ table_id: 't1', member_id: m, kind, value, version: 1 });
+  const mk = (R, xs) => { const st = applyOps(base(R), [hs('h1', C0)]).state; st.extras.push(...xs); return st; };
+  const plain = mk(rules, []);
+  const p0 = tableView(plain, 't1'), s0 = sessionSeisan(plain, 's1');
+  const W = (v, m) => v.windows.find((w) => w.member_id === m);
+  const st = mk(R3, [X('m1', 'yaki', 2), X('m4', 'yaki', -2), X('m2', 'c:ko', 3), X('m3', 'c:ko', -3), X('m1', 'c:ba', 1), X('m2', 'c:ba', 2), X('m5', 'c:ba', 1), X('m6', 'yaki', 0)]);
+  const v = tableView(st, 't1');
+  const d = (m) => W(v, m).hanPt10 === W(p0, m).hanPt10;
+  ok('窓：半荘の pt は同じ・yaki 枚と pt10（m1 2枚＝40・点 400／m4 −40）', ['m1', 'm2', 'm3', 'm4'].every(d) && W(v, 'm1').yaki === 2 && W(v, 'm1').yakiPt10 === 40 && W(v, 'm1').yakiBig === 400 && W(v, 'm4').yakiPt10 === -40, J(W(v, 'm1')));
+  ok('窓：pt10＝半荘＋やきとり＋コイン（m1 +40・m2 +15・m3 −15・m4 −40）・場代は入らない', W(v, 'm1').pt10 === W(p0, 'm1').pt10 + 40 && W(v, 'm2').pt10 === W(p0, 'm2').pt10 + 15 && W(v, 'm3').pt10 === W(p0, 'm3').pt10 - 15 && W(v, 'm4').pt10 === W(p0, 'm4').pt10 - 40);
+  ok('窓：out10（m1 10・m2 20・席に居ない m5 10＝人に出る）・outBig は点（m2 200）・0 の行の m6 は出ない', W(v, 'm1').out10 === 10 && W(v, 'm2').out10 === 20 && !!W(v, 'm5') && W(v, 'm5').out10 === 10 && W(v, 'm2').outBig === 200 && !W(v, 'm6'));
+  ok('★場代の行が在る間は今まで通り not_yet で止める（画面の「払う額」欄まで・v2.1 止め2）★＝custWait・dim・missing は c:ba の1件だけ', v.custWait && v.extrasOk && v.windows.every((w) => w.dim) && J(v.missing.filter((m) => m.what)) === J([{ what: 'c:ba', name: '場代', why: 'not_yet' }]), J(v.missing));
+  const s = sessionSeisan(st, 's1');
+  ok('開催の精算：ten は半荘＋やきとり＋コインの点（m1 +400・m2 +150・m3 −150・m4 −400）・合計0', s.ok && s.ten.m1 === s0.ten.m1 + 400 && s.ten.m2 === s0.ten.m2 + 150 && s.ten.m3 === s0.ten.m3 - 150 && s.ten.m4 === s0.ten.m4 - 400 && Object.values(s.ten).reduce((a, b) => a + b, 0) === 0, J(s.ten));
+  ok('開催の精算：out は場代の点（m1 100・m2 200・m5 100）・ten／pay に m5 は居ない', s.ok && J(s.out) === J({ m1: 100, m2: 200, m5: 100 }) && !('m5' in s.ten) && !s.pay.some((x) => x.from === 'm5' || x.to === 'm5'), J(s.out));
+  const bd = sessionBreakdown(st, 's1');
+  ok('内訳：m1 yaki 2・yaki10 40・out10 10／m2 cust10 15・out10 20', bd.by.m1.yaki === 2 && bd.by.m1.yaki10 === 40 && bd.by.m1.out10 === 10 && bd.by.m2.cust10 === 15 && bd.by.m2.out10 === 20 && bd.used.yaki === true, J(bd.by.m1));
+  ok('内訳：Σkei×r/10 ＝ 精算の ten（やきとり・コイン込み・場代は入れない）', Object.keys(s.ten).every((m) => Object.entries(bd.by[m].kei).reduce((a, [r, k]) => a + k * (Number(r) / 10), 0) === s.ten[m]), J(bd.by));
+  const ngSt = mk(R3, [X('m1', 'yaki', 2), X('m4', 'yaki', -1)]);
+  const ng = tableView(ngSt, 't1');
+  ok('やきとりの合計が 0 でない＝extrasOk false・missing {what yaki, diff 1}・額を足さない・dim', !ng.extrasOk && J(ng.missing.filter((m) => m.what)) === J([{ what: 'yaki', diff: 1 }]) && W(ng, 'm1').pt10 === W(p0, 'm1').pt10 && ng.windows.every((w) => w.dim), J(ng.missing));
+  ok('やきとりの合計が 0 でない卓は精算でも数えない（ten は半荘だけ）', (() => { const x = sessionSeisan(ngSt, 's1'); return x.ok && x.ten.m1 === s0.ten.m1; })());
+  const off = tableView(mk({ ...R3, yakitori: false }, [X('m1', 'yaki', 2), X('m5', 'yaki', 1)]), 't1');
+  ok('yakitori が true でない卓の yaki 行は数えない（missing 無し・pt 同じ）が、0 でない行の人は出す（m5）', off.extrasOk && !off.missing.some((m) => m.what) && W(off, 'm1').pt10 === W(p0, 'm1').pt10 && W(off, 'm1').yaki === 0 && !!W(off, 'm5'));
+  const z = tableView(mk({ ...R3, yakitori_pt: 0 }, [X('m1', 'yaki', 2), X('m4', 'yaki', -2)]), 't1');
+  ok('yakitori_pt 0 は枚を数えて額 0（合計は見る）', z.extrasOk && W(z, 'm1').pt10 === W(p0, 'm1').pt10 && W(z, 'm1').yaki === 2);
+  const nr = mk(R3, [X('m1', 'c:ba', 3)]);
+  nr.tables[0].rate_mode = 'none';
+  const nrs = sessionSeisan(nr, 's1');
+  ok('レートの無い卓の場代＝outPt10NoRate（m1 30）・out は空', nrs.ok && J(nrs.outPt10NoRate) === J({ m1: 30 }) && J(nrs.out) === '{}', J(nrs));
 }
 
 console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本＝schema.sql の mj_write ①・③ダッシュ・③ダッシュ2・mj_w_op 末尾・紙 write4_utsushi.md v1.1）');
