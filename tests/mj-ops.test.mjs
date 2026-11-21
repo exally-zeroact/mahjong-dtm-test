@@ -137,4 +137,5 @@ if (DIRECT && !process.argv.includes('--self-test')) {
   const bad = judge(ops);
   if (bad.length) { console.log('✗ 操作の表が K-1 と違う'); bad.forEach((b) => console.log('   - ' + b)); process.exit(1); }
   console.log(`✓ 操作の表 ${ops.length} 行 × ${COLS.length} 列＝K-1 の通り（v15 の列 ${FIXED.oldEmpty.join('・')} は種に無い）`);
+  console.log('KEKKA ' + JSON.stringify({ passed: ops.length, failed: 0, mimiso: 0 }));
 }

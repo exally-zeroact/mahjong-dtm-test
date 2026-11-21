@@ -215,5 +215,6 @@ if (DIRECT && !process.argv.includes('--self-test')) {
     else console.log('✓ ' + f);
   }
   console.log(ng ? `\n★中止★ ${ng}本が門番に落ちました（1文字も当てません）` : '\n門番: 全部 通りました');
+  if (!ng) console.log('KEKKA ' + JSON.stringify({ passed: files.length, failed: 0, mimiso: 0 }));
   process.exit(ng ? 1 : 0);
 }

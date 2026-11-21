@@ -151,3 +151,4 @@ const t0 = Date.now();
 const res = run(S, false);
 if (res.length) { console.log(`✗ 待ち・シャンテン ${res.length}/${n} が違う`); for (const b of res.slice(0, 30)) console.log('  ' + b); process.exit(1); }
 console.log(`✓ 待ち・シャンテン ${n} 件 全部 合った（清一色13枚 93,600通り・1枚替えの探索 1,260手・手で書いた正解表）${((Date.now() - t0) / 1000).toFixed(1)}秒`);
+console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));

@@ -122,7 +122,8 @@ export function au(name, src, refs = REFS) {
 if (process.argv.includes('--self-test')) {
   console.log('\n[supa-config-matches-repo --self-test] わざと 食い違わせたら 赤に なるか');
   let ng = 0;
-  const iu = (nm, good) => { if (!good) ng++; console.log('  ' + (good ? '✓' : '✗') + ' ' + nm + (good ? '' : '  ★思っていたのと 違う★')); };
+  let iuN = 0;
+  const iu = (nm, good) => { iuN++; if (!good) ng++; console.log('  ' + (good ? '✓' : '✗') + ' ' + nm + (good ? '' : '  ★思っていたのと 違う★')); };
 
   /* ★作り物の ref（本物は この自己確認では 使わない）★ */
   const F = { prod: 'aaaabbbbccccddddeeee', test: 'zzzzyyyyxxxxwwwwvvvv' };
@@ -186,6 +187,7 @@ if (process.argv.includes('--self-test')) {
   fs.rmSync(tmp, { recursive: true, force: true });
 
   console.log(ng ? '\n★自己確認 ' + ng + '件 おかしい★' : '\n自己確認 OK（わざと 食い違わせると 赤に なる）');
+  if (!ng) console.log('KEKKA ' + JSON.stringify({ passed: iuN, failed: 0, mimiso: 0 }));
   process.exit(ng ? 1 : 0);
 }
 
@@ -202,7 +204,7 @@ console.log('  ' + CFG + ' の 名札 env … ' + (r.env || '（読めない）'
 console.log('  ' + CFG + ' の 倉庫 url … ' + (r.url || '（読めない）'));
 console.log('  鍵の形 … ' + keyShape(src) + (r.key ? '／中の ref … ' + r.key : ''));
 for (const k of (r.koe || [])) console.log('  ・声 … ' + k);
-if (r.ok) { console.log('  ✓ 合っている'); process.exit(0); }
+if (r.ok) { console.log('  ✓ 合っている'); console.log('KEKKA ' + JSON.stringify({ passed: 1, failed: 0, mimiso: 0 })); process.exit(0); }
 for (const x of r.riyuu) console.log('  ✗ ' + x);
 console.log('    ★直し方★ この repo の ' + CFG + ' を この線の 値に 戻す（もう片方から 写すな）。');
 console.log('    ★運ぶ時は scripts/mirror-to-prod.mjs を 通す★（' + CFG + ' を 運ばない 守りが 入っている）。');

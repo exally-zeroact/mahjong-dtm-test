@@ -2699,7 +2699,8 @@ function selfTest() {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === SELF;
 if (isMain) {
   if (process.argv.includes("--self-test")) process.exit(selfTest());
-  const { code, lines } = run();
+  const { code, lines, r } = run();
   for (const l of lines) console.log(l);
+  if (code === 0) console.log("KEKKA " + JSON.stringify({ passed: r.c.files, failed: 0, mimiso: 0 }));
   process.exit(code);
 }

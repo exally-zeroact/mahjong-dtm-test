@@ -384,3 +384,4 @@ const { n, bad } = run(score);
 if (ROWS.length < ROW_FLOOR) bad.push(`正解表の行が ${ROWS.length}（床 ${ROW_FLOOR}）`);
 if (bad.length) { console.log(`✗ 点数計算 ${bad.length}/${n} が違う`); for (const b of bad) console.log('  ' + b); process.exit(1); }
 console.log(`✓ 点数計算 正解表 ${ROWS.length} 行（${n} か所）全部 同じ`);
+console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));

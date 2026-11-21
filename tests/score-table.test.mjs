@@ -138,3 +138,4 @@ for (let h = 5; h <= 13; h++) if (!T.LIMIT[h]) bad.push(`5翻以上の段 ${h}�
 if (CELLS_572() !== 572) bad.push('マスの数');
 if (bad.length) { console.log(`✗ 早見表 ${bad.length}/${n} が違う`); for (const b of bad) console.log('  ' + b); process.exit(1); }
 console.log(`✓ 早見表 ${n} マス 全部 正解表と同じ（4翻以下 176・5翻以上・切り上げ・数え・役満・3人）`);
+console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));

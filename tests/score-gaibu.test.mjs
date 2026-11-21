@@ -243,3 +243,4 @@ if (bad.length) {
 }
 if (out.length) { console.log('✗ 外の計算器との突き合わせ'); for (const x of out) console.log('  ' + x); process.exit(1); }
 console.log(`✓ 外の計算器との突き合わせ ${n} 手 全部 同じ（翻・符・点を比べたのは和了 ${okN} 手・残りは両方 役なし）`);
+console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));

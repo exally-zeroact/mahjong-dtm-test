@@ -739,7 +739,7 @@ function run(root, label) {
   skipBad.forEach((t) => console.log('  ' + t));
   asi.forEach((t) => console.log('  ★undefined を返す return★ ' + t));
   /* ★どちらも赤にする★（未測定を緑にしない）。ただし ★数は分けて返す★ */
-  return { red: red, unmeasured: unmeasured, total: red + unmeasured };
+  return { red: red, unmeasured: unmeasured, total: red + unmeasured, n: tests.length };
 }
 
 /* ★走らせた場所が 測った根の外なら 赤★（--self-test でも同じ。黙って別の repo を測らせない）
@@ -992,6 +992,7 @@ if (process.argv.includes('--self-test')) {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   if (ng) { console.error(NL + '★自己診断 ' + ng + '件 失敗★'); process.exit(1); }
   console.log(NL + '自己診断 ' + tried + '件 とも 正しい');
+  console.log('KEKKA ' + JSON.stringify({ passed: tried, failed: 0, mimiso: 0 }));
   process.exit(0);
 }
 
@@ -1000,3 +1001,4 @@ const bad = out.total;
 if (process.argv.includes('--list')) process.exit(0);
 if (bad) { console.error(NL + '★' + bad + '件★ 直すまで進めない（登録しないと 1本も走りません）'); process.exit(1); }
 console.log('OK（在る試験は 全部 走っている）');
+console.log('KEKKA ' + JSON.stringify({ passed: out.n, failed: 0, mimiso: 0 }));

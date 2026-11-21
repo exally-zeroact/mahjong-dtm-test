@@ -343,6 +343,7 @@ if (!SELF) {
   const b = await run();
   for (const x of b) console.log('  ✗ ' + x);
   console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・webkit 390×844）`);
+  if (!b.length) console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));
   await shut();
   process.exit(b.length ? 1 : 0);
 }

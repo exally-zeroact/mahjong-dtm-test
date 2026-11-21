@@ -27,6 +27,13 @@ jobs:
         run: node scripts/tests-registered.mjs
       - name: ★その見張りの自己確認 (わざと外して赤になるか)
         run: node scripts/tests-registered.mjs --self-test
+      - name: CI の段を 測った/読めない に割る道具（tools/_bunrui.mjs）が正解表の通りか（自己確認: a/b と KEKKA の読み方）
+        run: node tests/bunrui.test.mjs
+      - name: 割る道具の見張りの自己確認（読む式を5か所壊して全部赤になるか）
+        shell: bash
+        run: |
+          node tests/bunrui.test.mjs --self-test | tee bunrui-self.out
+          sh scripts/ci-yuka.sh bunrui-self.out 5
 
       # ── どちらの線か（テスト倉庫を本番が読む事故を防ぐ） ──────
       - name: テスト環境の帯（本番では出さない・全画面が読み込む）
