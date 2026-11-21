@@ -28,25 +28,25 @@
   <button class="btn btn-main" type="button" id="btnLoginOpen">ログイン・新規登録</button>
 </section>
 
-<!-- ⑧ 作るか入るか（絵 home_v154 ②）＝切り替えで片方だけ出す -->
+<!-- ⑧ ［対局を始める］（部屋なし・既定）／みんなで見る部屋を作る・入る（gamen_b3a_sadame v1.1）＝切り替えで片方だけ出す -->
 <section id="vChoose" class="view" hidden>
+  <button class="btn btn-main" type="button" id="btnStart">対局を始める</button>
+  <p class="sec">みんなで見る</p>
   <div class="seg" id="chSeg">
     <button type="button" data-p="pMake" aria-pressed="true">部屋を作る</button>
     <button type="button" data-p="pJoin" aria-pressed="false">部屋に入る</button>
   </div>
   <div id="pMake" class="h-pane">
-    <p class="sec">部屋を作る</p>
     <div class="list">
-      <label class="li"><span>部屋の名前</span><input class="h-in" id="cName" maxlength="40" autocomplete="off" placeholder="金曜の会"></label>
-      <label class="li"><span>パス（4字以上）</span><input class="h-in" id="cPass" type="password" maxlength="64" autocomplete="new-password" autocapitalize="off" spellcheck="false"></label>
+      <label class="li"><span>部屋名</span><input class="h-in" id="cName" maxlength="40" autocomplete="off" placeholder="金曜の会"></label>
+      <label class="li"><span>パス（数字4つ）</span><input class="h-in" id="cPass" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" autocapitalize="off" spellcheck="false"></label>
     </div>
     <div class="err" id="cErr0"></div>
     <button class="btn btn-main" type="button" id="goRules">次へ（ルールを決める）</button>
   </div>
   <div id="pJoin" class="h-pane" hidden>
-    <p class="sec">部屋に入る</p>
     <div class="list">
-      <label class="li"><span>部屋番号（8桁）</span><input class="h-in" id="jNo" inputmode="numeric" maxlength="9" autocomplete="off" placeholder="4827 1953"></label>
+      <label class="li"><span>部屋名</span><input class="h-in" id="jName" maxlength="40" autocomplete="off" placeholder="金曜の会"></label>
       <label class="li"><span>パス</span><input class="h-in" id="jPass" type="password" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
     </div>
     <div class="err" id="jErr"></div>
@@ -65,8 +65,8 @@
 <!-- ⑩ 部屋ができた（絵 home_v154 ④・管理の合言葉は v18.3 で無し） -->
 <section id="vMade" class="view" hidden>
   <div class="card h-made">
-    <p class="r-hint">部屋番号</p>
-    <div class="h-no" id="mNo"></div>
+    <p class="r-hint">部屋名</p>
+    <div class="h-no h-name" id="mName"></div>
     <p class="r-hint" id="mPass"></p>
     <div class="qr" id="mQr"></div>
     <div class="h-url" id="mUrl"></div>

@@ -2,7 +2,8 @@
  * =============================================================================
  * 画面は section を出し入れするだけ（札ごと差し替えない＝今出ていない箱を触って止まる形を作らない）。
  * 入口：mj_room_create(p_op_id, p_name, p_pass, p_rules, p_secrets{url_token_hash})
- *       mj_room_join(p_way 'pass'|'url', p_room_no, p_key, p_pass)
+ *       ＝名前もパスも null で部屋なし（kind solo・作った画面を出さずにそのまま対局）
+ *       mj_room_join(p_way 'name'|'url', p_room_no null, p_key, p_pass, p_name)（番号の道 'pass' は画面から呼ばない）
  * ★送り直しは同じ op_id と同じ token で★（返事が切れても部屋を2つ作らない・token が変わると mismatch）。
  */
 import { needLogin, showLogin, rpc, errText, rememberRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
@@ -15,12 +16,13 @@ const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
 let rulesCtl = null; // ⑨ のルール設定（作るたびに同じ物を使う）
 let lastMade = null; // 作った直後に ‹ ルール設定 で戻っても、同じ中身なら2つ目を作らない
+let makeKind = 'shared'; // 'solo'＝［対局を始める］（部屋なし）／'shared'＝［みんなで見る部屋を作る］
 
 const BAR = {
   vLogin: { back: 'ホーム', title: '対局' },
   vChoose: { back: 'ホーム', title: '対局' },
   vUrlJoin: { back: 'ホーム', title: '対局' },
-  vRules: { back: '部屋を作る', onBack: () => show('vChoose'), title: 'ルール設定' },
+  vRules: { back: '対局', onBack: () => show('vChoose'), title: 'ルール設定' },
 };
 export function show(id) {
   for (const v of VIEWS) $(v).hidden = v !== id;
@@ -48,22 +50,25 @@ const RULE_ERR = {
 /* ── 作る ── */
 const PENDING = () => 'mj-pending-create:' + me.id;
 function nameAndPass() {
+  if (makeKind === 'solo') return { name: null, pass: null };
   const name = $('cName').value.trim();
-  const pass = $('cPass').value;
-  if (!name) return { err: '部屋の名前を入れてください。' };
-  if (pass.trim().length < 4) return { err: 'パスは4字以上で入れてください。' };
+  const pass = $('cPass').value.normalize('NFKC').trim(); // 全角の数字も通す（倉庫の mj_pass_key も NFKC）
+  if (!name) return { err: '部屋名を入れてください。' };
+  if (!/^\d{4}$/.test(pass)) return { err: 'パスは数字4つで入れてください。' };
   return { name, pass };
 }
 async function sha256Hex(s) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
-function goRules() {
+function goRules(kind) {
+  makeKind = kind;
   $('cErr0').textContent = '';
   const np = nameAndPass();
   if (np.err) { $('cErr0').textContent = np.err; return; }
   if (!rulesCtl) rulesCtl = mountRules($('cRules'), { rules: { ...defaultRules(4), rate: 100 }, readOnly: false });
   $('cErr').textContent = '';
+  $('btnCreate').textContent = kind === 'solo' ? 'この設定で対局を始める' : 'この設定で部屋を作る';
   show('vRules');
 }
 async function doCreate() {
@@ -79,7 +84,7 @@ async function doCreate() {
   if (!chk.ok) { $('cErr').textContent = RULE_ERR[chk.err] || ('ルールの「' + chk.err + '」が入れられません。'); return; }
   // 送り直しの印：同じ中身なら同じ op_id と token（返事が切れた時に部屋を2つ作らない）
   const body = JSON.stringify({ name, pass, rules });
-  if (lastMade && lastMade.body === body) { showMade(lastMade.room, pass); return; }
+  if (lastMade && lastMade.body === body) { made(lastMade.room, pass); return; }
   // 端末に残すのは中身の sha256 だけ（パスの平文を localStorage に置かない）
   const bodyH = await sha256Hex(body);
   let p = null;
@@ -90,21 +95,24 @@ async function doCreate() {
   busy(btn, false);
   if (!res.ok) {
     if (res.err === 'mj_session') { relogin(doCreate); return; }
-    if (['bad', 'common', 'range', 'mismatch', 'mj_op_other_user'].includes(res.err)) localStorage.removeItem(PENDING());
-    $('cErr').textContent = res.err === 'range' && RULE_ERR[res.key] ? RULE_ERR[res.key] : errText(res);
+    // 同じ op と token で送り直しても同じ返しになる物は印を消す（消さないと詰まる・dup／gone＝gamen_b3a_sadame v1.1）
+    if (['bad', 'common', 'range', 'mismatch', 'mj_op_other_user', 'dup', 'gone'].includes(res.err)) localStorage.removeItem(PENDING());
+    $('cErr').textContent = res.err === 'range' && RULE_ERR[res.key] ? RULE_ERR[res.key] : errText(res, 'create');
     return;
   }
   localStorage.removeItem(PENDING());
   // rules＝倉庫の既定で埋めた形（倉庫の mj_read が来るまで、作った端末だけが部屋のルールを持つ）
-  const room = { room_id: res.room_id, room_no: res.room_no, name, role: 'kan', owner: true, token: p.token, channel_key: res.channel_key, rules: rulesOk(rules).rules };
+  const solo = res.kind === 'solo';
+  const room = { room_id: res.room_id, kind: solo ? 'solo' : 'shared', name: solo ? '対局' : name, role: 'kan', owner: true, token: solo ? undefined : p.token, channel_key: res.channel_key, rules: rulesOk(rules).rules };
   rememberRoom(me.id, room);
   lastMade = { body, room };
-  showMade(room, pass);
+  made(room, pass);
 }
-function fmtNo(no) { return String(no).replace(/^(\d{4})(\d{4})$/, '$1 $2'); }
+/* 部屋なし＝作った画面を出さずにそのまま対局へ／部屋＝部屋ができた画面 */
+function made(room, pass) { if (room.kind === 'solo') openRoom(room.room_id); else showMade(room, pass); }
 /* pass あり＝作った直後（‹ ルール設定・［この設定で対局を始める］）／pass なし＝対局の［ルール］の下から（‹ 対局・［対局に戻る］） */
 function showMade(room, pass) {
-  $('mNo').textContent = fmtNo(room.room_no);
+  $('mName').textContent = room.name || '';
   $('mPass').textContent = pass ? 'パス ' + '●'.repeat(Math.min(pass.length, 12)) + '（作った時に打った物）' : 'パスは作った時に打った物';
   const url = room.token ? roomUrl(room.token) : '';
   $('mUrl').textContent = url;
@@ -134,27 +142,28 @@ export function qrSvg(text) {
   return '<svg viewBox="0 0 ' + s + ' ' + s + '" role="img" aria-label="部屋の URL の QR" shape-rendering="crispEdges"><rect width="100%" height="100%" class="qr-bg"/><path d="' + d + '" class="qr-fg"/></svg>';
 }
 
-/* ── 入る（番号＋パス） ── */
+/* ── 入る（部屋名＋パス）＝パスは空かだけ見る（古い部屋の英字・4字以上も倉庫が受ける・鍵盤は数字に絞らない） ── */
 async function doJoin() {
   const btn = $('btnJoin');
   $('jErr').textContent = '';
-  const no = $('jNo').value.replace(/[\s-]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const name = $('jName').value.trim();
   const pass = $('jPass').value;
-  if (!/^\d{8}$/.test(no)) { $('jErr').textContent = '部屋番号は8桁の数字です。'; return; }
+  if (!name) { $('jErr').textContent = '部屋名を入れてください。'; return; }
   if (!pass) { $('jErr').textContent = 'パスを入れてください。'; return; }
   busy(btn, true);
-  const res = await rpc('mj_room_join', { p_way: 'pass', p_room_no: no, p_key: null, p_pass: pass });
+  const res = await rpc('mj_room_join', { p_way: 'name', p_room_no: null, p_key: null, p_pass: pass, p_name: name });
   busy(btn, false);
   if (!res.ok) {
     if (res.err === 'mj_session') { relogin(doJoin); return; }
-    $('jErr').textContent = errText(res);
+    $('jErr').textContent = errText(res, 'name');
     return;
   }
   joined(res, null);
 }
 function joined(res, token) {
   const old = myRooms(me.id).find((x) => x.room_id === res.room_id);
-  rememberRoom(me.id, { room_id: res.room_id, room_no: res.room_no, name: res.name, role: res.role, channel_key: res.channel_key, token: token || (old && old.token) || undefined });
+  // 入れるのは shared だけ（部屋なしは倉庫が潰す）＝kind 'shared'。番号は控えに持たない
+  rememberRoom(me.id, { room_id: res.room_id, kind: 'shared', name: res.name, role: res.role, channel_key: res.channel_key, token: token || (old && old.token) || undefined });
   openRoom(res.room_id);
 }
 
@@ -163,11 +172,11 @@ async function urlJoin(token) {
   show('vUrlJoin');
   $('uErr').textContent = '';
   $('btnUrlRetry').hidden = true;
-  const res = await rpc('mj_room_join', { p_way: 'url', p_room_no: null, p_key: token, p_pass: null });
+  const res = await rpc('mj_room_join', { p_way: 'url', p_room_no: null, p_key: token, p_pass: null, p_name: null });
   if (!res.ok) {
     if (res.err === 'mj_session') { relogin(() => urlJoin(token)); return; }
     $('uMsg').textContent = '入れませんでした。';
-    $('uErr').textContent = errText(res);
+    $('uErr').textContent = errText(res, 'url');
     $('btnUrlRetry').hidden = !['net', 'offline', 'busy', 'server'].includes(res.err);
     $('btnUrlRetry').onclick = () => urlJoin(token);
     return;
@@ -178,11 +187,12 @@ async function urlJoin(token) {
 /* ── 部屋の中 ── */
 async function openRoom(roomId) {
   const room = myRooms(me.id).find((x) => x.room_id === roomId);
-  if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋番号とパスか URL で入ってください。', 'warn'); return; }
+  if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
   obi('');
   show('vRoom');
-  mountRoom($('vRoom'), { me, room, showShare: () => showMade(room, null), bar });
+  // 部屋なしは URL で入れない（倉庫が潰す）＝［部屋名と URL］を出さない（B3b で［みんなで見る部屋にする］に替わる）
+  mountRoom($('vRoom'), { me, room, showShare: room.kind !== 'solo' ? () => showMade(room, null) : null, bar });
 }
 
 /* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま。ten＝［点数］の行き先（対局のページだけ・設計図§2「右上の［ルール］の隣に［点数］」） */
@@ -225,7 +235,8 @@ $('chSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   for (const x of $('chSeg').querySelectorAll('button')) { x.setAttribute('aria-pressed', String(x === b)); $(x.dataset.p).hidden = x !== b; }
 });
-$('goRules').onclick = goRules;
+$('goRules').onclick = () => goRules('shared');
+$('btnStart').onclick = () => goRules('solo');
 $('btnCreate').onclick = doCreate;
 $('btnJoin').onclick = doJoin;
 $('btnLoginOpen').onclick = () => showLogin(start);

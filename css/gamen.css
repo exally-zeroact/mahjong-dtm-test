@@ -211,6 +211,7 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .h-made { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; margin: 0; }
 .h-made .r-hint { margin: 0; }
 .h-no { font-size: 30px; font-weight: 800; letter-spacing: .06em; font-variant-numeric: tabular-nums; }
+.h-name { font-size: 26px; letter-spacing: 0; line-height: 1.3; overflow-wrap: anywhere; max-width: 100%; }
 .h-made .qr { width: 150px; margin: 8px 0 0; }
 .h-made .qr.qr-big { width: 100%; max-width: 320px; }
 .h-url { margin: 8px 0 2px; font-size: 13px; color: var(--c-kon); word-break: break-all; }

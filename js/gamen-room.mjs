@@ -3,7 +3,7 @@
  * 正の絵（司さんに出した一番新しい版・memory/mahjong_tataki_2026-11-20/）：
  *   対局＝mahjong_nyuryoku4_v122（①表は1回ずつ伸び10回分で止まる・計は下に固定 ②「n回」を押すと直す ③直す画面）
  *   精算＝mahjong_seisan_v153／人を選ぶ＝mahjong_namae_v155／ルール＝mahjong_home_v154 ③
- * mountRoom(el, { me, room, showShare, bar, page })
+ * mountRoom(el, { me, room, showShare, bar, page })＝showShare が無い（部屋なしの対局）時は［部屋名と URL］を出さない
  *   bar({ back, onBack, title, right, onRight, ten })＝上の帯（‹ 戻る・題・右の字・ten＝［点数］の行き先）を変える
  * ★窓に説明の字を置かない★（司さん 11-20「赤丸の説明いらん」）＝窓は名前・大きい数（pt×レートの点）・チップ／祝儀の行だけ。
  *   チップ・祝儀の「1枚＝」と横の数はレートで換えた点（レートなしの卓は pt）。
@@ -75,8 +75,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
     el.innerHTML = '<p class="setsumei">この部屋のルールはまだこの端末に届いていません（倉庫の読み口ができたら出ます）。</p>' +
-      '<button class="btn" id="rShare">部屋番号と URL</button>';
-    el.querySelector('#rShare').onclick = showShare;
+      (showShare ? '<button class="btn" id="rShare">部屋名と URL</button>' : '');
+    if (showShare) el.querySelector('#rShare').onclick = showShare;
     return;
   }
   const g2 = roomGate(st, room.rules); // room.rules が入った後に部屋の rules も見る
@@ -241,9 +241,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
 
   function renderRules() {
     bar({ back: '対局', onBack: toRoom, title: 'ルール' });
-    el.innerHTML = '<div id="rRules"></div><button class="btn btn-line" id="rShare">部屋番号と URL</button>';
+    el.innerHTML = '<div id="rRules"></div>' + (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '');
     mountRules(el.querySelector('#rRules'), { rules: { ...R, rate: tableView(st, table.table_id).rate }, readOnly: true });
-    el.querySelector('#rShare').onclick = showShare;
+    if (showShare) el.querySelector('#rShare').onclick = showShare;
   }
 
   function memberStats(mid) {

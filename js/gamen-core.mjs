@@ -40,30 +40,40 @@ export async function rpc(fn, args) {
   return d;
 }
 
-/* ── 返しの字（客に見せる字・ここ1か所） ── */
-export function errText(res) {
+/* ── 返しの字（客に見せる字・ここ1か所） ──
+ * way＝'create'（作る）｜'name'（部屋名＋パスで入る）｜'url'（URL・QR で入る）。同じ err でも道で意味が違う（gamen_b3a_sadame v1.1）：
+ * busy user（作る＝1人1日5つ／入る＝1分10回の外れ）・full（作る＝倉庫の枠／入る＝部屋の人数）・wrong（名前の道／URL の道）・locked（作る＝名前の止め） */
+export function errText(res, way) {
   const e = res && res.err;
   const w = res && res.what;
+  const join = way === 'name' || way === 'url';
   switch (e) {
     case 'mj_session': return 'ログインが切れました。ログインし直してください。';
     case 'offline': return '電波がありません。つながってからもう一度押してください。';
     case 'net': return 'つながりませんでした。電波を確かめてもう一度押してください。';
     case 'common': return 'よく使われるパスは使えません。別のパスにしてください。';
-    case 'wrong': return '部屋番号かパスが違います。';
-    case 'locked': return '打ち間違いが続いたので、' + hhmm(res.until) + ' まで入れません。';
+    case 'wrong': return way === 'url' ? 'この URL の部屋は見つかりません。もらった URL を確かめてください。' : '部屋名かパスが違います。';
+    case 'ambiguous': return '同じ名前とパスの部屋が2つ在ります。URL・QR で入ってください。';
+    case 'closed': return 'この部屋は終わりました。';
+    case 'dup': return w === 'name_pass' ? 'その名前とパスの部屋は今使われています。' : '送り直しが合いませんでした。もう一度最初から押してください。';
+    case 'locked':
+      if (way === 'create') return 'その部屋名は打ち間違いが続いたので、' + hhmm(res.until) + ' まで使えません。';
+      return '打ち間違いが続いたので、' + hhmm(res.until) + ' まで入れません。';
     case 'gone': return 'この部屋は消されています。';
     case 'removed': return 'この部屋からは外されています。部屋の管の人に訊いてください。';
-    case 'full': return '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。';
+    case 'full': return join ? 'この部屋は人数がいっぱいで入れません。' : '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。';
     case 'mismatch': case 'mj_op_other_user': return '送り直しが合いませんでした。もう一度最初から押してください。';
     case 'range': return 'その数は入れられません（範囲）' + (res.key ? '：' + ruleLabel(res.key) : '');
     case 'busy':
-      if (w === 'user') return '1人が1日に作れる部屋は5つまでです。明日もう一度。';
+      if (w === 'user') return join ? '打ち間違いが続いたので、1分待ってもう一度。' : '1人が1日に作れる部屋は5つまでです。明日もう一度。';
+      if (w === 'name') return 'その名前の部屋が多すぎます。別の名前にしてください。';
       if (w === 'room') return 'この部屋は今混んでいます。1分待ってもう一度。';
+      if (w === 'all' && way === 'create') return '今は混んでいます。少し待ってからもう一度押してください。';
       return '混んでいます。1分待ってもう一度押してください。';
     case 'bad':
       if (w === 'name') return '部屋の名前を1〜40字で入れてください。';
-      if (w === 'pass') return 'パスは4字以上で入れてください。';
-      if (w === 'room_no') return '部屋番号は8桁の数字です。';
+      if (w === 'pass') return 'パスは数字4つで入れてください。';
+      if (w === 'kind') return '送り直しが合いませんでした。もう一度最初から押してください。';
       if (w === 'key') return 'URL が途中で切れています。もらった URL をそのまま開いてください。';
       return '入れた物が足りません（' + (w || '?') + '）。';
     case 'server': return '倉庫で止まりました（' + (res.detail || '') + '）。';
@@ -135,7 +145,7 @@ export function myRooms(uid) {
     return Array.isArray(a) ? a : [];
   } catch { return []; }
 }
-/* room＝{room_id, room_no, name, role, token?}（token は作った人か URL で入った人だけが持つ＝URL を回せる） */
+/* room＝{room_id, kind, name, role, token?}（kind＝'shared'｜'solo'・古い控えは kind 無し＝shared・番号は持たない＝古い控えに在っても出さない。token は作った人か URL で入った人だけが持つ＝URL を回せる） */
 export function rememberRoom(uid, room) {
   const a = myRooms(uid).filter((x) => x.room_id !== room.room_id);
   const old = myRooms(uid).find((x) => x.room_id === room.room_id) || {};
