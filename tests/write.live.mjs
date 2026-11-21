@@ -7,7 +7,7 @@
  *  ③ 範囲 ④ 版 ⑤ 飛び賞 ⑥ そろった後 ⑦ チップ・祝儀（11通り・倉庫と lib〔画面の lib/room-state.mjs の tableView〕に同じ表を通す）
  *  ⑦' 2c-2a1（紙 write2_sekkei.md v3.3）＝卓の一度そろった（first_complete_at）・卓の印・正味の門（v1510:195①）・使わない種と取り消した開催日・前の組の締め
  *  ⑪ 2c-2a2（作り write_2c2a2_tsukuri.md）＝直す op 6個（member_rename・member_active・session_edit・table_edit・hanchan_seats・extra_set）と印・版
- *  ⑫ 2c-3b（紙 write3_sekkei.md §3）＝自由な項目の枚 c:<id>  ⑬ 2c-3c（同 §4・v1.1 S1〜S3）＝やきとり yakitori_set（形・使わない部屋・版・締めた後の印・split の端数で並び・飛びの直しを止めない・取り消した半荘）
+ *  ⑫ 2c-3b（紙 write3_sekkei.md §3）＝自由な項目の枚 c:<id>  ⑬ 2c-3c’（write6_yaki_sadame.md v1.1）＝やきとりは extras の種 'yaki'（使う＝yakitori true かつ pt≥1・合計0・理由は yaki が c: より先・op yakitori_set は無い）
  *  ⑭ 2c-2b（紙 write4_sekkei.md v1〜v1.2・write4_shiken_keikaku.md）＝人の op 5つ（member_link・member_unlink・member_relink・role_set・account_remove）・役の門 mj_role・入り直しの門 mj_reauth（jwt の amr 10分）・名乗り member_claims
  *  ⑮ 2c-2c（紙 write5_sadame.md v1.1）＝部屋の op 4つ（room_leave・room_delete・room_undelete・room_secret）・K-3 の継ぎ（段1＝持ち主のアカウントが消えた時）・組に1つだけ
  *  ⑩ 2c-2a0＝範囲の端の表 tests/fixtures/write-cases.json を倉庫に流す（want_db ?? want と ok／err だけ比べる・弾いた組は何も書かない）
@@ -107,13 +107,9 @@ const xa = (T, who, add, kind = 'chip') => O('extra_add', { table_id: T[0], memb
 /* ⑫ 2c-3b 自由な項目（write3_sekkei.md §3）：ra のルールに tane_custom を塊の中だけ足す（並びは ko・ba・ke＝id の順と違う＝理由が並びの順か見る） */
 const TC = [{ id: 'ko', name: 'コイン', pt10: 5, sum0: true }, { id: 'ba', name: '場代', pt10: 10, sum0: false }, { id: 'ke', name: '景品', pt10: 3, sum0: true }];
 const C3N = [U(), U()], C3P = [U(), U()], C3Q = [U(), U()];
-/* ⑬ 2c-3c やきとり（write3_sekkei.md §4・v1.1 S1〜S3）：Y1 そろった卓・Y2 飛んだ卓・Y3 取り消す卓・Y4 やきとりを使わない部屋 */
+/* ⑬ 2c-3c’ やきとり＝extras の種 'yaki'（write6_yaki_sadame.md v1.1）：Y1・Y2 使う卓（pt 10）・Y3 pt 0 の卓・Y4 yakitori false の卓 */
 const Y1 = [U(), U()], Y2 = [U(), U()], Y3 = [U(), U()], Y4 = [U(), U()];
-const HY = (h) => `select jsonb_build_object('y', yakitori, 'yv', yakitori_version, 'state', state, 'why', state_reason, 'fc', first_complete_at is not null,
-  'ch', changed_after_complete_at is not null, 'tobi', tobi_to, 'voided', voided) from mahjong.hanchans where id = '${h}'`;
-const yvv = (h) => S(`(select to_jsonb(yakitori_version) from mahjong.hanchans where id = '${h}')`);
-const ys = (h, y, bv) => O('yakitori_set', { hanchan_id: h, ...(y === undefined ? {} : { yakitori: y }), base_version: bv });
-const YBAD = [['y5c0', undefined], ['y5c1', [4]], ['y5c2', [-1]], ['y5c3', ['1']], ['y5c4', [1.5]], ['y5c5', { 0: 1 }], ['y5c6', null], ['y5c7', '0'], ['y5c8', [0, 1, 2, 3, 0]]];
+const YR = (o) => `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify(o))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);`;
 const TK = (t) => `select jsonb_build_object('c', chip_state, 's', shugi_state, 'e', extra_state, 'why', extra_reason, 'fc', first_complete_at is not null) from mahjong.tables where id = '${t}'`;
 const XSUM = (t, kind) => `select coalesce(sum(value), 0) from mahjong.extras where table_id = '${t}' and kind = '${kind}'`;
 const mkT = (T, cells = C4) => [O('table_add', { table_id: T[0], session_id: SA, label: 'p' }), O('hanchan_start', { hanchan_id: T[1], table_id: T[0], seats: MA.slice(0, 4), cells })];
@@ -172,7 +168,7 @@ const setupOps = (room) => {
   return A(...xs);
 };
 const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) => c[6].map(([who, kind, add]) => O('extra_add', { table_id: c[4], member_id: RM[room].m[who], kind, add }))));
-const NAMES28 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'yakitori_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
+const NAMES27 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
   'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'extra_set',
   'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove', 'room_leave', 'room_delete', 'room_undelete', 'room_secret'];
 /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1）：⑭ の H14 で人と名簿の人をそろえる・送り直しは決めた op_id で */
@@ -322,7 +318,7 @@ const body = `
   ${W('dupn', 2, 'ra', A(ma(U(), ' 甲 ')))}
   ${asWho(2)}
   arr := '{}';
-  for nm in select name from mahjong.mj_ops where name not in (${NAMES28.map((n) => `'${n}'`).join(', ')}) order by name loop
+  for nm in select name from mahjong.mj_ops where name not in (${NAMES27.map((n) => `'${n}'`).join(', ')}) order by name loop
     r := public.mj_write(ra, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', nm)));
     arr := arr || jsonb_build_object(nm, r);
   end loop;
@@ -478,38 +474,31 @@ const body = `
   ${undo('k4', `${W('k4a', 1, 'ra', A(...mkT(C3N)))}
     ${W('k4b', 2, 'ra', A(xa(C3N, 0, 1, 'c:ko')))}`)}
 
-  /* ⑬ 2c-3c やきとり（倉庫だけ＝写しは画面が yakitori_set を持つまで比べない） */
+  /* ⑬ 2c-3c’ やきとり＝extras の種 'yaki'（倉庫だけ＝写しの 'yaki' は計算の B と同じ押し） */
   ${RS}
-  ${undo('y5', `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify({ yakitori: true, yakitori_to: 'split', yakitori_pt: 10 }))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);
-    ${W('y5a', 1, 'ra', A(...mkT(Y1, C4D), ...mkT(Y2, [60000, 30000, 20000, -10000]), ...mkT(Y3, C4D)))}
-    ${ROW('y5a_h', HY(Y1[1]))}
-    ${W('y5b', 2, 'ra', A(ys(Y1[1], [0, 2], yvv(Y1[1]))))}
-    ${ROW('y5b_h', HY(Y1[1]))}
-    ${YBAD.map(([k, y]) => W(k, 2, 'ra', A(ys(Y1[1], y, yvv(Y1[1]))))).join('\n    ')}
-    ${W('y5d1', 2, 'ra', A(ys(Y1[1], [1, 1], yvv(Y1[1]))))}
-    ${W('y5d2', 2, 'ra', A(ys(Y1[1], [2, 1], yvv(Y1[1]))))}
-    ${ROW('y5d_h', HY(Y1[1]))}
-    ${W('y5e', 2, 'ra', A(ys(Y1[1], [0, 2], 1)))}
-    ${W('y5f', 2, 'ra', A(ys(Y1[1], [1], 1)))}
-    ${ROW('y5f_h', HY(Y1[1]))}
-    ${W('y5g', 2, 'ra', A(ys(Y1[1], [1], yvv(Y1[1]))))}
-    ${ROW('y5g_h', HY(Y1[1]))}
-    ${W('y5h', 2, 'ra', A(O('hanchan_order', { hanchan_id: Y1[1], ton_order: TON4, base_version: ov(Y1[1]) })))}
-    ${ROW('y5h_h', HY(Y1[1]))}
-    ${W('y5i', 2, 'ra', A(O('tobi_set', { hanchan_id: Y2[1], tobi_to: { 3: 0 }, base_version: tv(Y2[1]) })))}
-    ${W('y5j', 2, 'ra', A(cs(Y2[1], 3, 10000), cs(Y2[1], 0, 40000)))}
-    ${ROW('y5j_h', HY(Y2[1]))}
-    ${W('y5k', 2, 'ra', A(cs(Y2[1], 3, -10000), cs(Y2[1], 0, 60000), ys(Y2[1], [0, 2], yvv(Y2[1]))))}
-    ${ROW('y5k_h', HY(Y2[1]))}
-    ${W('y5l', 2, 'ra', A(ys(HB, [], 1)))}
-    ${W('y5m', 2, 'ra', A(O('hanchan_void', { hanchan_id: Y3[1] })))}
-    ${W('y5n', 2, 'ra', A(ys(Y3[1], [3], yvv(Y3[1]))))}
-    ${ROW('y5n_h', HY(Y3[1]))}`)}
-  ${undo('y6', `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify({ yakitori: false }))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);
-    ${W('y6a', 1, 'ra', A(...mkT(Y4, C4D)))}
-    ${W('y6b', 2, 'ra', A(ys(Y4[1], [0], yvv(Y4[1]))))}
-    ${W('y6c', 2, 'ra', A(ys(Y4[1], [], yvv(Y4[1]))))}
-    ${ROW('y6c_h', HY(Y4[1]))}`)}
+  ${undo('y5', `${YR({ yakitori: true, yakitori_pt: 10, tane_custom: TC })}
+    ${W('y5a', 1, 'ra', A(...mkT(Y1), ...mkT(Y2)))}
+    ${W('y5b', 2, 'ra', A(xa(Y1, 0, 3, 'yaki')))}
+    ${ROW('y5b_t', TK(Y1[0]))}
+    ${ROW('y5b_x', XSUM(Y1[0], 'yaki'))}
+    ${W('y5c', 2, 'ra', A(xa(Y1, 1, -3, 'yaki')))}
+    ${ROW('y5c_t', TK(Y1[0]))}
+    ${W('y5d', 2, 'ra', A(O('extra_set', { table_id: Y2[0], member_id: MA[0], kind: 'yaki', value: 2, base_version: 0 })))}
+    ${ROW('y5d_t', TK(Y2[0]))}
+    ${W('y5e', 2, 'ra', A(xa(Y2, 1, 1, 'c:ko')))}
+    ${ROW('y5e_t', TK(Y2[0]))}
+    ${W('y5f', 2, 'ra', A(xa(Y2, 1, -2, 'yaki')))}
+    ${ROW('y5f_t', TK(Y2[0]))}
+    ${W('y5g', 2, 'ra', A(xa(Y1, 0, 1000, 'yaki')))}
+    ${W('y5h', 2, 'ra', A(O('yakitori_set', { hanchan_id: Y1[1], yakitori: [0], base_version: 1 })))}`)}
+  ${undo('y6', `${YR({ yakitori: true, yakitori_pt: 0 })}
+    ${W('y6a', 1, 'ra', A(...mkT(Y3)))}
+    ${W('y6b', 2, 'ra', A(xa(Y3, 0, 1, 'yaki')))}
+    ${W('y6c', 2, 'ra', A(O('extra_set', { table_id: Y3[0], member_id: MA[0], kind: 'yaki', value: 1, base_version: 0 })))}
+    ${ROW('y6_x', `select count(*) from mahjong.extras where table_id = '${Y3[0]}'`)}`)}
+  ${undo('y7', `${YR({ yakitori: false, yakitori_pt: 10 })}
+    ${W('y7a', 1, 'ra', A(...mkT(Y4)))}
+    ${W('y7b', 2, 'ra', A(xa(Y4, 0, 1, 'yaki')))}`)}
 
   /* ⑦' 2c-2a1 卓の一度そろった・卓の印 */
   ${RS}
@@ -1068,7 +1057,7 @@ function check(out, lib, say) {
   ok('② session_add の league_id → bad', isErr('lg', 'bad', { at: 'league_id' }), J(R('lg')));
   ok('② 同じ名前（trim の後）→ dup・member_id と name を添える', isErr('dupn', 'dup') && R('dupn').member_id === MA[0] && R('dupn').name === '甲', J(R('dupn')));
   const ny = out.ny || {};
-  ok('② 28個の外の7個は全部 not_yet（i:0）', Object.keys(ny).length === 7 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
+  ok('② 27個の外の7個は全部 not_yet（i:0）', Object.keys(ny).length === 7 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
@@ -1158,23 +1147,17 @@ function check(out, lib, say) {
   ok('⑫ chip だけ ng → 理由 null（今まで通り）・一度そろったは消えない', isOk('k3k') && tk('k3k_t', 'ng', null, true) && out.k3k_t.c === 'ng', J([R('k3k'), out.k3k_t]));
   ok('⑫ extra_set で合計0の種 c:ko を 2 → ok・卓は ng 理由 c:ko', isOk('k3l') && tk('k3l_t', 'ng', 'c:ko', false) && Number(out.k3l_x) === 2, J([R('k3l'), out.k3l_t, out.k3l_x]));
   ok('⑫ tane_custom の無いルール（ra のまま）で c:ko → bad at kind', isOk('k4a') && isErr('k4b', 'bad', { at: 'kind' }), J([R('k4a'), R('k4b'), out.k4_err]));
-  /* ⑬ 2c-3c やきとり（倉庫だけ） */
-  const hy = (k) => out[k] || {};
-  ok('⑬ 卓の用意（ルール yakitori true・split・pt 10）→ ok・Y1 はそろって yakitori [] 版1', isOk('y5a') && J(hy('y5a_h').y) === '[]' && hy('y5a_h').yv === 1 && hy('y5a_h').state === 'ok' && hy('y5a_h').fc === true && hy('y5a_h').ch === false, J([R('y5a'), out.y5a_h, out.y5_err]));
-  ok('⑬ ① yakitori_set [0,2] → ok・版2・履歴1・そろったまま（N 2 で端数なし）', isOk('y5b') && J(hy('y5b_h').y) === '[0,2]' && hy('y5b_h').yv === 2 && hy('y5b_h').state === 'ok' && has('y5b', { hc: 1, h: 1 }), J([R('y5b'), out.y5b_h, d('y5b')]));
-  ok('⑬ ⑥ 締めた後の印（一度そろった半荘に yakitori_set）→ changed_after_complete_at', hy('y5b_h').ch === true, J(out.y5b_h));
-  ok('⑬ ② 形が違う（鍵なし・席の外・負・字・小数・object・null・字の並び・長すぎ）→ bad at yakitori・何も書かない', YBAD.every(([k]) => isErr(k, 'bad', { at: 'yakitori' }) && has(k, { hc: 0, h: 0 })), J(YBAD.map(([k]) => R(k))));
-  ok('⑬ ② 重なり・降順 → bad at yakitori・版は2のまま', isErr('y5d1', 'bad', { at: 'yakitori' }) && isErr('y5d2', 'bad', { at: 'yakitori' }) && hy('y5d_h').yv === 2 && J(hy('y5d_h').y) === '[0,2]', J([R('y5d1'), R('y5d2'), out.y5d_h]));
-  ok('⑬ ④ 同じ値は古い版（1）でも ok・書かない', isOk('y5e') && has('y5e', { hc: 0, h: 0 }), J([R('y5e'), d('y5e')]));
-  ok('⑬ ⑤ 古い版で違う値 → conflict（what yakitori・cur は今の値と版）・何も書かない', isErr('y5f', 'conflict', { at: { what: 'yakitori', hanchan_id: Y1[1] }, cur: { value: [0, 2], version: 2 } }) && has('y5f', { hc: 0, h: 0 }) && hy('y5f_h').yv === 2, J([R('y5f'), out.y5f_h]));
-  ok('⑬ S1 split の端数（[1]＝N 3・100 % 3 ≠ 0）→ 並びが無いので input order', isOk('y5g') && J(hy('y5g_h').y) === '[1]' && hy('y5g_h').state === 'input' && hy('y5g_h').why === 'order', J([R('y5g'), out.y5g_h]));
-  ok('⑬ S1 並びを入れると ok', isOk('y5h') && hy('y5h_h').state === 'ok', J([R('y5h'), out.y5h_h]));
-  ok('⑬ S3［cell_set・yakitori_set］の組でも飛びの古い受け取りが直る（yakitori_set は fresh にしない）', isOk('y5i') && isOk('y5j') && J(hy('y5j_h').tobi) === J({ 3: 0 })
-    && isOk('y5k') && J(hy('y5k_h').tobi) === '{}' && hy('y5k_h').state === 'input' && hy('y5k_h').why === 'tobi' && J(hy('y5k_h').y) === '[0,2]', J([R('y5k'), out.y5j_h, out.y5k_h]));
-  ok('⑬ ⑦ よその部屋の半荘 → bad at hanchan_id', isErr('y5l', 'bad', { at: 'hanchan_id' }) && has('y5l', { hc: 0, h: 0 }), J(R('y5l')));
-  ok('⑬ 取り消した半荘にも書ける（tobi_set と同じ）', isOk('y5m') && isOk('y5n') && hy('y5n_h').voided === true && J(hy('y5n_h').y) === '[3]', J([R('y5m'), R('y5n'), out.y5n_h]));
-  ok('⑬ ③ やきとりを使わない部屋：印あり → bad at yakitori', isOk('y6a') && isErr('y6b', 'bad', { at: 'yakitori' }), J([R('y6a'), R('y6b'), out.y6_err]));
-  ok('⑬ ③ やきとりを使わない部屋：空 → ok・書かない', isOk('y6c') && has('y6c', { hc: 0, h: 0 }) && hy('y6c_h').yv === 1, J([R('y6c'), out.y6c_h]));
+  /* ⑬ 2c-3c’ やきとり＝extras の種 'yaki'（倉庫だけ） */
+  ok('⑬ 卓の用意（ルール yakitori true・pt 10・tane_custom）→ ok', isOk('y5a'), J([R('y5a'), out.y5_err]));
+  ok("⑬ yaki +3 → ok・卓は ng・理由 'yaki'・行の合計 3", isOk('y5b') && tk('y5b_t', 'ng', 'yaki', false) && Number(out.y5b_x) === 3, J([R('y5b'), out.y5b_t, out.y5b_x]));
+  ok('⑬ yaki −3 で合計0 → ok・理由 null・一度そろった', isOk('y5c') && tk('y5c_t', 'ok', null, true), J([R('y5c'), out.y5c_t]));
+  ok("⑬ extra_set の yaki 2 → ok・卓は ng 理由 'yaki'", isOk('y5d') && tk('y5d_t', 'ng', 'yaki', false), J([R('y5d'), out.y5d_t]));
+  ok("⑬ yaki と c:ko が両方 ng → 理由は 'yaki'（yaki が c: より先）", isOk('y5e') && tk('y5e_t', 'ng', 'yaki', false), J([R('y5e'), out.y5e_t]));
+  ok("⑬ yaki がそろって c:ko だけ ng → 理由 'c:ko'", isOk('y5f') && tk('y5f_t', 'ng', 'c:ko', false), J([R('y5f'), out.y5f_t]));
+  ok('⑬ yaki の +1000 → range at add（chip の ③ r5 と同じ）', isErr('y5g', 'range', { at: 'add' }), J(R('y5g')));
+  ok('⑬ op yakitori_set は無い → bad at op（古い端末が送っても黙って消えない）', isErr('y5h', 'bad', { at: 'op' }), J(R('y5h')));
+  ok('⑬ pt 0 の卓（yakitori true）：yaki の extra_add・extra_set → bad at kind・行0（黙って0円にしない）', isOk('y6a') && isErr('y6b', 'bad', { at: 'kind' }) && isErr('y6c', 'bad', { at: 'kind' }) && Number(out.y6_x) === 0, J([R('y6a'), R('y6b'), R('y6c'), out.y6_x, out.y6_err]));
+  ok('⑬ yakitori false の卓：yaki → bad at kind', isOk('y7a') && isErr('y7b', 'bad', { at: 'kind' }), J([R('y7a'), R('y7b'), out.y7_err]));
   /* ⑦' 2c-2a1 */
   const tx = (k, fc, ch, e) => out[k]?.fc === fc && out[k]?.ch === ch && (e === undefined || out[k]?.e === e);
   ok("⑦' 卓の用意 → ok", isOk('p0') && isOk('g0') && isOk('s0'), J([R('p0'), R('g0'), R('s0'), out.p_err, out.g_err, out.s_err]));
@@ -1502,14 +1485,11 @@ const WAZA = [
   ['正味の門の字順を C にしない（libc の en_US は : を飛ばす＝khaw の既定 ICU では割れない）', 'public.mj_write', 'order by h.row_key::text collate "C" loop', 'order by h.row_key::text collate "en_US.utf8" loop', null, '⑫ 正味の門で chip と c:ko'],
   ['理由を id の順にする', 'mahjong_private.mj_w_tstate', '   order by u.n limit 1;', '   order by u.k limit 1;', null, '⑫ 合計0の種が2つ ng'],
   /* 2c-3c（write3_sekkei.md §4 --waza・v1.1 S1 S3） */
-  ["やきとりを使わない部屋の門を外す", 'mahjong_private.mj_w_op', "if h.rules_snapshot -> 'yakitori' is distinct from 'true'::jsonb and pg_catalog.jsonb_array_length(v_j) > 0 then", "if false then", null, '⑬ ③ やきとりを使わない部屋：印あり'],
-  ["やきとりの昇順を見ない", 'mahjong_private.mj_yaki_ok', " or e::numeric <= v_prev then", " then", null, '⑬ ② 重なり・降順'],
-  ["やきとりの席の上を見ない", 'mahjong_private.mj_yaki_ok', " or e::numeric >= p_players", "", null, '⑬ ② 形が違う'],
-  ["やきとりの版を比べない", 'mahjong_private.mj_w_op', "if v_bv <> h.yakitori_version then", "if false then", null, '⑬ ⑤ 古い版で違う値'],
-  ["やきとりの同じ値で版を見る", 'mahjong_private.mj_w_op', "if h.yakitori = v_j then", "if false then", null, '⑬ ④ 同じ値は古い版'],
-  ["やきとりで mj_w_changed を呼ばない", 'mahjong_private.mj_w_op', "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);\n    perform mahjong_private.mj_w_changed(h.id, p_me);", "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);", null, '⑬ ⑥ 締めた後の印'],
-  ["yakitori_set に 'fresh' を付ける", 'mahjong_private.mj_w_op', "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id);", "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id, 'fresh', true);", null, '⑬ S3'],
-  ["hstate がやきとりの端数を見ない", 'mahjong_private.mj_w_hstate', "mj_needs_order(rs, v_cells, h.yakitori) ?| array['tie', 'yaki']", "mj_needs_order(rs, v_cells, h.yakitori) ? 'tie'", null, '⑬ S1 split の端数'],
+  /* ── 2c-3c’ やきとり＝extras の種 yaki（write6_yaki_sadame.md v1.1）── */
+  ["yaki の pt を見ない（pt 0 も使う）", "mahjong_private.mj_w_yaki_used", ">= 1 else false end", ">= 0 else false end", null, "⑬ pt 0 の卓"],
+  ["yaki を使わない卓でも通す", "mahjong_private.mj_w_kind", "return case when mahjong_private.mj_w_yaki_used(p_rules) then 'sum0' end;", "return 'sum0';", null, "⑬ yakitori false の卓"],
+  ["tstate が yaki を数えない", "mahjong_private.mj_w_tstate", "then v_sum0 := array['yaki'] || v_sum0;", "then v_sum0 := v_sum0;", null, "⑬ yaki +3"],
+  ["理由の順を c: → yaki に", "mahjong_private.mj_w_tstate", "array['yaki'] || v_sum0", "v_sum0 || array['yaki']", null, "⑬ yaki と c:ko が両方"],
   /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1 S1〜S4・K-3・組に1つ） */
   ["room_secret の前と同じパスを見ない", 'mahjong_private.mj_w_op', "if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then", "if false then", null, '⑮ room_secret：前と同じパス'],
   ["room_secret のよくあるパスを見ない", 'mahjong_private.mj_w_op', "if exists (select 1 from mahjong.mj_common_pass x where x.key = v_key) then", "if false then", null, '⑮ room_secret：よくあるパス'],

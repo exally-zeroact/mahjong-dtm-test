@@ -1,7 +1,7 @@
 /* mj-ops.test.mjs — ★操作の表 mahjong.mj_ops の値そのものの誤りを捕まえる★（案 v18_login_sekkei.md K-1・I-5）
  * =============================================================================
  * 試験は表から引く（名前を字で並べない）が、★表そのものが間違っていたら表から引く試験は全部緑★。
- * だから ★K-1 の全35行×全列★（2c-3c で yakitori_set を足した＝write3_sekkei.md §4） をここに字で固定する（K-1 の表から起こした字・schema.sql からは写さない）
+ * だから ★K-1 の全34行×全列★（2c-3c で足した yakitori_set は 2c-3c' で外した＝やきとりは extras の種 yaki・write6_yaki_sadame.md） をここに字で固定する（K-1 の表から起こした字・schema.sql からは写さない）
  * ＝表を変えた日に ★この試験が赤になる★。読むのは supabase/schema.sql の insert into mahjong.mj_ops（倉庫に当てる物と同じ字）。
  * 字の読み替え（K-1 → 表）：
  *   who_plain：本人=self／入=nyu／本人か管=self_or_kan／管=kan／持ち主=owner／持ち主か管=owner_or_kan／K-2 の決まり=revert_rule／—=none
@@ -20,7 +20,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COLS = ['who_plain', 'who_league', 'on_deleted', 'writes_history', 'revert', 'versioned', 're'];
 const o = true, x = false;
 export const FIXED = {
-  count: 35,
+  count: 34,
   /* 種に書いてはいけない v15 の列（倉庫では空だけ＝mj_ops_old_empty） */
   oldEmpty: ['kan', 'nyu', 'needs_secret'],
   rows: {
@@ -41,7 +41,6 @@ export const FIXED = {
     hanchan_unvoid:   ['nyu',          'nyu',             x, o, 'void',          x, 'no'],
     cell_set:         ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     tobi_set:         ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
-    yakitori_set:     ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     kyotaku_set:      ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     hanchan_order:    ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     extra_set:        ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],

@@ -250,7 +250,7 @@ begin
   end loop;
 end $exck$;
 alter table mahjong.extras drop constraint if exists extras_kind_ok;
-alter table mahjong.extras add constraint extras_kind_ok check (kind in ('chip', 'shugi') or kind ~ '^c:[a-z0-9]{1,8}$');
+alter table mahjong.extras add constraint extras_kind_ok check (kind in ('chip', 'shugi', 'yaki') or kind ~ '^c:[a-z0-9]{1,8}$');  -- 2c-3c'：やきとり 'yaki' を足した
 
 -- ── 飛び賞の受け取り（receiver＝席 0〜3・−1＝全員から＝飛んだ人が他の全員に tobi_pt ずつ・分けない＝v15.9） ──
 create table if not exists mahjong.tobi (
@@ -488,7 +488,6 @@ insert into mahjong.mj_ops (name, who_plain, who_league, on_deleted, writes_hist
   ('hanchan_unvoid',   'nyu',          'nyu',             false, true,  'void',          false, 'no'),
   ('cell_set',         'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
   ('tobi_set',         'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
-  ('yakitori_set',     'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
   ('kyotaku_set',      'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
   ('hanchan_order',    'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
   ('extra_set',        'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
@@ -754,18 +753,13 @@ revoke all on function mahjong_private.mj_rules_ok(jsonb) from public, anon, aut
 -- ── 起家からの順が要る半荘か（lib/needs-order.mjs と同じ答え・設計図 v15.9 §3） ──────────────────
 -- 返し＝理由の jsonb 配列：[]＝要らない／["tie"]＝同じ素点が2人以上（箱下なしは0未満を0にして比べる・鍵が無ければ箱下なし）／
 -- ["incomplete"]＝rules が object でない・players が 3/4 でない・cells が長さ players の整数の並びでない（止める側）。
--- 2c-3c：引数に半荘のやきとりの席 p_yaki を足した（lib の needsOrder(rules, cells, yaki) と同じ・null＝[]＝今までの答え）
---   ★既定値は付けない★（紙 v1.2 注意A・2引数で呼ぶ所を足した日に落ちて気づく＝やきとりを黙って見落とさない）
---   理由は決まった順 tie → yaki。yaki＝yakitori true・yakitori_to 'split'・|Y|≥1・|N|≥1・(yakitori_pt×10) % |N| ≠ 0（write3_sekkei.md v1.1 S1）
---   p_yaki が昇順・重なり無し・0〜players−1 の整数の並びでなければ incomplete（止める側）
-drop function if exists mahjong_private.mj_needs_order(jsonb, jsonb);
--- 既定値つきで当てた倉庫は create or replace で既定を外せない（42P13）＝毎回 drop して作り直す（呼ぶのは hstate の plpgsql だけ＝依存は無い）
+-- 2c-3c'：やきとりは extras の種 'yaki'（チップと同じ ±・司さん 11-21）＝順の理由 yaki と3つ目の引数 p_yaki を外した（tie だけ・lib の needsOrder(rules, cells) と同じ）
+--   3引数の版（2c-3c）は drop する（呼ぶのは hstate の plpgsql だけ＝依存は無い）
 drop function if exists mahjong_private.mj_needs_order(jsonb, jsonb, jsonb);
-create or replace function mahjong_private.mj_needs_order(p_rules jsonb, p_cells jsonb, p_yaki jsonb) returns jsonb
+create or replace function mahjong_private.mj_needs_order(p_rules jsonb, p_cells jsonb) returns jsonb
 language plpgsql immutable set search_path = '' as $fn$
 declare
-  n int; hako boolean; e jsonb; x numeric; seen numeric[] := '{}'; v_tie boolean := false; v_y jsonb; v_ny int; v_nn int; v_pt jsonb;
-  v_prev numeric := -1; v_res jsonb := '[]'::jsonb;
+  n int; hako boolean; e jsonb; x numeric; seen numeric[] := '{}'; v_tie boolean := false; v_res jsonb := '[]'::jsonb;
 begin
   if p_rules is null or pg_catalog.jsonb_typeof(p_rules) <> 'object' then return '["incomplete"]'::jsonb; end if;
   e := p_rules -> 'players';
@@ -780,14 +774,6 @@ begin
              where pg_catalog.jsonb_typeof(t.v) <> 'number' or (t.v::numeric) % 1 <> 0) then
     return '["incomplete"]'::jsonb;
   end if;
-  v_y := case when p_yaki is null or p_yaki = 'null'::jsonb then '[]'::jsonb else p_yaki end;
-  if pg_catalog.jsonb_typeof(v_y) <> 'array' then return '["incomplete"]'::jsonb; end if;
-  for e in select t.v from pg_catalog.jsonb_array_elements(v_y) t(v) loop
-    if pg_catalog.jsonb_typeof(e) <> 'number' or (e::numeric) % 1 <> 0 or e::numeric < 0 or e::numeric >= n or e::numeric <= v_prev then
-      return '["incomplete"]'::jsonb;
-    end if;
-    v_prev := e::numeric;
-  end loop;
   for e in select t.v from pg_catalog.jsonb_array_elements(p_cells) t(v) loop
     x := e::numeric;
     if not hako and x < 0 then x := 0; end if;
@@ -795,16 +781,9 @@ begin
     seen := seen || x;
   end loop;
   if v_tie then v_res := v_res || '["tie"]'::jsonb; end if;
-  v_ny := pg_catalog.jsonb_array_length(v_y);
-  v_nn := n - v_ny;
-  v_pt := p_rules -> 'yakitori_pt';
-  if p_rules -> 'yakitori' = 'true'::jsonb and p_rules -> 'yakitori_to' = '"split"'::jsonb and v_ny >= 1 and v_nn >= 1
-     and pg_catalog.jsonb_typeof(v_pt) = 'number' and (v_pt::numeric) % 1 = 0 and ((v_pt::numeric) * 10) % v_nn <> 0 then
-    v_res := v_res || '["yaki"]'::jsonb;
-  end if;
   return v_res;
 end $fn$;
-revoke all on function mahjong_private.mj_needs_order(jsonb, jsonb, jsonb) from public, anon, authenticated;
+revoke all on function mahjong_private.mj_needs_order(jsonb, jsonb) from public, anon, authenticated;
 
 -- ── パスのそろえた字（lib/common-pass.mjs の passKey と同じ手順・版1）─────────────────────
 --   ① NFKC（全角の数字・英字を半角に＝日本語の打ち方で「１２３４」と打っても同じパス）② 英字 A〜Z だけ小文字
@@ -1371,7 +1350,7 @@ revoke all on function public.mj_room_join(text, text, text, text) from public, 
 grant execute on function public.mj_room_join(text, text, text, text) to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
--- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・yakitori_set（2c-3c）・
+-- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・
 --   kyotaku_set・extra_add・settle_snap・hanchan_void・hanchan_unvoid＋2c-2a2 の直す op＝member_rename・member_active・
 --   session_edit・table_edit・hanchan_seats・extra_set）＋2c-2b の人の op 5個（member_link・member_unlink・member_relink・role_set・account_remove）
 --   ＋2c-2c の部屋の op 4個（room_leave・room_delete・room_undelete・room_secret＝組の中で1つだけ）。
@@ -1388,12 +1367,27 @@ alter table mahjong.hanchans add column if not exists tobi_to jsonb not null def
 alter table mahjong.hanchans add column if not exists tobi_version int not null default 1;
 alter table mahjong.hanchans drop constraint if exists hanchans_tobi_version_ok;
 alter table mahjong.hanchans add constraint hanchans_tobi_version_ok check (tobi_version >= 1);
--- やきとり（2c-3c・write3_sekkei.md §4）＝席の番号の並び（昇順・重なり無し・0〜players−1＝細かい形は op yakitori_set で見る）・[]＝なし（未入力の印は持たない＝v1.1 S2・司さん「やきとりない時もある」）
+-- （旧）やきとり（2c-3c・write3_sekkei.md §4）＝席の番号の並び（昇順・重なり無し・0〜players−1＝細かい形は op yakitori_set で見る）・[]＝なし（未入力の印は持たない＝v1.1 S2・司さん「やきとりない時もある」）
 --   ★席で持つ★（tobi_to・cells と同じ＝hanchan_seats で人を直しても印は席に残る）
-alter table mahjong.hanchans add column if not exists yakitori jsonb not null default '[]'::jsonb;
-alter table mahjong.hanchans add column if not exists yakitori_version int not null default 1;
-alter table mahjong.hanchans drop constraint if exists hanchans_yakitori_version_ok;
-alter table mahjong.hanchans add constraint hanchans_yakitori_version_ok check (yakitori_version >= 1);
+-- 2c-3c'（write6_yaki_sadame.md v1.1 止め2）：やきとりは extras の種 'yaki' へ移した＝半荘の列 yakitori・yakitori_version を落とす
+--   ★列が在る時だけ数える★（落とした後の2回目の当てでも落ちない）・印のある半荘が1本でも在れば止める（黙って消さない・計算の止め5）
+--   順＝check 2つ → 列 2つ → 関数 mj_yaki_ok（check が呼ぶので最後・下の drop function）
+do $yk$
+declare v_n bigint;
+begin
+  if exists (select 1 from information_schema.columns c
+             where c.table_schema = 'mahjong' and c.table_name = 'hanchans' and c.column_name = 'yakitori') then
+    lock table mahjong.hanchans in share mode;
+    execute 'select pg_catalog.count(*) from mahjong.hanchans where yakitori <> ''[]''::jsonb' into v_n;
+    if v_n <> 0 then
+      raise exception 'mj_schema: やきとりの印のある半荘が % 本在る（2c-3c'' で列を落とす前に始末を決める）', v_n;
+    end if;
+    alter table mahjong.hanchans drop constraint if exists hanchans_yakitori_ok;
+    alter table mahjong.hanchans drop constraint if exists hanchans_yakitori_version_ok;
+    alter table mahjong.hanchans drop column if exists yakitori;
+    alter table mahjong.hanchans drop column if exists yakitori_version;
+  end if;
+end $yk$;
 -- 席の版（段2c-2a2・hanchan_seats が +1・倉庫の中だけ＝客は base_version を送らない・kyotaku_set の version とは別）
 alter table mahjong.hanchans add column if not exists seats_version int not null default 1;
 alter table mahjong.hanchans drop constraint if exists hanchans_seats_version_ok;
@@ -1434,24 +1428,8 @@ begin
   return true;
 end $fn$;
 revoke all on function mahjong_private.mj_tobi_ok(jsonb, smallint) from public, anon, authenticated;
--- やきとりの席の並び（2c-3c）：配列・各が整数 0〜players−1・昇順・重なり無し（空は通す）
-create or replace function mahjong_private.mj_yaki_ok(p jsonb, p_players smallint) returns boolean
-language plpgsql immutable set search_path = '' as $fn$
-declare e jsonb; v_prev numeric := -1;
-begin
-  if p is null or pg_catalog.jsonb_typeof(p) <> 'array' or p_players is null then return false; end if;
-  for e in select t.v from pg_catalog.jsonb_array_elements(p) t(v) loop
-    if pg_catalog.jsonb_typeof(e) <> 'number' or (e::numeric) % 1 <> 0 or e::numeric < 0 or e::numeric >= p_players or e::numeric <= v_prev then
-      return false;
-    end if;
-    v_prev := e::numeric;
-  end loop;
-  return true;
-end $fn$;
-revoke all on function mahjong_private.mj_yaki_ok(jsonb, smallint) from public, anon, authenticated;
--- 表の check も同じ形（2c-3c taiketsu 注意1：形の悪い並びは mj_needs_order が incomplete を返し hstate が順を求めなくなる＝表で入れさせない）
-alter table mahjong.hanchans drop constraint if exists hanchans_yakitori_ok;
-alter table mahjong.hanchans add constraint hanchans_yakitori_ok check (mahjong_private.mj_yaki_ok(yakitori, players));
+-- やきとりの席の並びの確かめ mj_yaki_ok（2c-3c）は 2c-3c' で外した（列と check は上の $yk$ で落とした後）
+drop function if exists mahjong_private.mj_yaki_ok(jsonb, smallint);
 alter table mahjong.hanchans drop constraint if exists hanchans_tobi_ok;
 alter table mahjong.hanchans add constraint hanchans_tobi_ok check (mahjong_private.mj_tobi_ok(tobi_to, players));
 
@@ -1615,8 +1593,7 @@ begin
   elsif pg_catalog.jsonb_typeof(rs -> 'start_pts') is distinct from 'number'
         or v_sum <> (rs -> 'start_pts')::numeric * h.players - h.lost_kyotaku then
     v_st := 'ng'; v_why := 'sum';
-  -- 2c-3c：やきとりの split の端数（yaki）も上家の順を求める（h.yakitori を渡す）
-  elsif mahjong_private.mj_needs_order(rs, v_cells, h.yakitori) ?| array['tie', 'yaki'] and h.ton_order is null then
+  elsif mahjong_private.mj_needs_order(rs, v_cells) ? 'tie' and h.ton_order is null then
     v_st := 'input'; v_why := 'order';
   elsif exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then
     v_st := 'input'; v_why := 'tobi';
@@ -1629,8 +1606,28 @@ begin
      and (x.state is distinct from v_st or x.state_reason is distinct from v_why or (v_st = 'ok' and x.first_complete_at is null));
 end $fn$;
 revoke all on function mahjong_private.mj_w_hstate(uuid) from public, anon, authenticated;
+-- 2c-3c'（定め v1.1 任意4）：順の理由 yaki は外した＝前の当てで state_reason yaki の半荘を今の決まりで出し直す（0本なら何もしない・2回目の当てでも同じ）
+do $yr$
+declare r record;
+begin
+  for r in select x.id from mahjong.hanchans x where x.state_reason = 'yaki' loop
+    perform mahjong_private.mj_w_hstate(r.id);
+  end loop;
+end $yr$;
+
+-- やきとりを使う卓か（2c-3c'・write6_yaki_sadame.md v1.1 止め1）＝ルールの yakitori が JSON の true かつ yakitori_pt が1以上の整数
+--   ★pt 0 は使わない種★（chip_pt10 が null と同じ＝黙って0円の行を作らない）・lib の yakiUsed と同じ条件（計算 aba53ce）
+create or replace function mahjong_private.mj_w_yaki_used(p_rules jsonb) returns boolean
+language sql immutable set search_path = '' as $fn$
+  select coalesce(p_rules -> 'yakitori' = 'true'::jsonb, false)
+     and coalesce(pg_catalog.jsonb_typeof(p_rules -> 'yakitori_pt') = 'number', false)
+     and case when pg_catalog.jsonb_typeof(p_rules -> 'yakitori_pt') = 'number'
+              then ((p_rules -> 'yakitori_pt')::numeric) % 1 = 0 and ((p_rules -> 'yakitori_pt')::numeric) >= 1 else false end
+$fn$;
+revoke all on function mahjong_private.mj_w_yaki_used(jsonb) from public, anon, authenticated;
 
 -- 種の確かめ（2c-3b・write3_sekkei.md §3）：卓のルール p_rules で種 p_kind を見て 'sum0'（合計0の種）／'out'（外へ払う種）／null（弾く）
+--   'yaki'（2c-3c'）＝mj_w_yaki_used が true の時だけ 'sum0'・でなければ null
 --   'chip'・'shugi'＝*_pt10 が JSON の null なら null（使わない種）・でなければ 'sum0'（鍵が無いのも使う側＝倉庫だけの守り・今まで通り）
 --   'c:<id>'＝tane_custom が配列で id が一致する物が在る時だけ（★pt10 の鍵の在りで判じない★）・sum0 false＝'out'／それ以外＝'sum0'
 --   それ以外（字でない・形が違う・無い id）＝null
@@ -1644,6 +1641,9 @@ begin
     if p_rules -> (v_k || '_pt10') = 'null'::jsonb then return null; end if;
     return 'sum0';
   end if;
+  if v_k = 'yaki' then
+    return case when mahjong_private.mj_w_yaki_used(p_rules) then 'sum0' end;
+  end if;
   if v_k !~ '^c:[a-z0-9]{1,8}$' or pg_catalog.jsonb_typeof(p_rules -> 'tane_custom') is distinct from 'array' then return null; end if;
   select q.e into v_t from pg_catalog.jsonb_array_elements(p_rules -> 'tane_custom') q(e)
    where q.e ->> 'id' = pg_catalog.substr(v_k, 3) limit 1;
@@ -1656,6 +1656,8 @@ revoke all on function mahjong_private.mj_w_kind(jsonb, jsonb) from public, anon
 --   使う種は extras のその種の合計が0なら ok・でなければ ng（行が無い＝0）。extra_state＝使う種が全部 ok なら ok
 --   自由な項目（2c-3b）：合計0の種（sum0 true）はその種の合計が0でなければ ng・extra_reason＝tane_custom の並びの順の最初の 'c:<id>'
 --     （chip・shugi の ng は今まで通り reason null）・外へ払う種（sum0 false）は合計を見ない・卓のルールに無い c:<id> の行は数えない
+--   やきとり（2c-3c'）：使う卓（mj_w_yaki_used）だけ 'yaki' の合計を見る・ng なら extra_reason は 'yaki' が c:<id> より先
+--     使わない卓の 'yaki' の行は数えない（chip の unused と同じ）
 create or replace function mahjong_private.mj_w_tstate(p_tid uuid) returns void
 language plpgsql set search_path = '' as $fn$
 declare rs jsonb; v_c bigint; v_s bigint; v_cs text; v_ss text; v_es text; v_done boolean; v_why text; v_sum0 text[];
@@ -1670,6 +1672,8 @@ begin
   v_sum0 := array(select 'c:' || (q.e ->> 'id') from pg_catalog.jsonb_array_elements(
                      case when pg_catalog.jsonb_typeof(rs -> 'tane_custom') = 'array' then rs -> 'tane_custom' else '[]'::jsonb end) with ordinality q(e, n)
                    where q.e -> 'sum0' is distinct from 'false'::jsonb order by q.n);
+  -- 2c-3c'：使うやきとりは合計0の種の先頭（reason の順＝yaki → c:<id>）
+  if mahjong_private.mj_w_yaki_used(rs) then v_sum0 := array['yaki'] || v_sum0; end if;
   select u.k into v_why from pg_catalog.unnest(v_sum0) with ordinality u(k, n)
    where coalesce((select pg_catalog.sum(e.value) from mahjong.extras e where e.table_id = p_tid and e.kind = u.k), 0) <> 0
    order by u.n limit 1;
@@ -2120,32 +2124,6 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.tobi_version + 1), 'made', 0, 'hist', 1,
       'h', h.id, 'fresh', true);
 
-  elsif v_op = 'yakitori_set' then
-    -- 2c-3c（write3_sekkei.md §4・v1.1 S1〜S3）：tobi_set と同じ版の形・取り消した半荘にも書ける（mj_w_h は voided を見ない＝tobi_set と同じ）
-    --   形＝配列・各が整数 0〜players−1・昇順・重なり無し／ルールの yakitori が true でない部屋は空だけ通す → bad at yakitori
-    --   同じ値＝書かずに ok（版を見ない）・版が違う＝conflict・返しは 'h' だけ（★'fresh' を付けない＝組の終わりの飛びの直しを飛ばさない★）
-    h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
-    v_j := p_o -> 'yakitori';
-    if not coalesce(mahjong_private.mj_yaki_ok(v_j, h.players), false) then perform mahjong_private.mj_w_bad(p_i, 'yakitori'); end if;
-    if h.rules_snapshot -> 'yakitori' is distinct from 'true'::jsonb and pg_catalog.jsonb_array_length(v_j) > 0 then
-      perform mahjong_private.mj_w_bad(p_i, 'yakitori');
-    end if;
-    v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
-    if h.yakitori = v_j then
-      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.yakitori_version), 'made', 0, 'hist', 0, 'h', h.id);
-    end if;
-    if v_bv <> h.yakitori_version then
-      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'conflict', 'i', p_i,
-        'at', pg_catalog.jsonb_build_object('hanchan_id', h.id, 'what', 'yakitori'),
-        'cur', pg_catalog.jsonb_build_object('value', h.yakitori, 'version', h.yakitori_version)));
-    end if;
-    update mahjong.hanchans x set yakitori = v_j, yakitori_version = x.yakitori_version + 1 where x.id = h.id;
-    get diagnostics v_rc = row_count;
-    if v_rc <> 1 then raise exception 'mj_write: yakitori_set の更新が % 行', v_rc; end if;
-    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
-      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);
-    perform mahjong_private.mj_w_changed(h.id, p_me);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id);
 
   elsif v_op = 'hanchan_void' or v_op = 'hanchan_unvoid' then
     h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i);
@@ -2761,7 +2739,6 @@ declare
     "hanchan_order": ["hanchan_id", "ton_order", "base_version"],
     "cell_set": ["hanchan_id", "seat", "value", "base_version"],
     "tobi_set": ["hanchan_id", "tobi_to", "base_version"],
-    "yakitori_set": ["hanchan_id", "yakitori", "base_version"],
     "kyotaku_set": ["hanchan_id", "value", "base_version"],
     "extra_add": ["table_id", "member_id", "kind", "add"],
     "settle_snap": ["session_id", "rev", "content", "used", "missing"],
