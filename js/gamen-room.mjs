@@ -21,7 +21,7 @@ const WRITE_READY = false; // 倉庫の mj_write が入った日に true（送�
 const KEY = (uid, rid) => 'mj-room:' + uid + ':' + rid;
 const OUT = (uid, rid) => 'mj-outbox:' + uid + ':' + rid;
 const NAMES = (uid) => 'mj-names:' + uid;
-// 卓の人（前もって・gamen_0kaime_sadame.md v1.1 段1）＝半荘の前に決めた n 人。この端末だけ（倉庫の席の op は段2）
+// 前の版の卓の人の控え（この端末だけ）。B1（b1_sadame_v2.md v2.1）から卓の席の正本は倉庫の t.seats（op table_seats）＝★もう書かない・開いたら消す★
 const SEATS = (uid, rid) => 'mj-seats:' + uid + ':' + rid;
 
 // 素点の差は + を付けない（司さん 11-21 夜「点を入れるところに＋なんかいるか？」）＝「1,000 多い／少ない」
@@ -81,6 +81,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   }
   const g2 = roomGate(st, room.rules); // room.rules が入った後に部屋の rules も見る
   if (g2.mode !== 'ok') { gateOnly(g2); return; }
+  try { localStorage.removeItem(SEATS(uid, rid)); } catch { /* 消せなくても使わない */ }
   st.rules = room.rules; // 卓を作る時のルール（op では送らない＝倉庫は開催日のルールを使う・§3 table_add）
 
   function commit(ops) {
@@ -131,7 +132,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>';
     h += v.rows.length ? renderTable(v) : renderHead(preSeats());
     h += '<button class="btn btn-main r-add" id="rAdd">' + v.nextNo + '回目の点を入れる</button>';
-    if (v.windows.length) h += renderWindows(v) + renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
+    // B1：席だけの卓（行がまだ無い）も窓と ± を出す＝並べは seatWin（画面だけ）。✓ と［精算を見る］は今まで通り windows が在る時だけ
+    if (v.windows.length || v.seatPeople.length) h += renderWindows(v);
+    if (v.windows.length) h += renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
+    else if (pmErr) h += '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>';
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
@@ -144,11 +148,25 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
       : Array.from({ length: n }, () => '<th><button type="button" class="r-nm r-nm-add" data-seats="1">＋名前</button></th>');
     return '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + cells.join('') + '</tr></thead></table></div>';
   }
+  // 卓の席（倉庫の t.seats＝tableView の seatPeople）。長さ n・全員 active の時だけ使う
   function preSeats() {
-    const x = load(SEATS(uid, rid), null);
-    if (!x || typeof x !== 'object' || x.table_id !== table.table_id || !Array.isArray(x.seats) || x.seats.length !== n || new Set(x.seats).size !== n) return null;
-    if (!x.seats.every((m) => { const y = st.members.find((z) => z.member_id === m); return y && y.active; })) return null;
-    return x.seats.slice();
+    const x = tableView(st, table.table_id).seatPeople.map((p) => p.member_id);
+    if (x.length !== n || new Set(x).size !== n) return null;
+    if (!x.every((m) => { const y = st.members.find((z) => z.member_id === m); return y && y.active; })) return null;
+    return x;
+  }
+  // 窓の並べ（画面だけ・お金の数は v.windows のまま）＝卓の席の順に「windows に在ればその窓・無ければ0の見せ窓」→席に居ない windows の人を今の順で
+  function seatWin(v) {
+    const byId = new Map(v.windows.map((w) => [w.member_id, w]));
+    const zero = (p) => {
+      const w = { member_id: p.member_id, name: p.name, big: 0, pt10: 0, dim: false };
+      for (const { kind } of KINDS) { w[kind] = 0; w[kind + 'Big'] = 0; w[kind + 'Pt10'] = 0; }
+      return w;
+    };
+    const out = v.seatPeople.map((p) => byId.get(p.member_id) || zero(p));
+    const inSeat = new Set(v.seatPeople.map((p) => p.member_id));
+    for (const w of v.windows) if (!inSeat.has(w.member_id)) out.push(w);
+    return out;
   }
   function renderTable(v) {
     if (!v.rows.length) return '';
@@ -184,7 +202,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const ten = v.rate !== null;
     const unit = (pt10) => (ten ? (pt10 * v.rate / 10).toLocaleString('ja-JP') : (pt10 / 10).toFixed(1) + 'pt');
     let h = '<div class="r-mado">';
-    for (const w of v.windows) {
+    for (const w of seatWin(v)) {
       const big = ten ? fmt(w.big) : fmtPt(w.big) + '<small>pt</small>';
       h += '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div>' +
         '<div class="r-w-big ' + sign(w.big) + (w.dim ? ' dim' : '') + '">' + big + (w.dim ? '<span class="r-bang" aria-label="' + (v.custWait || (v.cust || []).some((c) => c.ng) ? 'チップ・祝儀・やきとり・飛び賞・自由な項目のどれかが合わないか数えられません' : 'チップ・祝儀・やきとり・飛び賞のどれかの合計が合いません') + '">!</span>' : '') + '</div>';
@@ -574,7 +592,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
 
   function plusMinus(mid, kind, add) {
     const r = applyOps(st, [{ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }], { roomRules: room.rules });
-    if (!r.ok) { pmErr = r.res && r.res.at === 'member_id' ? 'この人はこの卓の半荘に入っていないので、入れられませんでした' : '入れられませんでした'; render(); return; }
+    if (!r.ok) { pmErr = r.res && r.res.at === 'member_id' ? 'この人はこの卓の席にいないので、入れられませんでした' : '入れられませんでした'; render(); return; }
     pmErr = null;
     st = r.state; save(KEY(uid, rid), st);
     const k = mid + '|' + kind;
@@ -612,8 +630,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     for (const b of q('#pBase').querySelectorAll('[data-pick]')) b.onclick = () => { if (seat(b.dataset.pick)) renderPick(); };
     for (const b of q('#pBase').querySelectorAll('[data-hist]')) b.onclick = () => { const r = addMember(b.dataset.hist); pickDone(r.mid || r.dup); };
     q('#pGo').onclick = () => {
-      const seats = picking.seats.slice(), only = picking.only; picking = null;
-      save(SEATS(uid, rid), { table_id: table.table_id, seats });
+      const seats = picking.seats.slice(), only = picking.only;
+      // 取り消していない半荘が0本の卓だけ、卓の席を倉庫へ（op table_seats・only でも同じ）。半荘が在る時は送らない（entry.seats＝半荘の席）
+      if (!st.hanchans.some((h) => h.table_id === table.table_id && !h.voided)) {
+        const r = commit([{ op: 'table_seats', table_id: table.table_id, seats }]);
+        if (!r.ok) { el.querySelector('#pErr').textContent = '卓の席を残せませんでした。もう一度押してください。'; return; }
+      }
+      picking = null;
       if (only) { toRoom(); return; }
       entry = { seats, no: tableView(st, table.table_id).nextNo, cells: new Array(n).fill(''), lost: '0', step: 'cells', order: [] };
       page = 'edit'; render();
