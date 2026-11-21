@@ -45,7 +45,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は30個（2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 30 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set']), J(OP_NAMES));
+ok('op は31個（B1 で table_seats を足した・2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 31 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'table_seats', 'tobi_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -580,7 +580,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 30);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 31);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -826,12 +826,12 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
 {
   const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
   const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
-  ok('WHO・WHO_LEAGUE・RE は30個とも schema の mj_ops の who_plain・who_league・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].who_league === WHO_LEAGUE[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].who_league !== WHO_LEAGUE[n] || rows[n].re !== RE[n])));
+  ok('WHO・WHO_LEAGUE・RE は31個とも schema の mj_ops の who_plain・who_league・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].who_league === WHO_LEAGUE[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].who_league !== WHO_LEAGUE[n] || rows[n].re !== RE[n])));
   const NY = Object.keys(rows).filter((n) => !OP_NAMES.includes(n)).sort();
   ok('mj_ops に在って写しに無い op は4つ（not_yet＝rules_save・rerev_ok・history_revert・room_export）', J(NY) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']), J(NY));
   const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
   const cKeys = ck ? JSON.parse(ck[1]) : null;
-  ok('KEYS の名と鍵は schema の c_keys と同じ（30個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('KEYS の名と鍵は schema の c_keys と同じ（31個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
   ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
   ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
     needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
@@ -935,7 +935,7 @@ console.log("■ 2c-2d1 リーグの op 3つ・③' は who_league が same か 
     J(KEYS_OF('league_owner_set')) === J(['league_id']));
   ok('リーグの op は PERSON_OPS（direct）・WHO＝kan/none/owner・RE＝no/no/yes', LEAGUE_OPS.every((n) => PERSON_OPS.includes(n)) && J(LEAGUE_OPS.map((n) => WHO[n])) === J(['kan', 'none', 'owner']) && J(LEAGUE_OPS.map((n) => RE[n])) === J(['no', 'no', 'yes']));
   const SKIP = OP_NAMES.filter((n) => !ROLE_AT_GATE(n)).sort();
-  ok("③' を飛ばす op＝8つ（session_add・session_edit・table_add・table_edit・hanchan_seats・member_rename・member_active・league_save）", J(SKIP) === J(['hanchan_seats', 'league_save', 'member_active', 'member_rename', 'session_add', 'session_edit', 'table_add', 'table_edit']), J(SKIP));
+  ok("③' を飛ばす op＝9つ（session_add・session_edit・table_add・table_edit・table_seats・hanchan_seats・member_rename・member_active・league_save）", J(SKIP) === J(['hanchan_seats', 'league_save', 'member_active', 'member_rename', 'session_add', 'session_edit', 'table_add', 'table_edit', 'table_seats']), J(SKIP));
   const LC = { op: 'league_create', league_id: L1, name: 'リーグ', date_from: '2026-11-01', date_to: null, rank_by: 'pt', min_games: 0, players_main: 4, rules: {}, rules_alt: null };
   const cases = [
     ["league_save を nyu（who_plain none）→ ③' で止めない＝ok（L は倉庫だけ）", [{ op: 'league_save', league_id: L1, base_version: 1 }], { role: 'nyu' }, 'ok'],
@@ -962,6 +962,52 @@ console.log("■ 2c-2d1 リーグの op 3つ・③' は who_league が same か 
   const n2 = applyOps(s0, [{ op: 'session_add', session_id: 's9', date: '2026-11-21', rate: 100, league_id: L1 }], { role: 'nyu' });
   ok('リーグの日の session_add は並びに積まない（direct 無し → err direct・何も当てない）', !n2.ok && E(n2) === 'direct#0' && n2.state === s0);
   ok('direct が無い組のリーグの op 3つ → err direct', [LC, { op: 'league_save', league_id: L1, base_version: 1 }, { op: 'league_owner_set', league_id: L1 }].every((op) => { const r = applyOps(s0, [op], { now: NOW, role: 'owner', reauthAt: NS }); return !r.ok && E(r) === 'direct#0' && r.state === s0; }));
+}
+console.log('■ B1 卓の席 table_seats（b1_sadame_v2.md v2.1・写しの分）');
+{
+  const one = (st, op) => applyOps(st, [op]);
+  const err = (r) => (r.ok ? 'ok' : r.res.err + '@' + r.res.at);
+  const T = (st) => st.tables.find((t) => t.table_id === 't1');
+  const st0 = base();
+  ok('B1 table_add は seats: [] を作る', J(T(st0).seats) === '[]');
+  ok('B1 KEYS：table_seats＝table_id・seats／リーグの日は L／③\' は飛ばす', J(KEYS_OF('table_seats')) === J(['table_id', 'seats']) && WHO.table_seats === 'nyu' && WHO_LEAGUE.table_seats === 'L' && RE.table_seats === 'no' && !ROLE_AT_GATE('table_seats'));
+  // seats の無い v2 の写し（B1 の前に作った卓）
+  const old = clone(st0); delete T(old).seats;
+  let thrown = null;
+  try { tableView(old, 't1'); applyOps(old, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 }]); sessionBreakdown(old, 's1'); } catch (e) { thrown = String(e); }
+  ok('B1 seats の無い v2 の写しで tableView・applyOps・sessionBreakdown が投げない', thrown === null, thrown);
+  ok('B1 seats の無い写しの seatPeople は []', J(tableView(old, 't1').seatPeople) === '[]');
+  ok('B1 seats の無い写しへも table_seats が当たる', one(old, { op: 'table_seats', table_id: 't1', seats: SEATS }).ok);
+  ok('B1 seats の無い写しの門は通る（roomGate ok）', roomGate(old, rules).mode === 'ok', J(roomGate(old, rules)));
+  // 当てる・席の順
+  const r1 = one(st0, { op: 'table_seats', table_id: 't1', seats: ['m3', 'm1', 'm4', 'm2'] });
+  ok('B1 table_seats → ok・t.seats が席の順・seats_version は持たない', r1.ok && J(T(r1.state).seats) === J(['m3', 'm1', 'm4', 'm2']) && !('seats_version' in T(r1.state)));
+  ok('B1 seatPeople は席の順の名前', J(tableView(r1.state, 't1').seatPeople.map((x) => x.name)) === J(['佐藤', '山田', '高橋', '鈴木']));
+  const same = one(r1.state, { op: 'table_seats', table_id: 't1', seats: ['m3', 'm1', 'm4', 'm2'] });
+  ok('B1 同じ値は書かずに ok（同じ物）', same.ok && J(T(same.state).seats) === J(T(r1.state).seats));
+  ok('B1 長さ違い・重なり・部屋に無い人・字でない・配列でない は bad@seats', [['m1', 'm2', 'm3'], ['m1', 'm1', 'm3', 'm4'], ['m1', 'm2', 'm3', 'm9'], ['m1', 'm2', 'm3', 4], 'm1'].every((a) => err(one(st0, { op: 'table_seats', table_id: 't1', seats: a })) === 'bad@seats'));
+  ok('B1 無い卓・取り消した卓・取り消した開催日は bad@table_id',
+    err(one(st0, { op: 'table_seats', table_id: 'tx', seats: SEATS })) === 'bad@table_id' &&
+    err(applyOps(st0, [{ op: 'table_edit', table_id: 't1', voided: true }, { op: 'table_seats', table_id: 't1', seats: SEATS }])) === 'bad@table_id' &&
+    err(applyOps(st0, [{ op: 'session_edit', session_id: 's1', voided: true }, { op: 'table_seats', table_id: 't1', seats: SEATS }])) === 'bad@table_id');
+  const in5 = applyOps(r1.state, [{ op: 'member_add', member_id: 'm5', name: '渡辺' }, { op: 'member_active', member_id: 'm5', active: false }, { op: 'member_active', member_id: 'm1', active: false }]);
+  ok('B1 使わない人：新しく入れるのは bad・今の卓の席にいる人は残せる', in5.ok && err(one(in5.state, { op: 'table_seats', table_id: 't1', seats: ['m5', 'm2', 'm3', 'm4'] })) === 'bad@seats' && one(in5.state, { op: 'table_seats', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'] }).ok, err(one(in5.state, { op: 'table_seats', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'] })));
+  // 正味の門：半荘0本の卓で席の人は ± を打てる・席にいない人は今まで通り弾く
+  const g1 = applyOps(st0, [{ op: 'table_seats', table_id: 't1', seats: SEATS }, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 3 }]);
+  ok('B1 席を決めて半荘0の卓に chip +3 → ok', g1.ok, J(g1.res));
+  const mem5 = applyOps(st0, [{ op: 'member_add', member_id: 'm5', name: '渡辺' }]).state;
+  ok('B1 卓の席にいない部屋の人へ +1 は bad@member_id（今のまま）', err(applyOps(mem5, [{ op: 'table_seats', table_id: 't1', seats: SEATS }, { op: 'extra_add', table_id: 't1', member_id: 'm5', kind: 'chip', add: 1 }])) === 'bad@member_id');
+  ok('B1 席を決めないと半荘0の卓に +1 は bad@member_id（今のまま）', err(one(st0, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 })) === 'bad@member_id');
+  // お金の判じは変えない：席だけの卓は席を決める前と同じ
+  const pick = (v) => J({ w: v.windows, p: v.people, r: v.rows, t: v.total10, m: v.missing, s: v.tableForSeisan, e: v.extrasOk });
+  ok('B1 席だけの卓の windows・people・rows・精算の判じは席を決める前と同じ', pick(tableView(r1.state, 't1')) === pick(tableView(st0, 't1')));
+  ok('B1 席だけの卓の sessionBreakdown（rates・order・kei）は席を決める前と同じ', J(sessionBreakdown(r1.state, 's1')) === J(sessionBreakdown(st0, 's1')));
+  const one1 = applyOps(st0, [{ op: 'table_seats', table_id: 't1', seats: ['m3', 'm1', 'm4', 'm2'] }, { op: 'extra_add', table_id: 't1', member_id: 'm4', kind: 'chip', add: 2 }]);
+  const v1 = tableView(one1.state, 't1');
+  ok('B1 ± を1人に押すと windows は押した1人だけ・seatPeople は席の順のまま', one1.ok && J(v1.windows.map((w) => w.member_id)) === J(['m4']) && J(v1.seatPeople.map((x) => x.member_id)) === J(['m3', 'm1', 'm4', 'm2']), J(v1.windows.map((w) => w.member_id)));
+  // 半荘の後も卓の席の人は打てる
+  const h1 = applyOps(st0, [{ op: 'table_seats', table_id: 't1', seats: SEATS }, { op: 'member_add', member_id: 'm5', name: '渡辺' }, { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m5', 'm2', 'm3', 'm4'], cells: [40000, 30000, 20000, 10000] }]);
+  ok('B1 半荘の後も卓の席の人（半荘に居ない m1）は ± を打てる', h1.ok && one(h1.state, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 }).ok);
 }
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
