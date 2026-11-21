@@ -499,6 +499,7 @@ insert into mahjong.mj_ops (name, who_plain, who_league, on_deleted, writes_hist
   ('table_edit',       'nyu',          'L',               false, true,  'prev',          false, 'no'),
   ('hanchan_start',    'nyu',          'nyu',             false, true,  'void',          false, 'no'),
   ('hanchan_seats',    'nyu',          'L',               false, true,  'prev',          false, 'no'),
+  ('table_seats',      'nyu',          'L',               false, true,  'prev',          false, 'no'),
   ('hanchan_void',     'nyu',          'nyu',             false, true,  'unvoid',        false, 'no'),
   ('hanchan_unvoid',   'nyu',          'nyu',             false, true,  'void',          false, 'no'),
   ('cell_set',         'nyu',          'nyu',             false, true,  'prev',          true,  'no'),
@@ -1400,6 +1401,14 @@ end $yk$;
 alter table mahjong.hanchans add column if not exists seats_version int not null default 1;
 alter table mahjong.hanchans drop constraint if exists hanchans_seats_version_ok;
 alter table mahjong.hanchans add constraint hanchans_seats_version_ok check (seats_version >= 1);
+-- 卓の席（B1・b1_sadame_v2.md v2.1）＝0回目から ± を打てる人の門と画面の名前の列だけに効く（お金の判じは変えない）
+--   seats＝member_id（小文字の字）の配列・長さ 0 か players／seats_version は倉庫の中だけ（客は base_version を送らない）
+alter table mahjong.tables add column if not exists seats jsonb not null default '[]'::jsonb;
+alter table mahjong.tables add column if not exists seats_version int not null default 1;
+alter table mahjong.tables drop constraint if exists tables_seats_ok;
+alter table mahjong.tables add constraint tables_seats_ok check (jsonb_typeof(seats) = 'array' and jsonb_array_length(seats) in (0, players));
+alter table mahjong.tables drop constraint if exists tables_seats_version_ok;
+alter table mahjong.tables add constraint tables_seats_version_ok check (seats_version >= 1);
 -- チップ・祝儀は種ごとの state（unused＝ルールで使わない）。extra_state は「使う種が全部 ok なら ok・どれか ng なら ng」
 alter table mahjong.tables add column if not exists chip_state text not null default 'unused';
 alter table mahjong.tables add column if not exists shugi_state text not null default 'unused';
@@ -2541,6 +2550,45 @@ begin
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.seats_version + 1), 'made', 0, 'hist', v_n,
       'h', h.id, 't', h.table_id);
 
+  elsif v_op = 'table_seats' then
+    -- B1（b1_sadame_v2.md v2.1）：卓の席＝後勝ち・base_version 無し。確かめは hanchan_seats と同じ（今の卓の席にいない inactive だけ bad）
+    t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
+    if t.voided or exists (select 1 from mahjong.sessions z where z.id = t.session_id and z.voided) then
+      perform mahjong_private.mj_w_bad(p_i, 'table_id');
+    end if;
+    v_j := p_o -> 'seats';
+    if pg_catalog.jsonb_typeof(v_j) is distinct from 'array' or pg_catalog.jsonb_array_length(v_j) <> t.players then
+      perform mahjong_private.mj_w_bad(p_i, 'seats');
+    end if;
+    for k in 0 .. t.players - 1 loop
+      if pg_catalog.jsonb_typeof(v_j -> k) <> 'string'
+         or ((v_j -> k) #>> '{}') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        perform mahjong_private.mj_w_bad(p_i, 'seats');
+      end if;
+    end loop;
+    if (select pg_catalog.count(distinct (q.v #>> '{}')::uuid) from pg_catalog.jsonb_array_elements(v_j) q(v)) <> t.players then
+      perform mahjong_private.mj_w_bad(p_i, 'seats');
+    end if;
+    if (select pg_catalog.count(*) from mahjong.members x
+         where x.room_id = p_room and x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))) <> t.players then
+      perform mahjong_private.mj_w_bad(p_i, 'seats');
+    end if;
+    if exists (select 1 from mahjong.members x where x.room_id = p_room and not x.active
+                 and x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))
+                 and not exists (select 1 from pg_catalog.jsonb_array_elements_text(t.seats) w where w.value = x.id::text)) then
+      perform mahjong_private.mj_w_bad(p_i, 'seats');
+    end if;
+    v_j2 := (select pg_catalog.jsonb_agg(pg_catalog.lower(q.v #>> '{}') order by q.o) from pg_catalog.jsonb_array_elements(v_j) with ordinality q(v, o));
+    if t.seats = v_j2 then
+      return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', t.seats_version), 'made', 0, 'hist', 0);
+    end if;
+    update mahjong.tables x set seats = v_j2, seats_version = x.seats_version + 1 where x.id = t.id;
+    get diagnostics v_rc = row_count;
+    if v_rc <> 1 then raise exception 'mj_write: table_seats の更新が % 行', v_rc; end if;
+    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'tables', pg_catalog.jsonb_build_object('id', t.id),
+      'seats', t.seats, v_j2, t.seats_version + 1);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', t.seats_version + 1), 'made', 0, 'hist', 1);
+
   elsif v_op = 'extra_set' then
     -- 確かめの順は extra_add と同じ（kind → unused → member → 取り消した卓・開催日 → value の range）→ base_version
     t := mahjong_private.mj_w_t(p_room, mahjong_private.mj_w_uuid(p_o, 'table_id', p_i), p_i, v_op, p_me, p_role);
@@ -2998,6 +3046,7 @@ declare
     "session_edit": ["session_id", "date", "place", "rate", "voided"],
     "table_edit": ["table_id", "label", "rate_mode", "rate", "voided"],
     "hanchan_seats": ["hanchan_id", "seats"],
+    "table_seats": ["table_id", "seats"],
     "extra_set": ["table_id", "member_id", "kind", "value", "base_version"],
     "member_link": ["member_id"],
     "member_unlink": ["member_id"],
@@ -3190,9 +3239,11 @@ begin
                 where h.group_id = v_gid and h.room_id = p_room_id and h.kind = 'row' and h.tbl = 'extras'
                   and h.row_key ->> 'table_id' = v_k
                 group by h.row_key order by h.row_key::text collate "C" loop   -- 字順は C（写しの JS の < と同じ・既定の照合だと ':' を飛ばして c:ko と chip が入れ替わる＝2c-3b N2）
-        -- 正味の門（v1510:195①）：組の後に取り消していない半荘の席にいない人は、0へ近づき0を越えない時だけ（行の無い人への足しは弾く）
+        -- 正味の門（v1510:195①）：組の後に取り消していない半荘の席にも卓の席（B1）にもいない人は、0へ近づき0を越えない時だけ（行の無い人への足しは弾く）
         if not exists (select 1 from mahjong.hanchans x where x.table_id = v_k::uuid and not x.voided
                          and exists (select 1 from pg_catalog.jsonb_each_text(x.seats) s where s.value = e.row_key ->> 'member_id'))
+           and not exists (select 1 from mahjong.tables y, pg_catalog.jsonb_array_elements_text(y.seats) s
+                            where y.id = v_k::uuid and s.value = e.row_key ->> 'member_id')
            and (e.b is null or pg_catalog.abs((e.a)::int) > pg_catalog.abs((e.b)::int) or (e.a)::int * (e.b)::int < 0) then
           perform mahjong_private.mj_w_bad(coalesce((v_ei ->> (e.row_key::text))::int, 0), 'member_id');
         end if;

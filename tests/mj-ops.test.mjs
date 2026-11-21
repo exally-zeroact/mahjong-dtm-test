@@ -20,7 +20,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COLS = ['who_plain', 'who_league', 'on_deleted', 'writes_history', 'revert', 'versioned', 're'];
 const o = true, x = false;
 export const FIXED = {
-  count: 34,
+  count: 35,
   /* 種に書いてはいけない v15 の列（倉庫では空だけ＝mj_ops_old_empty） */
   oldEmpty: ['kan', 'nyu', 'needs_secret'],
   rows: {
@@ -37,6 +37,7 @@ export const FIXED = {
     table_edit:       ['nyu',          'L',               x, o, 'prev',          x, 'no'],
     hanchan_start:    ['nyu',          'nyu',             x, o, 'void',          x, 'no'],
     hanchan_seats:    ['nyu',          'L',               x, o, 'prev',          x, 'no'],
+    table_seats:      ['nyu',          'L',               x, o, 'prev',          x, 'no'],
     hanchan_void:     ['nyu',          'nyu',             x, o, 'unvoid',        x, 'no'],
     hanchan_unvoid:   ['nyu',          'nyu',             x, o, 'void',          x, 'no'],
     cell_set:         ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],

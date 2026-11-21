@@ -112,6 +112,10 @@ const C3N = [U(), U()], C3P = [U(), U()], C3Q = [U(), U()];
 const Y1 = [U(), U()], Y2 = [U(), U()], Y3 = [U(), U()], Y4 = [U(), U()];
 /* ⑯ B2 段1 飛び賞＝extras の種 'tobi'（tobi_chip_v3.md）：B1・B2 使う卓（tobi true・pt 10）・B3 pt 0 の卓・B4 tobi false の卓 */
 const B1 = [U(), U()], B2 = [U(), U()], B3 = [U(), U()], B4 = [U(), U()];
+/* ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）：TS＝半荘0の卓・TSV＝取り消す卓 */
+const TS = U(), TSV = U();
+const TSR = (t) => `select jsonb_build_object('seats', seats, 'sv', seats_version, 'v', version) from mahjong.tables where id = '${t}'`;
+const tse = (t, seats) => O('table_seats', { table_id: t, seats });
 const YR = (o) => `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify(o))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);`;
 const TK = (t) => `select jsonb_build_object('c', chip_state, 's', shugi_state, 'e', extra_state, 'why', extra_reason, 'fc', first_complete_at is not null) from mahjong.tables where id = '${t}'`;
 const XSUM = (t, kind) => `select coalesce(sum(value), 0) from mahjong.extras where table_id = '${t}' and kind = '${kind}'`;
@@ -171,8 +175,8 @@ const setupOps = (room) => {
   return A(...xs);
 };
 const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) => c[6].map(([who, kind, add]) => O('extra_add', { table_id: c[4], member_id: RM[room].m[who], kind, add }))));
-const NAMES30 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
-  'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'extra_set',
+const NAMES31 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
+  'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'table_seats', 'extra_set',
   'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove', 'room_leave', 'room_delete', 'room_undelete', 'room_secret',
   'league_create', 'league_save', 'league_owner_set'];
 /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1）：⑭ の H14 で人と名簿の人をそろえる・送り直しは決めた op_id で */
@@ -334,7 +338,7 @@ const body = `
   ${W('dupn', 2, 'ra', A(ma(U(), ' 甲 ')))}
   ${asWho(2)}
   arr := '{}';
-  for nm in select name from mahjong.mj_ops where name not in (${NAMES30.map((n) => `'${n}'`).join(', ')}) order by name loop
+  for nm in select name from mahjong.mj_ops where name not in (${NAMES31.map((n) => `'${n}'`).join(', ')}) order by name loop
     r := public.mj_write(ra, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', nm)));
     arr := arr || jsonb_build_object(nm, r);
   end loop;
@@ -542,6 +546,29 @@ const body = `
   ${undo('ob7', `${YR({ tobi: false, tobi_pt: 10 })}
     ${W('ob7a', 1, 'ra', A(...mkT(B4)))}
     ${W('ob7b', 2, 'ra', A(xa(B4, 0, 1, 'tobi')))}`)}
+
+  /* ⑰ B1 卓の席 op table_seats（半荘0の卓に席を決めて ± を打つ） */
+  ${RS}
+  ${undo('q', `${W('q0', 1, 'ra', A(O('table_add', { table_id: TS, session_id: SA, label: 'q' }), O('table_add', { table_id: TSV, session_id: SA, label: 'qv' })))}
+    ${ROW('q0_t', TSR(TS))}
+    ${W('q1', 2, 'ra', A(xa([TS], 0, 3)))}
+    ${W('q2', 2, 'ra', A(tse(TS, MA.slice(0, 4))))}
+    ${ROW('q2_t', TSR(TS))}
+    ${ROW('q2_hc', HCOL(TS, 'seats'))}
+    ${W('q3', 2, 'ra', A(tse(TS, MA.slice(0, 4))))}
+    ${W('q4', 2, 'ra', A(xa([TS], 0, 3)))}
+    ${W('q5', 2, 'ra', A(xa([TS], 4, 3)))}
+    ${W('q6', 2, 'ra', A(tse(TS, MA.slice(0, 3))))}
+    ${W('q7', 2, 'ra', A(tse(TS, [...MA.slice(0, 4), MA[0]])))}
+    ${W('q8', 2, 'ra', A(tse(TS, [MA[0], MA[1], MA[2], MA[2]])))}
+    ${W('q9', 2, 'ra', A(tse(TS, [MA[0], MA[1], MA[2], MB[0]])))}
+    ${W('qa', 2, 'ra', A(O('table_edit', { table_id: TSV, voided: true }), tse(TSV, MA.slice(0, 4))))}
+    ${W('qb', 2, 'ra', A(tse(TS, [MA[1], MA[4], MA[2], MA[3]].map((m) => m.toUpperCase()))))}
+    ${ROW('qb_t', TSR(TS))}
+    ${ROW('qb_hc', HCOL(TS, 'seats'))}
+    ${ROW('qb_x', `select count(*) from mahjong.extras where table_id = '${TS}'`)}
+    ${st8('qc', `update mahjong.tables set seats = '{}'::jsonb where id = '${TS}';`)}
+    ${st8('qd', `update mahjong.tables set seats = ${lit(JSON.stringify(MA.slice(0, 3)))}::jsonb where id = '${TS}';`)}`)}
 
   /* ⑦' 2c-2a1 卓の一度そろった・卓の印 */
   ${RS}
@@ -1178,7 +1205,7 @@ function check(out, lib, say) {
   ok('② session_add の league_id → bad', isErr('lg', 'bad', { at: 'league_id' }), J(R('lg')));
   ok('② 同じ名前（trim の後）→ dup・member_id と name を添える', isErr('dupn', 'dup') && R('dupn').member_id === MA[0] && R('dupn').name === '甲', J(R('dupn')));
   const ny = out.ny || {};
-  ok('② 30個の外の4個は全部 not_yet（i:0）', J(Object.keys(ny).sort()) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']) && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
+  ok('② op 31個の外の4個は全部 not_yet（i:0）', J(Object.keys(ny).sort()) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']) && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
@@ -1289,6 +1316,22 @@ function check(out, lib, say) {
   ok("⑯ extra_set の tobi 2 → ok・卓は ng 理由 'tobi'", isOk('ob5g') && tk('ob5g_t', 'ng', 'tobi', true), J([R('ob5g'), out.ob5g_t]));
   ok('⑯ pt 0 の卓（tobi true）：tobi の extra_add・extra_set → bad at kind・行0（黙って0円にしない）', isOk('ob6a') && isErr('ob6b', 'bad', { at: 'kind' }) && isErr('ob6c', 'bad', { at: 'kind' }) && Number(out.ob6_x) === 0, J([R('ob6a'), R('ob6b'), R('ob6c'), out.ob6_x, out.ob6_err]));
   ok('⑯ tobi false の卓：tobi → bad at kind', isOk('ob7a') && isErr('ob7b', 'bad', { at: 'kind' }), J([R('ob7a'), R('ob7b'), out.ob7_err]));
+  /* ⑰ B1 卓の席 op table_seats */
+  const vq = (k, v) => J(R(k).results) === J([{ i: 0, v }]);   // v1 はこの後で決まる（同じ形）
+  ok('⑰ 卓の用意 → ok・seats は []・seats_version 1', isOk('q0') && J(out.q0_t?.seats) === '[]' && out.q0_t?.sv === 1, J([R('q0'), out.q0_t, out.q_err]));
+  ok('⑰ 席を決める前：半荘0の卓に chip +3 → bad at member_id（今のまま）', isErr('q1', 'bad', { at: 'member_id' }), J(R('q1')));
+  ok('⑰ table_seats：席を決める → ok・seats_version 2・version は上げない・history 1', isOk('q2') && vq('q2', 2) && J(out.q2_t?.seats) === J(MA.slice(0, 4)) && out.q2_t?.sv === 2
+    && out.q2_t?.v === out.q0_t?.v && Number(out.q2_hc) === 1 && has('q2', { hc: 1, h: 1 }), J([R('q2'), out.q2_t, out.q2_hc, d('q2')]));
+  ok('⑰ table_seats：同じ → ok・書かない（v2）', isOk('q3') && vq('q3', 2) && has('q3', { hc: 0, h: 0 }), J([R('q3'), d('q3')]));
+  ok('⑰ 卓の席の人に半荘0の卓で chip +3 → ok（正味の門が卓の席を見る）', isOk('q4') && has('q4', { x: 3 }), J([R('q4'), d('q4')]));
+  ok('⑰ 卓の席にいない部屋の人に chip +3 → bad at member_id', isErr('q5', 'bad', { at: 'member_id' }) && has('q5', { x: 0 }), J([R('q5'), d('q5')]));
+  ok('⑰ table_seats：長さ違い（3人・5つ目が重なり）→ bad at seats', isErr('q6', 'bad', { at: 'seats' }) && isErr('q7', 'bad', { at: 'seats' }), J([R('q6'), R('q7')]));
+  ok('⑰ table_seats：重なり → bad at seats', isErr('q8', 'bad', { at: 'seats' }), J(R('q8')));
+  ok('⑰ table_seats：よその部屋の人 → bad at seats', isErr('q9', 'bad', { at: 'seats' }), J(R('q9')));
+  ok('⑰ table_seats：取り消した卓 → bad at table_id（i 1）', isErr('qa', 'bad', { at: 'table_id', i: 1 }), J(R('qa')));
+  ok('⑰ table_seats：替える（大文字で送る）→ 小文字で入る・seats_version 3・history 2・外した人の行は残る', isOk('qb') && vq('qb', 3) && J(out.qb_t?.seats) === J([MA[1], MA[4], MA[2], MA[3]])
+    && out.qb_t?.sv === 3 && Number(out.qb_hc) === 2 && Number(out.qb_x) === 1, J([R('qb'), out.qb_t, out.qb_hc, out.qb_x]));
+  ok('⑰ 列の check：配列でない・長さ違いを表へ直に → 23514', out.qc === '23514' && out.qd === '23514', J([out.qc, out.qd, out.q_err]));
   /* ⑦' 2c-2a1 */
   const tx = (k, fc, ch, e) => out[k]?.fc === fc && out[k]?.ch === ch && (e === undefined || out[k]?.e === e);
   ok("⑦' 卓の用意 → ok", isOk('p0') && isOk('g0') && isOk('s0'), J([R('p0'), R('g0'), R('s0'), out.p_err, out.g_err, out.s_err]));
@@ -1659,6 +1702,10 @@ const WAZA = [
   ["理由の順を c: → tobi に", "mahjong_private.mj_w_tstate", "array['tobi'] || v_sum0", "v_sum0 || array['tobi']", null, "⑯ yaki がそろって tobi・c:ko が ng"],
   ["④を残す（飛んだら why tobi で待つ）", "mahjong_private.mj_w_hstate", "    v_st := 'ok'; v_why := null;", "    v_st := case when exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then 'input' else 'ok' end; v_why := case when v_st = 'input' then 'tobi' end;", null, "⑤ 飛んだ席の鍵が無くても ok"],
   ["段1 で tobi_set を捨てる", "mahjong_private.mj_w_op", "update mahjong.hanchans x set tobi_to = v_j, tobi_version = x.tobi_version + 1 where x.id = h.id;", "update mahjong.hanchans x set tobi_to = x.tobi_to where x.id = h.id;", null, "⑤ tobi_set で入れて ok"],
+  /* ── ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）── */
+  ['正味の門が卓の席を見ない', 'public.mj_write', "\n           and not exists (select 1 from mahjong.tables y, pg_catalog.jsonb_array_elements_text(y.seats) s\n                            where y.id = v_k::uuid and s.value = e.row_key ->> 'member_id')", '', null, '⑰ 卓の席の人に半荘0の卓で chip +3'],
+  ['table_seats が長さを見ない', 'mahjong_private.mj_w_op', " or pg_catalog.jsonb_array_length(v_j) <> t.players then", ' then', null, '⑰ table_seats：長さ違い'],
+  ['table_seats がよその部屋を見ない', 'mahjong_private.mj_w_op', "where x.room_id = p_room and x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))) <> t.players then", "where x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))) <> t.players then", null, '⑰ table_seats：よその部屋の人'],
   /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1 S1〜S4・K-3・組に1つ） */
   ["room_secret の前と同じパスを見ない", 'mahjong_private.mj_w_op', "if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then", "if false then", null, '⑮ room_secret：前と同じパス'],
   ["room_secret の今と同じ URL を見ない", 'mahjong_private.mj_w_op', "if v_s = s.url_token_hash then", "if false then", null, '⑮ room_secret：今と同じ URL'],

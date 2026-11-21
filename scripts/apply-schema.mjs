@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 25, ops: 34, caps: 15, rule_keys: 44, common_pass: 0, public_funcs: 3 };
+export const EXPECT = { tables: 25, ops: 35, caps: 15, rule_keys: 44, common_pass: 0, public_funcs: 3 };
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {
