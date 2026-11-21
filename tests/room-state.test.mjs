@@ -44,7 +44,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は28個（2c-2a2 の直す op 6個・2c-3c の yakitori_set・2c-2b の人の op 5個・2c-2c の部屋の op 4個を足した）', OP_NAMES.length === 28 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set', 'yakitori_set']), J(OP_NAMES));
+ok('op は27個（2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 27 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_delete', 'room_leave', 'room_secret', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -579,7 +579,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 28);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 27);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -657,41 +657,27 @@ console.log('■ canon（終えた時の控えの missing と今の missing を�
   ok('gamen-room の missing の比べは cn だけ（JSON.stringify で比べない）', /cn\(lastMissing\) !== cn\(s\.missing\)/.test(gr) && !/JSON\.stringify\(lastMissing\)|JSON\.stringify\(s\.missing\)/.test(gr));
 }
 
-console.log('■ 2c-3c やきとり（yakitori_set・印は計算に使わない＝③-2 A）');
+console.log('■ 2c-3c’ やきとり（op yakitori_set は外した＝やきとりは extras の種 yaki・write6_yaki_sadame.md v1.1／印は計算に使わない＝③-2 A）');
 {
   const YR = { ...rules, yakitori: true, yakitori_pt: 1, yakitori_to: 'split' };
   const C0 = [40000, 30000, 20000, 10000];
   const mk = (R = YR) => applyOps(base(R), [hs('h1', C0)]).state;
-  const ys = (y, bv, id = 'h1') => ({ op: 'yakitori_set', hanchan_id: id, yakitori: y, base_version: bv });
+  ok('KEYS・OP_NAMES に yakitori_set は無い', KEYS_OF('yakitori_set') === null && !OP_NAMES.includes('yakitori_set'));
   {
     const st = mk();
-    ok('hanchan_start は欄を作らない（遅く作る）', !('yakitori' in H(st, 'h1')) && !('yakitori_version' in H(st, 'h1')));
-    const r = applyOp(st, ys([1], 1));
-    ok('書く＝yakitori と版2', r.ok && J(H(st, 'h1').yakitori) === '[1]' && H(st, 'h1').yakitori_version === 2, J(r));
-    ok('同じ値は古い版でも ok・版を上げない', applyOp(st, ys([1], 1)).ok && H(st, 'h1').yakitori_version === 2);
-    ok('違う値で古い版＝conflict（what yakitori・cur）', J(applyOp(st, ys([0, 1], 1))) === J({ ok: false, err: 'conflict', at: { hanchan_id: 'h1', what: 'yakitori' }, cur: { value: [1], version: 2 } }));
-    ok('[] に戻す（なし）＝版3', applyOp(st, ys([], 2)).ok && J(H(st, 'h1').yakitori) === '[]' && H(st, 'h1').yakitori_version === 3);
+    const r = applyOp(st, { op: 'yakitori_set', hanchan_id: 'h1', yakitori: [1], base_version: 1 });
+    ok('古い端末の yakitori_set → 弾く（黙って当てない・欄を作らない）', !r.ok && r.err === 'bad' && !('yakitori' in H(st, 'h1')), J(r));
   }
-  ok('欄が無い半荘に [] ＝書かずに ok（欄を作らない）', (() => { const st = mk(); return applyOp(st, ys([], 1)).ok && !('yakitori' in H(st, 'h1')); })());
-  ok('欄が無い半荘で base_version 2 ＝conflict cur{[],1}', J(applyOp(mk(), ys([2], 2))) === J({ ok: false, err: 'conflict', at: { hanchan_id: 'h1', what: 'yakitori' }, cur: { value: [], version: 1 } }));
-  ok('形が悪い → bad at yakitori（mj_yaki_ok と同じ）', [[1, 1], [2, 1], [4], [-1], [1.5], ['1'], [true], [null], {}, null, undefined, '[]', 1].every((y) => { const r = applyOp(mk(), ys(y, 1)); return !r.ok && r.err === 'bad' && r.at === 'yakitori'; }));
-  ok('端の形は通る（[0]・[3]・[0,1,2,3]・-0・1.0）', [[0], [3], [0, 1, 2, 3], [-0], [1.0]].every((y) => applyOp(mk(), ys(y, 1)).ok));
-  ok('3人の卓は 3 を弾く', (() => { const R3 = { ...defaultRules(3), yakitori: true, yakitori_pt: 1 }; const st = applyOps(base(R3), [{ op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m1', 'm2', 'm3'], cells: [50000, 30000, 25000] }]).state; const r = applyOp(st, ys([3], 1)); return !r.ok && r.at === 'yakitori' && applyOp(st, ys([2], 1)).ok; })());
-  ok('rules の yakitori が true でない卓は [] だけ（空でない＝bad at yakitori）', (() => { const st = mk(rules); const r = applyOp(st, ys([1], 1)); return !r.ok && r.err === 'bad' && r.at === 'yakitori' && applyOp(st, ys([], 1)).ok; })());
-  ok('半荘が無い → bad at hanchan_id', J(applyOp(mk(), ys([1], 1, 'zz'))) === J({ ok: false, err: 'bad', at: 'hanchan_id' }));
-  ok('取り消した半荘にも書ける（tobi_set と同じ）', (() => { const st = mk(); applyOp(st, { op: 'hanchan_void', hanchan_id: 'h1' }); return applyOp(st, ys([1], 1)).ok && J(H(st, 'h1').yakitori) === '[1]'; })());
-  ok('知らない引数の鍵 → bad', !applyOp(mk(), { ...ys([1], 1), zz: 1 }).ok);
-  // 止め1（taiketsu）：版つきの op 5本は base_version の形を「同じ値か」より先に見る（倉庫 mj_w_int）
+  ok('hanchan_start は欄を作らない', (() => { const h = H(mk(), 'h1'); return !('yakitori' in h) && !('yakitori_version' in h); })());
+  // 止め1（taiketsu）：版つきの op 4本は base_version の形を「同じ値か」より先に見る（倉庫 mj_w_int）
   {
     const st0 = applyOps(base(YR), [hs('h1', C0, { tobi_to: {} })]).state;
-    applyOp(st0, ys([1], 1));
     const st1 = clone(st0); applyOp(st1, { op: 'hanchan_order', hanchan_id: 'h1', ton_order: SEATS, base_version: 1 });
     const same = {
       cell_set: { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 40000 },
       hanchan_order: { op: 'hanchan_order', hanchan_id: 'h1', ton_order: SEATS },
       kyotaku_set: { op: 'kyotaku_set', hanchan_id: 'h1', value: 0 },
       tobi_set: { op: 'tobi_set', hanchan_id: 'h1', tobi_to: {} },
-      yakitori_set: { op: 'yakitori_set', hanchan_id: 'h1', yakitori: [1] },
     };
     const BAD = ['x', '1', 1.5, null, 3e9, true];
     let all = true, why = '';
@@ -704,26 +690,18 @@ console.log('■ 2c-3c やきとり（yakitori_set・印は計算に使わない
       }
       if (!applyOp(clone(stx), { ...o, base_version: 99 }).ok) { all = false; why += name + ':99 '; }
     }
-    ok('版つき5本：同じ値でも base_version が整数でない・無い・±20億の外 → bad at base_version／形が正しければ古い版でも ok', all, why);
+    ok('版つき4本：同じ値でも base_version が整数でない・無い・±20億の外 → bad at base_version／形が正しければ古い版でも ok', all, why);
     ok('違う値で base_version "1" → conflict でなく bad', (() => { const r = applyOp(clone(st0), { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 41000, base_version: '1' }); return !r.ok && r.err === 'bad' && r.at === 'base_version'; })());
   }
-  // S3：yakitori_set は組の終わりの飛びの鍵消しを飛ばさない（whole に入れない）
-  {
-    const st = applyOps(base(YR), [hs('h1', [40000, 30000, 20000, 10000], { tobi_to: { 3: 0 } })]).state;
-    const r = applyOps(st, [{ op: 'cell_set', hanchan_id: 'h1', seat: 3, value: -5000, base_version: 1 }, { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 55000, base_version: 1 }, ys([1], 1)]);
-    ok('S3：［cell_set で飛ぶ・yakitori_set］の組でも古い飛びの鍵は消える', r.ok && J(H(r.state, 'h1').tobi_to) === '{}' && H(r.state, 'h1').tobi_version === 2 && J(H(r.state, 'h1').yakitori) === '[1]', J(r.state && H(r.state, 'h1')));
-  }
-  // ③-2 A（やきとりはチップと同じ ±・司さん 11-21）＝半荘の印 yakitori は計算に使わない（順の理由 yaki・yaki_calc・yakiOnly は外した）
   ok('hanchanPt：印が在っても順は要らない（yaki は渡しても見ない）', hanchanPt(YR, C0, {}).ok && hanchanPt(YR, C0, { yaki: [1] }).ok && hanchanPt(YR, C0, { yaki: [4] }).ok);
   ok('checkEntry：やきとりで needOrder は立たない（同点だけ）', checkEntry(YR, C0).needOrder === false && checkEntry(YR, C0, 0, [1]).needOrder === false);
   {
-    const st = mk(); applyOp(st, ys([1], 1));
+    // 古い倉庫から来た印（読む門は形だけ見る）＝計算に使わない
+    const st = mk(); H(st, 'h1').yakitori = [1]; H(st, 'h1').yakitori_version = 2;
     const v = tableView(st, 't1');
     ok('表：印が在っても順なしで額を出す（why なし・missing 0・yakiOnly の欄なし）', v.rows[0].ok === true && v.rows[0].why === null && !('yakiOnly' in v.rows[0]) && v.missing.length === 0 && sessionSeisan(st, 's1').missing.length === 0, J(v.rows[0]));
-    const b = mk(rules);
-    ok('印の在る半荘と無い半荘で pt が同じ', J(v.rows[0].by) === J(tableView(b, 't1').rows[0].by));
+    ok('印の在る半荘と無い半荘で pt が同じ', J(v.rows[0].by) === J(tableView(mk(rules), 't1').rows[0].by));
   }
-  ok('each・top・pt 0 でも止めない', ['each', 'top'].every((to) => { const st = mk({ ...YR, yakitori_to: to }); applyOp(st, ys([1], 1)); return tableView(st, 't1').rows[0].ok; }) && (() => { const a = mk({ ...YR, yakitori_pt: 0 }); applyOp(a, ys([1], 1)); return tableView(a, 't1').rows[0].ok; })());
   const grY = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'gamen-room.mjs'), 'utf8');
   ok('画面の字：控えの used に yakitori_version', /yakitori_version: h\.yakitori_version \?\? 1/.test(grY));
 }
@@ -732,10 +710,10 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
 {
   const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
   const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
-  ok('WHO・RE は28個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
+  ok('WHO・RE は27個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
   const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
   const cKeys = ck ? JSON.parse(ck[1]) : null;
-  ok('KEYS の名と鍵は schema の c_keys と同じ（28個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('KEYS の名と鍵は schema の c_keys と同じ（27個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
   ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
   ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
     needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
