@@ -9,8 +9,9 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
-  kindOf,
+  kindOf, PERSON_OPS, WHO, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
+import { readOps } from './mj-ops.test.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { defaultRules, rulesOk } from '../lib/rules.mjs';
 
@@ -43,7 +44,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は19個（2c-2a2 の直す op 6個・2c-3c の yakitori_set を足した）', OP_NAMES.length === 19 && J([...OP_NAMES].sort()) === J(['cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_rename', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set', 'yakitori_set']), J(OP_NAMES));
+ok('op は24個（2c-2a2 の直す op 6個・2c-3c の yakitori_set・2c-2b の人の op 5個を足した）', OP_NAMES.length === 24 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'tobi_set', 'yakitori_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -578,7 +579,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 19);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 24);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -734,6 +735,60 @@ console.log('■ 2c-3c やきとり（yakitori_set・順の理由 yaki・お金�
   ok('each と top も印が在れば止める', ['each', 'top'].every((to) => { const st = mk({ ...YR, yakitori_to: to }); applyOp(st, ys([1], 1)); return tableView(st, 't1').rows[0].why === 'yaki_calc'; }));
   const grY = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'gamen-room.mjs'), 'utf8');
   ok('画面の字：whyText と missingText の両方に yaki_calc・yakiOnly の字・控えの used に yakitori_version', (grY.match(/why === 'yaki_calc'/g) || []).length === 2 && /r\.yakiOnly \?/.test(grY) && /yakitori_version: h\.yakitori_version \?\? 1/.test(grY));
+}
+
+console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本＝schema.sql の mj_write ①・③ダッシュ・③ダッシュ2・mj_w_op 末尾・紙 write4_utsushi.md v1.1）');
+{
+  const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
+  const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
+  ok('WHO・RE は24個とも schema の mj_ops の who_plain・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].re !== RE[n])));
+  const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
+  const cKeys = ck ? JSON.parse(ck[1]) : null;
+  ok('KEYS の名と鍵は schema の c_keys と同じ（24個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
+  ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
+    needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
+    needOf('owner_or_kan', 'nyu') === 'kan' && needOf('owner', 'kan') === 'owner' && needOf('owner', 'owner') === null && needOf('revert_rule', 'owner') === 'revert_rule' && needOf(undefined, 'owner') === 'none');
+  const NOW = '2026-11-21T12:00:00Z', NS = Date.parse(NOW) / 1000;
+  ok('reauthOk：600秒ちょうどは通る・601秒は弾く・数でない/無い/now が読めない＝弾く', REAUTH_SEC === 600 && reauthOk(NS - 600, NOW) && !reauthOk(NS - 601, NOW) && !reauthOk(undefined, NOW) && !reauthOk(String(NS), NOW) && !reauthOk(NaN, NOW) && !reauthOk(NS, undefined) && !reauthOk(NS, 'zzz'));
+  const U1 = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const s0 = applyOps(emptyState(), [{ op: 'member_add', member_id: 'p1', name: '一' }, { op: 'member_add', member_id: 'p2', name: '二' }, { op: 'member_active', member_id: 'p2', active: false }]).state;
+  const keep = J(s0);
+  const D = (ops, o = {}) => applyOps(s0, ops, { now: NOW, direct: true, role: 'owner', reauthAt: NS, ...o });
+  const E = (r) => (r.ok ? 'ok' : r.res.err + (r.res.at ? '@' + r.res.at : '') + (r.res.need ? ':' + r.res.need : '') + '#' + r.res.i);
+  ok('direct が無い組の人の op → err direct（写しだけの弾き・並びに積まない）・state はそのまま', (() => { const r = applyOps(s0, [{ op: 'member_add', member_id: 'p3', name: '三' }, { op: 'member_link', member_id: 'p1' }], { now: NOW, role: 'owner', reauthAt: NS }); return !r.ok && E(r) === 'direct#1' && r.state === s0 && J(s0) === keep; })());
+  ok('direct が無くても人の op が無い組は今のまま当たる（今の commit の道）', applyOps(s0, [{ op: 'member_add', member_id: 'p3', name: '三' }], { now: NOW }).ok);
+  const cases = [
+    ['member_link 在る active → ok・状態は変えない', [{ op: 'member_link', member_id: 'p1' }], {}, 'ok'],
+    ['member_link 無い人 → bad@member_id', [{ op: 'member_link', member_id: 'zz' }], {}, 'bad@member_id#0'],
+    ['member_link active false → bad@member_id', [{ op: 'member_link', member_id: 'p2' }], {}, 'bad@member_id#0'],
+    ['member_link 字でない → bad@member_id', [{ op: 'member_link', member_id: 1 }], {}, 'bad@member_id#0'],
+    ['member_unlink active false でも ok（倉庫は active を見ない）', [{ op: 'member_unlink', member_id: 'p2' }], {}, 'ok'],
+    ['member_unlink 無い人 → bad@member_id', [{ op: 'member_unlink', member_id: 'zz' }], {}, 'bad@member_id#0'],
+    ['member_relink 人の後に user_id（uuid の形でない）→ bad@user_id', [{ op: 'member_relink', member_id: 'p1', user_id: 'u1' }], {}, 'bad@user_id#0'],
+    ['member_relink 無い人と悪い user_id → bad@member_id（人が先）', [{ op: 'member_relink', member_id: 'zz', user_id: 'u1' }], {}, 'bad@member_id#0'],
+    ['member_relink 大文字の uuid も通る', [{ op: 'member_relink', member_id: 'p1', user_id: U1.toUpperCase() }], {}, 'ok'],
+    ['role_set role が悪くて user_id も悪い → bad@role（role が先）', [{ op: 'role_set', user_id: 'x', role: 'owner' }], {}, 'bad@role#0'],
+    ['role_set role が字でない → bad@role', [{ op: 'role_set', user_id: U1, role: 1 }], {}, 'bad@role#0'],
+    ['role_set user_id が悪い → bad@user_id', [{ op: 'role_set', user_id: 'x', role: 'nyu' }], {}, 'bad@user_id#0'],
+    ['role_set nyu → ok（入り直しは見ない）', [{ op: 'role_set', user_id: U1, role: 'nyu' }], { reauthAt: undefined }, 'ok'],
+    ['account_remove user_id が悪い → bad@user_id', [{ op: 'account_remove', user_id: '' }], {}, 'bad@user_id#0'],
+    ['account_remove → ok', [{ op: 'account_remove', user_id: U1 }], {}, 'ok'],
+    ["① が ③' より先：入の組で後ろの op の知らない鍵 → bad@zz#1", [{ op: 'account_remove', user_id: U1 }, { op: 'member_link', member_id: 'p1', zz: 1 }], { role: 'nyu' }, 'bad@zz#1'],
+    ['① が中身より先：前の op の中身の誤りより後ろの op の鍵 → bad@zz#1', [{ op: 'member_link', member_id: 'zz' }, { op: 'member_link', member_id: 'p1', zz: 1 }], {}, 'bad@zz#1'],
+    ["③' 入で account_remove → mj_role:kan#0", [{ op: 'account_remove', user_id: U1 }], { role: 'nyu' }, 'mj_role:kan#0'],
+    ["③' 管で role_set → mj_role:owner#1（組の2つ目）", [{ op: 'member_link', member_id: 'p1' }, { op: 'role_set', user_id: U1, role: 'nyu' }], { role: 'kan' }, 'mj_role:owner#1'],
+    ["③' 役が無い＝nyu に倒す → member_relink は mj_role:kan", [{ op: 'member_relink', member_id: 'p1', user_id: U1 }], { role: undefined }, 'mj_role:kan#0'],
+    ["③' 入でも member_link・member_unlink は通る（self・self_or_kan）", [{ op: 'member_link', member_id: 'p1' }, { op: 'member_unlink', member_id: 'p1' }], { role: 'nyu' }, 'ok'],
+    ["③' が ③'' より先：入が role_set kan（reauth 無し）→ mj_role", [{ op: 'role_set', user_id: U1, role: 'kan' }], { role: 'nyu', reauthAt: undefined }, 'mj_role:owner#0'],
+    ["③'' role_set kan で reauthAt 無し → mj_reauth#0", [{ op: 'role_set', user_id: U1, role: 'kan' }], { reauthAt: undefined }, 'mj_reauth#0'],
+    ["③'' 601秒前 → mj_reauth#1", [{ op: 'member_link', member_id: 'p1' }, { op: 'role_set', user_id: U1, role: 'kan' }], { reauthAt: NS - 601 }, 'mj_reauth#1'],
+    ["③'' 600秒前ちょうど → ok", [{ op: 'role_set', user_id: U1, role: 'kan' }], { reauthAt: NS - 600 }, 'ok'],
+    ["③'' が中身より先：role_set kan（reauth 無し）の後ろの op の中身の誤り → mj_reauth", [{ op: 'role_set', user_id: U1, role: 'kan' }, { op: 'member_link', member_id: 'zz' }], { reauthAt: undefined }, 'mj_reauth#0'],
+  ];
+  for (const [name, ops, o, want] of cases) { const r = D(ops, o); ok(name, E(r) === want && (r.ok ? J(r.state) === keep : r.state === s0) && J(s0) === keep, E(r)); }
+  const gl = applyOps(s0, [{ op: 'member_link', member_id: 'p1' }], { now: NOW, direct: true, role: 'kan', reauthAt: NS, roomRules: { zzz: 1 } });
+  ok('roomGate が門より先（newer の部屋は人の op も newer）', !gl.ok && gl.res.err === 'newer');
 }
 
 console.log(`\n${p} passed, ${f} failed`);

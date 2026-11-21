@@ -19,7 +19,8 @@ const CASES = [
   ['busy は retry', { data: { ok: false, err: 'busy' } }, 'retry', 'busy'],
   ['conflict は conflict', { data: { ok: false, err: 'conflict', i: 0 } }, 'conflict'],
   ['gone は reload', { data: { ok: false, err: 'gone' } }, 'reload'],
-  ...['bad', 'range', 'not_yet', 'full', 'too_many', 'internal', 'mj_op_other_user'].map((e) => [e + ' は stop', { data: { ok: false, err: e } }, 'stop', e]),
+  ['mj_reauth は login（err は mj_reauth のまま＝mj_session と分ける）', { data: { ok: false, err: 'mj_reauth', within_min: 10, i: 0 } }, 'login', 'mj_reauth'],
+  ...['bad', 'range', 'not_yet', 'full', 'too_many', 'internal', 'mj_op_other_user', 'mj_role'].map((e) => [e + ' は stop', { data: { ok: false, err: e } }, 'stop', e]),
   ['知らない err は stop', { data: { ok: false, err: 'zzz' } }, 'stop', 'zzz'],
   ['err が無い ok:false は stop', { data: { ok: false } }, 'stop'],
 ];
@@ -33,6 +34,10 @@ function run(step) {
   }
   const d = step({ data: { ok: false, err: 'dup', member_id: 'm9', name: '山田' } });
   ok('dup は stop で member_id を添える', d.kind === 'stop' && d.err === 'dup' && d.member_id === 'm9', JSON.stringify(d));
+  const l = step({ data: { ok: false, err: 'linked', i: 0, member_id: 'm8' } });
+  ok('linked は stop で member_id を添える（2c-2b）', l.kind === 'stop' && l.err === 'linked' && l.member_id === 'm8', JSON.stringify(l));
+  const m = step({ data: { ok: false, err: 'mj_role', i: 0, need: 'kan' } });
+  ok('mj_role は名の在る stop（known）', m.kind === 'stop' && m.known === true, JSON.stringify(m));
   return { p, f };
 }
 
