@@ -20,12 +20,15 @@ const DETAIL = [
 ];
 const toInt = (s) => { const t = String(s).replace(/[,，\s]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^[−ー－]/, '-'); return /^-?\d+$/.test(t) ? Number(t) : NaN; };
 const toPt10 = (s) => { const t = String(s).trim().replace(/[０-９．]/g, (c) => (c === '．' ? '.' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0))); if (!/^\d+(\.\d)?$/.test(t)) return NaN; return Math.round(Number(t) * 10); };
-const n0 = (v) => (typeof v === 'number' ? v.toLocaleString('ja-JP') : '');
+// 整数でない値（空・崩れ＝NaN）は表示に NaN を出さない：行の字は「—」・打つ箱は空（司さん 11-21「NaN」）
+const okInt = (v) => Number.isInteger(v);
+const n0 = (v) => (okInt(v) ? v.toLocaleString('ja-JP') : '—');
+const bv = (v) => (okInt(v) ? String(v) : '');
 const pt1 = (pt10) => (pt10 / 10).toFixed(1);
 
 export function umaText(uma) {
-  if (uma.length === 4 && uma[0] === -uma[3] && uma[1] === -uma[2]) return uma[1] + ' − ' + uma[0];
-  return uma.join('／');
+  if (uma.length === 4 && uma.every(okInt) && uma[0] === -uma[3] && uma[1] === -uma[2]) return uma[1] + ' − ' + uma[0];
+  return uma.map((u) => (okInt(u) ? String(u) : '—')).join('／');
 }
 
 export function mountRules(el, { rules, readOnly }) {
@@ -58,12 +61,12 @@ export function mountRules(el, { rules, readOnly }) {
     if (!readOnly) h += '<div class="li li-sub"><span class="mini">' + RATES.map((v) => '<button type="button" data-rate="' + (v === null ? '' : v) + '" aria-pressed="' + (r.rate === v) + '">' + (v === null ? 'なし' : v) + '</button>').join('') + '</span></div>';
     h += '</div><h3 class="sec">点</h3><div class="list">';
     h += li('持ち点／返し', n0(r.start_pts) + ' ／ ' + n0(r.return_pts), { key: 'ps' });
-    if (open.has('ps')) h += '<div class="li li-sub"><span>持ち点</span>' + box('rStart', String(r.start_pts)) + '</div><div class="li li-sub"><span>返し</span>' + box('rReturn', String(r.return_pts)) + '</div>';
+    if (open.has('ps')) h += '<div class="li li-sub"><span>持ち点</span>' + box('rStart', bv(r.start_pts)) + '</div><div class="li li-sub"><span>返し</span>' + box('rReturn', bv(r.return_pts)) + '</div>';
     h += li('ウマ', esc(umaText(r.uma)), { key: 'uma' });
-    if (open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + r.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-uma="' + i + '" inputmode="numeric" value="' + u + '"></label>').join('') + '</span></div>';
+    if (open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + r.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-uma="' + i + '" inputmode="numeric" value="' + bv(u) + '" autocomplete="off"><button type="button" class="uma-pm" data-umaneg="' + i + '" aria-label="' + (i + 1) + '位のウマの＋−を替える">±</button></label>').join('') + '</span></div>';
     h += li('オカ', 'トップ取り');
-    h += li('飛び賞', r.tobi_pt ? r.tobi_pt + 'pt' : 'なし', { key: 'tobi' });
-    if (open.has('tobi')) h += '<div class="li li-sub"><span>飛び賞</span><span class="li-v">' + box('rTobi', String(r.tobi_pt)) + ' pt</span></div>';
+    h += li('飛び賞', !okInt(r.tobi_pt) ? '—' : r.tobi_pt ? r.tobi_pt + 'pt' : 'なし', { key: 'tobi' });
+    if (open.has('tobi')) h += '<div class="li li-sub"><span>飛び賞</span><span class="li-v">' + box('rTobi', bv(r.tobi_pt)) + ' pt</span></div>';
     h += '</div><h3 class="sec">チップ・祝儀</h3><div class="list">';
     for (const [k, label, id] of [['chip_pt10', 'チップ', 'rChip'], ['shugi_pt10', '祝儀', 'rShugi']]) {
       const on = r[k] !== null;
@@ -110,7 +113,8 @@ export function mountRules(el, { rules, readOnly }) {
     el.onclick = (e) => {
       const b = e.target.closest('button'); if (!b) return;
       readBoxes();
-      if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
+      if (b.dataset.umaneg !== undefined) { const i = Number(b.dataset.umaneg); if (okInt(r.uma[i])) r.uma[i] = -r.uma[i]; }
+      else if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
       else if (b.dataset.players !== undefined) {
         const n = JSON.parse(b.dataset.players);
         if (n !== r.players) { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); }

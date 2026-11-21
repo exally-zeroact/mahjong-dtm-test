@@ -166,6 +166,9 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .uma-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; padding: 6px 0; }
 .uma-row label { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--c-ji-usui); }
 .uma-row .box { width: 100%; }
+/* ウマの［±］（iPhone の数字鍵盤に − が無い・司さん 11-21）＝14px の字→高さ36・押す所は ::after で44 */
+.uma-pm { position: relative; width: 100%; height: 36px; padding: 0; font: inherit; font-size: 14px; font-weight: 800; border: 0; border-radius: 8px; background: var(--c-seg); color: var(--c-kon); }
+.uma-pm::after { content: ""; position: absolute; inset: -4px 0; }
 /* ホーム（home_v154 ①） */
 .h-brand { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 12px) 20px 0; }
 .h-n1 { font-size: 30px; font-weight: 800; letter-spacing: .02em; }
