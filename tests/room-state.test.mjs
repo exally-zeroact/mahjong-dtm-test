@@ -657,7 +657,7 @@ console.log('■ canon（終えた時の控えの missing と今の missing を�
   ok('gamen-room の missing の比べは cn だけ（JSON.stringify で比べない）', /cn\(lastMissing\) !== cn\(s\.missing\)/.test(gr) && !/JSON\.stringify\(lastMissing\)|JSON\.stringify\(s\.missing\)/.test(gr));
 }
 
-console.log('■ 2c-3c やきとり（yakitori_set・順の理由 yaki・お金は ③-2 まで止める）');
+console.log('■ 2c-3c やきとり（yakitori_set・印は計算に使わない＝③-2 A）');
 {
   const YR = { ...rules, yakitori: true, yakitori_pt: 1, yakitori_to: 'split' };
   const C0 = [40000, 30000, 20000, 10000];
@@ -713,28 +713,19 @@ console.log('■ 2c-3c やきとり（yakitori_set・順の理由 yaki・お金�
     const r = applyOps(st, [{ op: 'cell_set', hanchan_id: 'h1', seat: 3, value: -5000, base_version: 1 }, { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 55000, base_version: 1 }, ys([1], 1)]);
     ok('S3：［cell_set で飛ぶ・yakitori_set］の組でも古い飛びの鍵は消える', r.ok && J(H(r.state, 'h1').tobi_to) === '{}' && H(r.state, 'h1').tobi_version === 2 && J(H(r.state, 'h1').yakitori) === '[1]', J(r.state && H(r.state, 'h1')));
   }
-  // 順の理由 yaki（split の端数）＝hanchanPt と checkEntry と表
-  ok('hanchanPt：split の端数（pt1・N3）は順が要る＝order が無ければ err order', hanchanPt(YR, C0, { yaki: [1] }).err === 'order' && hanchanPt(YR, C0, { yaki: [1], order: [0, 1, 2, 3] }).ok);
-  ok('hanchanPt：割り切れる（pt3）・yaki なし・each は順が要らない', hanchanPt({ ...YR, yakitori_pt: 3 }, C0, { yaki: [1] }).ok && hanchanPt(YR, C0, { yaki: [] }).ok && hanchanPt(YR, C0, {}).ok && hanchanPt({ ...YR, yakitori_to: 'each' }, C0, { yaki: [1] }).ok);
-  ok('hanchanPt：yaki の形が悪い → err yaki', [[1, 1], [4], '1', {}].every((y) => hanchanPt(YR, C0, { yaki: y }).err === 'yaki'));
-  ok('checkEntry：yaki の端数で needOrder・形が悪いと yaki', checkEntry(YR, C0, 0, [1]).needOrder === true && checkEntry(YR, C0, 0, []).needOrder === false && checkEntry(YR, C0).needOrder === false && J(checkEntry(YR, C0, 0, [4])) === J({ ok: false, why: 'yaki' }));
+  // ③-2 A（やきとりはチップと同じ ±・司さん 11-21）＝半荘の印 yakitori は計算に使わない（順の理由 yaki・yaki_calc・yakiOnly は外した）
+  ok('hanchanPt：印が在っても順は要らない（yaki は渡しても見ない）', hanchanPt(YR, C0, {}).ok && hanchanPt(YR, C0, { yaki: [1] }).ok && hanchanPt(YR, C0, { yaki: [4] }).ok);
+  ok('checkEntry：やきとりで needOrder は立たない（同点だけ）', checkEntry(YR, C0).needOrder === false && checkEntry(YR, C0, 0, [1]).needOrder === false);
   {
     const st = mk(); applyOp(st, ys([1], 1));
     const v = tableView(st, 't1');
-    ok('表：順が要る訳がやきとりだけ＝why order・yakiOnly', v.rows[0].why === 'order' && v.rows[0].yakiOnly === true && J(v.missing) === J([{ no: 1, why: 'order' }]), J(v.rows[0]));
-    applyOp(st, { op: 'hanchan_order', hanchan_id: 'h1', ton_order: SEATS, base_version: 1 });
-    const v2 = tableView(st, 't1');
-    ok('★順を入れてもやきとりのお金（③-2）は無い＝yaki_calc で止める（額を出さない）★', v2.rows[0].ok === false && v2.rows[0].why === 'yaki_calc' && J(v2.missing) === J([{ no: 1, why: 'yaki_calc' }]) && sessionSeisan(st, 's1').missing.length === 1, J(v2.rows[0]) + J(v2.missing));
-    ok('同点の順は yakiOnly false', (() => { const s2 = applyOps(base(YR), [hs('h2', [35400, 35400, 15100, 14100])]).state; applyOp(s2, ys([1], 1, 'h2')); const r0 = tableView(s2, 't1').rows[0]; return r0.why === 'order' && r0.yakiOnly === false; })());
+    ok('表：印が在っても順なしで額を出す（why なし・missing 0・yakiOnly の欄なし）', v.rows[0].ok === true && v.rows[0].why === null && !('yakiOnly' in v.rows[0]) && v.missing.length === 0 && sessionSeisan(st, 's1').missing.length === 0, J(v.rows[0]));
+    const b = mk(rules);
+    ok('印の在る半荘と無い半荘で pt が同じ', J(v.rows[0].by) === J(tableView(b, 't1').rows[0].by));
   }
-  ok('pt 0・yakitori false・印なしは止めない（額は0か印が無い）', (() => {
-    const a = mk({ ...YR, yakitori_pt: 0 }); applyOp(a, ys([1], 1));
-    const b = mk(); applyOp(b, ys([], 1));
-    return tableView(a, 't1').rows[0].ok && tableView(b, 't1').rows[0].ok && tableView(mk(rules), 't1').rows[0].ok;
-  })());
-  ok('each と top も印が在れば止める', ['each', 'top'].every((to) => { const st = mk({ ...YR, yakitori_to: to }); applyOp(st, ys([1], 1)); return tableView(st, 't1').rows[0].why === 'yaki_calc'; }));
+  ok('each・top・pt 0 でも止めない', ['each', 'top'].every((to) => { const st = mk({ ...YR, yakitori_to: to }); applyOp(st, ys([1], 1)); return tableView(st, 't1').rows[0].ok; }) && (() => { const a = mk({ ...YR, yakitori_pt: 0 }); applyOp(a, ys([1], 1)); return tableView(a, 't1').rows[0].ok; })());
   const grY = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'gamen-room.mjs'), 'utf8');
-  ok('画面の字：whyText と missingText の両方に yaki_calc・yakiOnly の字・控えの used に yakitori_version', (grY.match(/why === 'yaki_calc'/g) || []).length === 2 && /r\.yakiOnly \?/.test(grY) && /yakitori_version: h\.yakitori_version \?\? 1/.test(grY));
+  ok('画面の字：控えの used に yakitori_version', /yakitori_version: h\.yakitori_version \?\? 1/.test(grY));
 }
 
 console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本＝schema.sql の mj_write ①・③ダッシュ・③ダッシュ2・mj_w_op 末尾・紙 write4_utsushi.md v1.1）');

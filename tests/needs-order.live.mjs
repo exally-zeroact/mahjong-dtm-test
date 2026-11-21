@@ -22,12 +22,12 @@ let token = raw; try { token = JSON.parse(raw).token; } catch (_) { /* 素の字
 
 const D = '$';
 const q = (t) => D + t + D;
-const pairs = '[' + CASES.map((k) => `[${k.r},${k.c}${k.y === undefined ? '' : ',' + k.y}]`).join(',') + ']';
+const pairs = '[' + CASES.map((k) => `[${k.r},${k.c}]`).join(',') + ']';
 const sql = `do ${q('no')} declare res jsonb := '[]'; c jsonb;
 begin
   for c in select value from jsonb_array_elements(${q('in')}${pairs}${q('in')}::jsonb) loop
     begin
-      res := res || jsonb_build_array(mahjong_private.mj_needs_order(c->0, c->1, c->2));
+      res := res || jsonb_build_array(mahjong_private.mj_needs_order(c->0, c->1));
     exception when others then
       res := res || jsonb_build_array(jsonb_build_object('err', sqlerrm));
     end;
@@ -55,10 +55,10 @@ const ok = (name, cond, why = '') => { if (cond) p++; else { f++; console.log(' 
 if (out) {
   ok('答えの数が入力の数と同じ', out.length === CASES.length, `${out.length}／${CASES.length}`);
   CASES.forEach((k, i) => {
-    const js = JSON.stringify(k.y === undefined ? needsOrder(JSON.parse(k.r), JSON.parse(k.c)) : needsOrder(JSON.parse(k.r), JSON.parse(k.c), JSON.parse(k.y)));
+    const js = JSON.stringify(needsOrder(JSON.parse(k.r), JSON.parse(k.c)));
     const db = JSON.stringify(out[i]);
     const want = JSON.stringify(k.want);
-    ok(`${k.r} ${k.c} ${k.y ?? ''}`, js === db && db === want, `lib ${js}／倉庫 ${db}／答え ${want}`);
+    ok(`${k.r} ${k.c}`, js === db && db === want, `lib ${js}／倉庫 ${db}／答え ${want}`);
   });
   console.log(`  入力 ${CASES.length} 件を倉庫と lib と答えで比べた`);
 }
