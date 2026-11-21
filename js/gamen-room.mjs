@@ -322,6 +322,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     const want = R.start_pts * n - lost;
     const filled = cells.every((x) => !Number.isNaN(x));
     const got = cells.reduce((a, x) => a + (Number.isNaN(x) ? 0 : x), 0);
+    // 残り（司さん 11-21 17:26「1人入れた時点で残りの点数も出して」）＝want − 入れた箱の和。数の箱が n−1 で空が1つなら、その箱に残りを薄く勧める
+    const nums = cells.filter((x) => !Number.isNaN(x)).length;
+    const empty = e.cells.map((v, i) => (String(v).trim() === '' ? i : -1)).filter((i) => i >= 0);
+    const rest = want - got;
+    const sug = nums === n - 1 && empty.length === 1 && rest % 100 === 0 && Math.abs(rest) <= CELL_MAX ? empty[0] : -1;
     let pt = null;
     if (filled) {
       const c = checkEntry(R, cells, lost);
@@ -330,19 +335,22 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
         if (g.ok) pt = g.pt10;
       }
     }
-    return { want, got, filled, pt };
+    return { want, got, filled, pt, nums, rest, sug };
   }
   function sumLine(c) {
-    if (c.filled && c.got === c.want) return '<p class="r-check ok" id="eSum">✓ 素点の合計 ' + c.want.toLocaleString('ja-JP') + '</p>';
-    return '<p class="r-check ' + (c.filled ? 'bad' : 'mada') + '" id="eSum">素点の合計 ' + c.got.toLocaleString('ja-JP') + '（' + c.want.toLocaleString('ja-JP') + ' になるはず）</p>';
+    const W = c.want.toLocaleString('ja-JP');
+    if (c.filled && c.got === c.want) return '<p class="r-check ok" id="eSum">✓ 素点の合計 ' + W + '</p>';
+    if (c.filled) return '<p class="r-check bad" id="eSum">素点の合計 ' + c.got.toLocaleString('ja-JP') + '・' + W + ' より ' + Math.abs(c.got - c.want).toLocaleString('ja-JP') + (c.got > c.want ? ' 多い' : ' 少ない') + '</p>';
+    return '<p class="r-check mada" id="eSum">素点の合計 ' + W + (c.nums ? '・残り ' + (c.rest < 0 ? '−' : '') + Math.abs(c.rest).toLocaleString('ja-JP') : '') + '</p>';
   }
+  const sugText = (c, i) => (c.sug === i ? (c.rest < 0 ? '-' : '') + Math.abs(c.rest).toLocaleString('ja-JP') : '');
   function renderEdit() {
     const e = entry;
     bar({ back: '対局', onBack: toRoom, title: e.no + '回目の点を' + (e.hanchan_id ? '直す' : '入れる') });
     let h = '';
     if (e.step === 'cells') {
       const c = liveCalc();
-      h += '<div class="r-ent">' + e.seats.map((m, i) => '<label class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><input class="r-er-v" inputmode="numeric" data-c="' + i + '" value="' + esc(e.cells[i]) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></label>').join('') + '</div>';
+      h += '<div class="r-ent">' + e.seats.map((m, i) => '<label class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><input class="r-er-v" inputmode="numeric" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></label>').join('') + '</div>';
       if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" inputmode="numeric" value="' + esc(e.lost) + '" autocomplete="off"></label>';
       h += sumLine(c) + '<p class="r-hint">pt と順位は点から自動で出す。</p>';
     } else if (e.step === 'order') {
@@ -368,6 +376,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
   function liveUpdate() {
     readCells();
     const c = liveCalc();
+    for (const inp of el.querySelectorAll('[data-c]')) inp.placeholder = sugText(c, Number(inp.dataset.c));
     for (const s of el.querySelectorAll('[data-p]')) { const i = Number(s.dataset.p); s.textContent = c.pt ? fmtPt(c.pt[i]) : ''; s.className = 'r-er-p ' + (c.pt ? sign(c.pt[i]) : ''); }
     el.querySelector('#eSum').outerHTML = sumLine(c);
   }
@@ -633,6 +642,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first }) {
     q('#eOk').onclick = entryNext;
     for (const inp of el.querySelectorAll('[data-c]')) {
       inp.addEventListener('input', liveUpdate);
+      // 勧めた残りは押せば値になる（全部を選ぶ＝打てば上書き）
+      inp.addEventListener('focus', () => { if (inp.value.trim() !== '' || !inp.placeholder) return; inp.value = inp.placeholder; liveUpdate(); inp.select(); });
       // 絵 nyuryoku4 ③＝枠の素点は「20,100」と区切って見せる（打っている間はそのまま・離れたら区切る）
       inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = v.toLocaleString('ja-JP'); readCells(); } });
     }
