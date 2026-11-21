@@ -27,10 +27,11 @@ console.log('■ 1卓・レートあり（1pt＝100点）');
 
 console.log('■ チップ・祝儀・飛び賞');
 {
-  // A=50+10(飛び)+2枚×5pt=70・B=10+1×5=15−祝儀1×3=12・C=−20−3×5=−35+祝儀1×3=−32・D=−40−10=−50
-  const t = { rate: 50, chip_pt10: 50, shugi_pt10: 30, hanchans: [
-    { members: ['A', 'B', 'C', 'D'], pt10: [500, 100, -200, -400], tobi10: [100, 0, 0, -100] },
-  ], chips: { A: 2, B: 1, C: -3, D: 0 }, shugis: { B: -1, C: 1 } };
+  // A=50+10(飛び 1枚×10pt)+2枚×5pt=70・B=10+1×5=15−祝儀1×3=12・C=−20−3×5=−35+祝儀1×3=−32・D=−40−10(飛び −1枚)=−50
+  // B2：飛び賞は卓の tobis（チップと同じ ±・合計0）。半荘は飛び賞を持たない
+  const t = { rate: 50, chip_pt10: 50, shugi_pt10: 30, tobi_pt10: 100, hanchans: [
+    { members: ['A', 'B', 'C', 'D'], pt10: [500, 100, -200, -400] },
+  ], chips: { A: 2, B: 1, C: -3, D: 0 }, shugis: { B: -1, C: 1 }, tobis: { A: 1, D: -1 } };
   const g = seisan([t]);
   ok('チップ・祝儀・飛び賞を pt10 に足す', g.ok && J(sortKeys(g.pt10)) === J({ A: 700, B: 120, C: -320, D: -500 }), J(g));
   ok('点（1pt＝50点）', g.ok && J(sortKeys(g.ten)) === J({ A: 3500, B: 600, C: -1600, D: -2500 }), J(g));
@@ -51,7 +52,15 @@ console.log('■ 止める形');
 const err = (name, tables, want) => { const g = seisan(tables); ok(`${name} → ${want}`, !g.ok && g.err === want, J(g)); };
 const H = (pt10, tobi10) => ({ members: ['A', 'B', 'C', 'D'], pt10, ...(tobi10 ? { tobi10 } : {}) });
 err('半荘の pt の合計が0でない', [{ rate: 100, hanchans: [H([500, 100, -200, -300])] }], 'hanchan_sum');
-err('飛び賞の合計が0でない', [{ rate: 100, hanchans: [H([500, 100, -200, -400], [100, 0, 0, 0])] }], 'tobi_sum');
+err('B2：半荘に tobi10 の鍵が在る（もう持たない）', [{ rate: 100, hanchans: [H([500, 100, -200, -400], [100, 0, 0, -100])] }], 'hanchan');
+err('B2：飛び賞の枚の合計が0でない（卓）', [{ rate: 100, tobi_pt10: 100, hanchans: [H([500, 100, -200, -400])], tobis: { A: 1, D: -2 } }], 'tobi_tsum');
+err('B2：飛び賞を使わない卓に枚', [{ rate: 100, tobi_pt10: null, hanchans: [H([500, 100, -200, -400])], tobis: { A: 1, D: -1 } }], 'tobi_off');
+err('B2：tobi_pt10 が小数', [{ rate: 100, tobi_pt10: 10.5, hanchans: [H([500, 100, -200, -400])] }], 'table');
+err('B2：tobis の枚が小数', [{ rate: 100, tobi_pt10: 100, hanchans: [H([500, 100, -200, -400])], tobis: { A: 0.5, D: -0.5 } }], 'table');
+ok('B2：前の半荘の tobi_sum はもう出ない（どの壊れた卓でも）', ['tobi_sum'].every((e) => ![
+  [{ rate: 100, hanchans: [H([500, 100, -200, -400], [100, 0, 0, 0])] }],
+  [{ rate: 100, tobi_pt10: 100, hanchans: [H([500, 100, -200, -400])], tobis: { A: 1 } }],
+].some((ts) => seisan(ts).err === e)));
 err('チップの合計が0でない（トップで吸わない）', [{ rate: 100, chip_pt10: 50, hanchans: [H([500, 100, -200, -400])], chips: { A: 2, B: -1 } }], 'chip_sum');
 err('祝儀の合計が0でない', [{ rate: 100, shugi_pt10: 30, hanchans: [H([500, 100, -200, -400])], shugis: { A: 1 } }], 'shugi_sum');
 err('チップを使わない卓に枚', [{ rate: 100, chip_pt10: null, hanchans: [H([500, 100, -200, -400])], chips: { A: 1, B: -1 } }], 'chip_off');
