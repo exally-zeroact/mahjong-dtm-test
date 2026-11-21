@@ -41,6 +41,12 @@ jobs:
         run: node tests/supa-config-matches-repo.test.mjs
       - name: 向き先の見張りの自己確認
         run: node tests/supa-config-matches-repo.test.mjs --self-test
+      - name: 本番へ運ぶ道具（scripts/hakobu.mjs）の自己確認（網を呼ばない・使い捨ての repo だけ・止まる組と11の壊しが全部赤になるか）
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          node scripts/hakobu.mjs --self-test | tee hakobu-self.out
+          sh scripts/ci-yuka.sh hakobu-self.out 52
 
       # ── 倉庫の設計図（部屋 mahjong）＝当てる前の門番と操作の表 ──────
       #   倉庫に本当に当てて CHECK が弾くかは tests/db-checks.live.mjs（鍵が要る＝手元・tests-no-ci.json）
