@@ -35,6 +35,9 @@ ok('鍵の名の組と並び（ASCII 順）が字の通り', RULE_KEYS.map((k) =
 ok('null を通す鍵は rate・chip_pt10・shugi_pt10 だけ', RULE_KEYS.filter((k) => k.nullable).map((k) => k.key).join(',') === 'chip_pt10,rate,shugi_pt10');
 ok('無いと弾く鍵は players だけ', RULE_KEYS.filter((k) => k.need).map((k) => k.key).join(',') === 'players');
 ok('既定（4人・3人）がどれも自分の確かめを通る', rulesOk(defaultRules(4)).ok && rulesOk(defaultRules(3)).ok);
+// S2（11-21 司さん）：箱下の既定は「あり」（4人・3人）。保存済みの false は替わらない（鍵を持っていればその値）
+ok('箱下の既定はあり（4人・3人）', defaultRules(4).hakoshita === true && defaultRules(3).hakoshita === true);
+ok('保存済みの箱下なしはなしのまま', rulesOk({ players: 4, hakoshita: false }).rules.hakoshita === false && rulesOk({ players: 3, hakoshita: false }).rules.hakoshita === false);
 
 /* ③ 手で決めた答え */
 const CASES = [

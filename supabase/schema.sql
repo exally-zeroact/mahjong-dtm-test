@@ -584,6 +584,7 @@ revoke all on function mahjong_private.mj_name_key(text) from public, anon, auth
 
 -- ── ルールの鍵の表（★正本★・種は下の rk 札で囲んだ jsonb の字1本＝lib/rules.mjs の RULE_KEYS と同じ・tests/rules-keys.test.mjs が CI で比べる）──
 -- ★鍵を後から足す日は、新しい鍵の既定を「足す前の振る舞い」と同じ値に限る（古い rules_snapshot の pt を変えない）★
+-- ★在る鍵の既定を替える日（S2 hakoshita false→true）は、新しく作るルールにだけ効く（保存した rules と写しは鍵を全部持つ＝mj_rules_ok が埋める）★
 create table if not exists mahjong.mj_rule_keys (
   key      text primary key check (key ~ '^[a-z][a-z0-9_]*$'),
   kind     text not null,                   -- 種の check は下の alter（mj_rule_keys_kind_ok・2c-3a で list を足した）
@@ -620,7 +621,7 @@ declare seed jsonb := $rk$[
   {"key":"double_ron","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"double_ron_kyotaku","kind":"enum","min":null,"max":null,"step":null,"vals":["kamicha","split"],"nullable":false,"def4":"kamicha","def3":"kamicha","need":false},
   {"key":"double_yakuman","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
-  {"key":"hakoshita","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
+  {"key":"hakoshita","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"honba","kind":"enum","min":null,"max":null,"step":null,"vals":[300,1500],"nullable":false,"def4":300,"def3":300,"need":false},
   {"key":"kazoe","kind":"enum","min":null,"max":null,"step":null,"vals":["yakuman","sanbai"],"nullable":false,"def4":"yakuman","def3":"yakuman","need":false},
   {"key":"kiriage","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":false,"def3":false,"need":false},
