@@ -3,12 +3,13 @@
  * 案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2 の「試験」§8 ⓪〜⑨・⑧'：
  *  ⓪ ログイン無し → mj_session・anon と PUBLIC に EXECUTE が無い・下請けは客から呼べない
  *  ① 一本道（member_add×4 → session_add → table_add → hanchan_start → cell_set で崩す → 戻す → extra_add ± → settle_snap）
- *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 11個・31個・知らない op）
+ *  ② 弾き（別の人の op_id・別の部屋の id・同じ id の作る op・3人卓の seat 3・知らない鍵・league_id・not_yet 7個・31個・知らない op）
  *  ③ 範囲 ④ 版 ⑤ 飛び賞 ⑥ そろった後 ⑦ チップ・祝儀（11通り・倉庫と lib〔画面の lib/room-state.mjs の tableView〕に同じ表を通す）
  *  ⑦' 2c-2a1（紙 write2_sekkei.md v3.3）＝卓の一度そろった（first_complete_at）・卓の印・正味の門（v1510:195①）・使わない種と取り消した開催日・前の組の締め
  *  ⑪ 2c-2a2（作り write_2c2a2_tsukuri.md）＝直す op 6個（member_rename・member_active・session_edit・table_edit・hanchan_seats・extra_set）と印・版
  *  ⑫ 2c-3b（紙 write3_sekkei.md §3）＝自由な項目の枚 c:<id>  ⑬ 2c-3c（同 §4・v1.1 S1〜S3）＝やきとり yakitori_set（形・使わない部屋・版・締めた後の印・split の端数で並び・飛びの直しを止めない・取り消した半荘）
  *  ⑭ 2c-2b（紙 write4_sekkei.md v1〜v1.2・write4_shiken_keikaku.md）＝人の op 5つ（member_link・member_unlink・member_relink・role_set・account_remove）・役の門 mj_role・入り直しの門 mj_reauth（jwt の amr 10分）・名乗り member_claims
+ *  ⑮ 2c-2c（紙 write5_sadame.md v1.1）＝部屋の op 4つ（room_leave・room_delete・room_undelete・room_secret）・K-3 の継ぎ（段1＝持ち主のアカウントが消えた時）・組に1つだけ
  *  ⑩ 2c-2a0＝範囲の端の表 tests/fixtures/write-cases.json を倉庫に流す（want_db ?? want と ok／err だけ比べる・弾いた組は何も書かない）
  *  ⑧ 数え（先見・後見の busy・internal と一時の失敗・古い窓・入と管が別）⑧' 上限 ⑨ 送り直し・部屋・last_seen
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋・trigger も全部戻る）。
@@ -171,9 +172,27 @@ const setupOps = (room) => {
   return A(...xs);
 };
 const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) => c[6].map(([who, kind, add]) => O('extra_add', { table_id: c[4], member_id: RM[room].m[who], kind, add }))));
-const NAMES24 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'yakitori_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
+const NAMES28 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'yakitori_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
   'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'extra_set',
-  'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove'];
+  'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove', 'room_leave', 'room_delete', 'room_undelete', 'room_secret'];
+/* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1）：⑭ の H14 で人と名簿の人をそろえる・送り直しは決めた op_id で */
+const WAo = (key, who, amr, room, ops, opid) => W(key, who, room, ops, opid).replace(asWho(who), asWhoA(who, amr));
+const OPL = U(), OPD = U(), OPS = U();
+const H1 = crypto.randomBytes(32).toString('hex');
+const PASS2 = 'Abcd9xQ';
+const sec = (pass, url) => O('room_secret', { pass, url_token_hash: url });
+const RL = O('room_leave'), RD = O('room_delete'), RU = O('room_undelete');
+const LG = (name, who, voided = false) => `insert into mahjong.leagues (id, room_id, name, rule_set_id, owner_user_id, voided) values ('${U()}', ra, '${name}', (select rule_set_id from mahjong.rooms where id = ra), us[${who}], ${voided});`;
+const JA = (who, ago) => `update mahjong.room_accounts set joined_at = now() - interval '${ago}' where room_id = ra and user_id = us[${who}];`;
+const JOIN = (key, who, pass) => `${asWho(who)} r := public.mj_room_join('pass', v_no, null, ${lit(pass)}); res := res || jsonb_build_object('${key}', r);`;
+const ST15 = (key) => ROW(key, `select jsonb_build_object(
+    'lu', (select jsonb_agg(m.user_id order by x.o) from unnest(array[${L.map((id) => `'${id}'::uuid`).join(', ')}]) with ordinality x(id, o) left join mahjong.members m on m.id = x.id),
+    'ra', (select jsonb_object_agg(a.user_id, a.role) from mahjong.room_accounts a where a.room_id = ra),
+    'bans', (select jsonb_agg(b.user_id) from mahjong.room_bans b where b.room_id = ra),
+    'cl', (select jsonb_agg(jsonb_build_array(c.member_id, c.user_id)) from mahjong.member_claims c where c.room_id = ra),
+    'own', (select owner_user_id from mahjong.rooms where id = ra), 'del', (select deleted_at is not null from mahjong.rooms where id = ra),
+    'ch', (select channel_key from mahjong.rooms where id = ra), 'url', (select url_token_hash from mahjong.rooms where id = ra),
+    'lg', (select jsonb_agg(l.owner_user_id order by l.name) from mahjong.leagues l where l.room_id = ra))`);
 /* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2）：人 8〜11＝足す人 xu1〜4（各節の頭で ra の room_accounts へ nyu で直に入れる）・L0〜L9＝各節の頭で足す名簿の人
  *  入り直しの jwt＝asWhoA（asWho に amr を足す）。FRESH は古い otp と新しい password（max を見るか）・OLD＝601秒前・空・字の timestamp・字の amr */
 const L = Array.from({ length: 10 }, () => U());
@@ -303,7 +322,7 @@ const body = `
   ${W('dupn', 2, 'ra', A(ma(U(), ' 甲 ')))}
   ${asWho(2)}
   arr := '{}';
-  for nm in select name from mahjong.mj_ops where name not in (${NAMES24.map((n) => `'${n}'`).join(', ')}) order by name loop
+  for nm in select name from mahjong.mj_ops where name not in (${NAMES28.map((n) => `'${n}'`).join(', ')}) order by name loop
     r := public.mj_write(ra, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', nm)));
     arr := arr || jsonb_build_object(nm, r);
   end loop;
@@ -836,6 +855,77 @@ const body = `
     ${W('qx8', 3, 'ra', A(ar(4)))}
     ${undo('qxc', `update mahjong.mj_caps set cap = (select count(*) from mahjong.room_bans where room_id = ra) where tbl = 'room_bans' and scope = 'room';
       ${W('qx9', 3, 'ra', A(ar(2)))}`)}`)}
+  /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1・各節を undo で分ける） */
+  ${undo('zrl', `${H14('zrl')}
+    ${JA(2, '3 days')} ${JA(8, '2 days')} ${JA(3, '1 day')}
+    ${LU(0, 2)} ${LU(1, 9)} ${CL(1, 2)}
+    ${LG('a', 2, true)} ${LG('b', 1)}
+    ${W('zrl1', 2, 'ra', A(RL), OPL)}
+    ${ST15('zrl1_s')}
+    ${W('zrl2', 2, 'ra', A(RL), OPL)}
+    ${W('zrl3', 2, 'ra', A(ma(U(), 'zrl3')))}
+    ${WA('zrl4', 1, AMR.old, 'ra', A(RL))}
+    ${W('zrl5', 3, 'ra', A(RL, ma(U(), 'zrl5')))}
+    ${W('zrl5b', 3, 'ra', A(ma(U(), 'zrl5b'), RD))}
+    ${WA('zrl6', 1, AMR.fresh, 'ra', A(RL))}
+    ${ST15('zrl6_s')}`)}
+  ${undo('zrk', `${H14('zrk')}
+    update mahjong.room_accounts set role = 'nyu' where room_id = ra and user_id = us[3];
+    ${JA(8, '2 days')} ${JA(2, '1 day')} ${JA(3, '1 hour')}
+    ${undo('zrka', `delete from mahjong.room_accounts where room_id = ra and user_id <> us[1];
+      ${WA('zrk2', 1, AMR.fresh, 'ra', A(RL))}`)}
+    ${WA('zrk1', 1, AMR.fresh, 'ra', A(RL))}
+    ${ST15('zrk1_s')}`)}
+  ${undo('zrd', `${RS}
+    ${W('zrd1', 2, 'ra', A(RD))}
+    ${W('zrd2', 3, 'ra', A(RD))}
+    ${WA('zrd3', 1, AMR.old, 'ra', A(RD))}
+    ${WAo('zrd4', 1, AMR.fresh, 'ra', A(RD), OPD)}
+    ${ST15('zrd4_s')}
+    ${WAo('zrd5', 1, AMR.fresh, 'ra', A(RD), OPD)}
+    ${W('zrd6', 2, 'ra', A(ma(U(), 'zrd6')))}
+    ${JOIN('zrd7', 4, PASS)}
+    ${W('zrd8', 2, 'ra', A(RU))}
+    ${W('zrd9', 3, 'ra', A(RU))}
+    ${ST15('zrd9_s')}
+    ${W('zrd10', 3, 'ra', A(RU))}
+    ${undo('zrdo', `update mahjong.rooms set deleted_at = now() - interval '8 days' where id = ra;
+      ${W('zrd11', 1, 'ra', A(RU))}`)}`)}
+  ${undo('zsc', `${H14('zsc')}
+    ${LU(0, 2)} ${LU(1, 8)} ${CL(2, 8)} ${CL(3, 3)}
+    ${LG('c', 9)}
+    insert into mahjong.room_bans (room_id, user_id) values (ra, us[7]);
+    ${W('zsc1', 2, 'ra', A(sec(PASS2, H1)))}
+    ${WA('zsc2', 3, AMR.old, 'ra', A(sec(PASS2, H1)))}
+    ${WA('zsc3', 3, AMR.fresh, 'ra', A(sec('abc', H1)))}
+    ${WA('zsc4', 3, AMR.fresh, 'ra', A(sec(PASS2, 'xyz')))}
+    ${WA('zsc5', 3, AMR.fresh, 'ra', A(O('room_secret', { pass: PASS2 })))}
+    ${WA('zsc6', 3, AMR.fresh, 'ra', A(sec(S('(select to_jsonb(key) from mahjong.mj_common_pass order by key limit 1)'), H1)))}
+    ${WA('zsc7', 3, AMR.fresh, 'ra', A(sec(PASS, H1)))}
+    ${WA('zsc7b', 3, AMR.fresh, 'ra', A(sec(PASS.toUpperCase(), H1)))}
+    ${WA('zsc8', 3, AMR.fresh, 'ra', A(sec(PASS2, S('(select to_jsonb(url_token_hash) from mahjong.rooms where id = ra)'))))}
+    ${WA('zsc9', 3, AMR.fresh, 'ra', A(sec(PASS2, S('(select to_jsonb(url_token_hash) from mahjong.rooms where id = rb)'))))}
+    ${WA('zsc10', 3, AMR.fresh, 'ra', A(ma(U(), 'zsc10'), sec(PASS2, H1)))}
+    ${ST15('zsc0_s')}
+    ${WAo('zsc11', 3, AMR.fresh, 'ra', A(sec(PASS2, H1)), OPS)}
+    ${ST15('zsc11_s')}
+    ${ROW('zsc11_h', `select jsonb_agg(jsonb_build_array(tbl, col, before_value, after_value) order by id) from mahjong.history where room_id = ra and op = 'room_secret'`)}
+    ${ROW('zsc11_o', `select result from mahjong.op_results where room_id = ra and op_id = '${OPS}'`)}
+    ${WAo('zsc12', 3, AMR.fresh, 'ra', A(sec(PASS2, H1)), OPS)}
+    ${JOIN('zsc13', 4, PASS)}
+    ${JOIN('zsc14', 7, PASS2)}`)}
+  ${undo('zk3', `${H14('zk3')}
+    update mahjong.room_accounts set role = 'kan' where room_id = ra and user_id = us[8];
+    ${JA(2, '5 days')} ${JA(8, '2 days')} ${JA(3, '1 day')}
+    ${LG('d', 1)}
+    delete from auth.users where id = us[1];
+    ${W('zk31', 2, 'ra', A(ma(U(), 'zk31')))}
+    ${ST15('zk31_s')}
+    ${ROW('zk31_h', `select jsonb_agg(jsonb_build_array(tbl, col) order by id) from mahjong.history where room_id = ra and op = 'owner_inherit'`)}`)}
+  ${undo('zk3b', `${RS}
+    delete from auth.users where id = us[1];
+    ${WA('zk3b1', 3, AMR.fresh, 'ra', A(RD))}
+    ${ST15('zk3b1_s')}`)}
   /* ⑨ 送り直し・部屋・last_seen */
   ${RS}
   ${W('rs1', 2, 'ra', A(O('extra_add', { table_id: TA, member_id: MA[2], kind: 'chip', add: 1 })), OPX)}
@@ -978,7 +1068,7 @@ function check(out, lib, say) {
   ok('② session_add の league_id → bad', isErr('lg', 'bad', { at: 'league_id' }), J(R('lg')));
   ok('② 同じ名前（trim の後）→ dup・member_id と name を添える', isErr('dupn', 'dup') && R('dupn').member_id === MA[0] && R('dupn').name === '甲', J(R('dupn')));
   const ny = out.ny || {};
-  ok('② 24個の外の11個は全部 not_yet（i:0）', Object.keys(ny).length === 11 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
+  ok('② 28個の外の7個は全部 not_yet（i:0）', Object.keys(ny).length === 7 && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
@@ -1268,6 +1358,46 @@ function check(out, lib, say) {
   ok('⑭ account_remove：リーグの持ち主（取り消した行でも）→ reason league', isErr('qx7', 'bad', { at: 'user_id', reason: 'league' }), J([R('qx7'), out.qxl_err]));
   ok('⑭ account_remove：行も印も無い → bad user_id', isErr('qx8', 'bad', { at: 'user_id' }), J(R('qx8')));
   ok('⑭ account_remove：room_bans の cap → full room_bans', isErr('qx9', 'full', { what: 'room_bans' }), J([R('qx9'), out.qxc_err]));
+  /* ⑮ 2c-2c 部屋の op 4つ */
+  const s15 = (k) => { const o = out[k] || {}; return { ...st(k), own: ui(o.own), del: o.del, ch: o.ch, url: o.url, lg: (o.lg || []).map(ui) }; };
+  const raK = (x) => Object.keys(x.ra).map(Number).sort((a, b) => a - b);
+  ok('⑮ room_leave：入が抜ける → ok・行が消え・名簿のつなぎと名乗りが消え・自分が L のリーグ（取り消した物も）は持ち主へ・履歴2', isOk('zrl1') && has('zrl1', { hc: 2, h: 2, rc: 0 })
+    && !raK(s15('zrl1_s')).includes(2) && s15('zrl1_s').lu[0] === null && J(s15('zrl1_s').cl) === '[]' && J(s15('zrl1_s').lg) === '[1,1]', J([R('zrl1'), d('zrl1'), s15('zrl1_s')]));
+  ok('⑮ room_leave：送り直し・抜けた後の書き込み → gone（S5）', isErr('zrl2', 'gone') && isErr('zrl3', 'gone'), J([R('zrl2'), R('zrl3')]));
+  ok('⑮ room_leave：持ち主は amr が古いと mj_reauth', isErr('zrl4', 'mj_reauth', { within_min: 10 }) && has('zrl4', { hc: 0 }), J(R('zrl4')));
+  ok('⑮ 組に1つだけ：部屋の op を他の op と混ぜる → bad at op・何も書かない', isErr('zrl5', 'bad', { i: 0, at: 'op' }) && isErr('zrl5b', 'bad', { i: 1, at: 'op' }) && has('zrl5', { hc: 0, m: 0 }) && has('zrl5b', { hc: 0, m: 0 }), J([R('zrl5'), R('zrl5b')]));
+  ok('⑮ room_leave：持ち主が抜ける → 一番古い管が継ぐ・持ち主のリーグも継ぐ人へ・履歴3', isOk('zrl6') && has('zrl6', { hc: 3, h: 3 }) && s15('zrl6_s').own === 3
+    && !raK(s15('zrl6_s')).includes(1) && s15('zrl6_s').ra[3] === 'kan' && J(s15('zrl6_s').lg) === '[3,3]', J([R('zrl6'), d('zrl6'), s15('zrl6_s')]));
+  ok('⑮ room_leave：管が居ない → 一番古い入が継いで kan になる', isOk('zrk1') && s15('zrk1_s').own === 8 && s15('zrk1_s').ra[8] === 'kan' && has('zrk1', { hc: 3 }), J([R('zrk1'), d('zrk1'), s15('zrk1_s')]));
+  ok('⑮ room_leave：ほかに誰も居ない持ち主 → bad reason alone・何も書かない', isErr('zrk2', 'bad', { at: 'op', reason: 'alone' }) && has('zrk2', { hc: 0 }), J(R('zrk2')));
+  ok('⑮ room_delete：入・管 → mj_role need owner・持ち主の amr が古い → mj_reauth', isErr('zrd1', 'mj_role', { need: 'owner' }) && isErr('zrd2', 'mj_role', { need: 'owner' }) && isErr('zrd3', 'mj_reauth'), J([R('zrd1'), R('zrd2'), R('zrd3')]));
+  ok('⑮ room_delete：持ち主 → ok・消した印・履歴1', isOk('zrd4') && has('zrd4', { hc: 1 }) && s15('zrd4_s').del === true, J([R('zrd4'), s15('zrd4_s')]));
+  ok('⑮ room_delete の後：送り直し・書き込み・入る → gone', isErr('zrd5', 'gone') && isErr('zrd6', 'gone') && R('zrd7').err === 'gone', J([R('zrd5'), R('zrd6'), out.zrd7]));
+  ok('⑮ room_undelete：入 → mj_role need kan・管 → ok（入り直し不要）・戻る・二度目は書かない', isErr('zrd8', 'mj_role', { need: 'kan' }) && isOk('zrd9') && has('zrd9', { hc: 1 })
+    && s15('zrd9_s').del === false && isOk('zrd10') && has('zrd10', { hc: 0 }), J([R('zrd8'), R('zrd9'), R('zrd10'), s15('zrd9_s')]));
+  ok('⑮ room_undelete：7日より前に消した部屋 → gone', isErr('zrd11', 'gone'), J(R('zrd11')));
+  ok('⑮ room_secret：入 → mj_role need kan・管の amr が古い → mj_reauth', isErr('zsc1', 'mj_role', { need: 'kan' }) && isErr('zsc2', 'mj_reauth'), J([R('zsc1'), R('zsc2')]));
+  ok('⑮ room_secret：形が悪い（短いパス・URL の字・URL が無い）→ bad', isErr('zsc3', 'bad', { at: 'pass' }) && isErr('zsc4', 'bad', { at: 'url_token_hash' }) && isErr('zsc5', 'bad', { at: 'url_token_hash' }), J([R('zsc3'), R('zsc4'), R('zsc5')]));
+  ok('⑮ room_secret：よくあるパス → bad reason common', isErr('zsc6', 'bad', { at: 'pass', reason: 'common' }), J(R('zsc6')));
+  ok('⑮ room_secret：前と同じパス（大文字でも）→ bad reason same', isErr('zsc7', 'bad', { at: 'pass', reason: 'same' }) && isErr('zsc7b', 'bad', { at: 'pass', reason: 'same' }), J([R('zsc7'), R('zsc7b')]));
+  ok('⑮ room_secret：今と同じ URL → bad reason same', isErr('zsc8', 'bad', { at: 'url_token_hash', reason: 'same' }), J(R('zsc8')));
+  ok('⑮ room_secret：他の部屋の URL → bad at url_token_hash・弾いた組は何も書かない', isErr('zsc9', 'bad', { at: 'url_token_hash' }) && R('zsc9').reason === undefined
+    && ['zsc3', 'zsc4', 'zsc5', 'zsc6', 'zsc7', 'zsc7b', 'zsc8', 'zsc9'].every((k) => has(k, { hc: 0, h: 0 })), J(R('zsc9')));
+  ok('⑮ room_secret：組に1つだけ → bad i 1 at op', isErr('zsc10', 'bad', { i: 1, at: 'op' }), J(R('zsc10')));
+  const k11 = R('zsc11').results?.[0]?.channel_key;
+  ok('⑮ room_secret：管が押す → ok・新しい channel_key・入の行が消え（L と管は残る）・消した入のつなぎと名乗りが消え・出した印0・履歴2', isOk('zsc11') && /^[0-9a-f]{32}$/.test(k11 || '')
+    && k11 === s15('zsc11_s').ch && k11 !== s15('zsc0_s').ch && s15('zsc11_s').url === H1 && J(raK(s15('zsc11_s'))) === '[1,3,9]' && s15('zsc11_s').ra[9] === 'nyu'
+    && s15('zsc11_s').lu[0] === null && s15('zsc11_s').lu[1] === null && J(s15('zsc11_s').cl) === '[[3,3]]' && J(s15('zsc11_s').bans) === '[]' && has('zsc11', { hc: 2, h: 2, rc: 0 }),
+    J([R('zsc11'), d('zsc11'), s15('zsc11_s')]));
+  ok('⑮ room_secret：履歴に pass・hash・channel_key が無い', Array.isArray(out.zsc11_h) && out.zsc11_h.length === 2 && !J(out.zsc11_h).includes(k11) && !J(out.zsc11_h).includes(H1)
+    && !J(out.zsc11_h).includes(PASS2) && !J(out.zsc11_h).includes('$2'), J(out.zsc11_h));
+  ok('⑮ room_secret：送り直しの答えに channel_key を書かない（op_results）', out.zsc11_o && out.zsc11_o.ok === true && !J(out.zsc11_o).includes('channel_key') && !J(out.zsc11_o).includes(k11), J(out.zsc11_o));
+  ok('⑮ room_secret：送り直し → 今の channel_key を読み直して返す（S2）', isOk('zsc12') && R('zsc12').results?.[0]?.channel_key === k11 && has('zsc12', { hc: 0 }), J(R('zsc12')));
+  ok('⑮ room_secret：前のパスで入る → wrong', out.zsc13?.err === 'wrong', J(out.zsc13));
+  ok('⑮ room_secret：出した人も新しいパスで入れる（印を全部消す）', out.zsc14?.ok === true, J(out.zsc14));
+  ok('⑮ K-3 段1：持ち主のアカウントが消えた → 入の呼びで一番古い管が継ぐ（入の方が古くても管が先）・リーグも・その呼びは ok', isOk('zk31') && s15('zk31_s').own === 8 && J(s15('zk31_s').lg) === '[8]'
+    && J(out.zk31_h) === J([['rooms', 'owner_user_id'], ['leagues', 'owner_user_id']]) && has('zk31', { hc: 3, h: 3 }), J([R('zk31'), d('zk31'), s15('zk31_s'), out.zk31_h]));
+  ok('⑮ K-3 段1：継いだ本人はその呼びから持ち主（room_delete が通る）', isOk('zk3b1') && s15('zk3b1_s').own === 3 && s15('zk3b1_s').del === true, J([R('zk3b1'), s15('zk3b1_s')]));
   /* ⑩ 範囲の端の表（write-cases.json） */
   ok('⑩ 表の版1・case 84以上・rules は表の名だけ', WT.v === 1 && WT_CASES.length >= 84 && WT_CASES.every((c) => c.rules in WT.rules), J(WT_CASES.filter((c) => !(c.rules in WT.rules)).map((c) => c.id + ':' + c.rules)));
   ok('⑩ 表の部屋を作れて base_ops が当たった', WT_RK.every((k) => out['made_' + WT_ROOM[k]]?.ok === true && isOk('tb_' + WT_ROOM[k])), J(WT_RK.map((k) => [out['made_' + WT_ROOM[k]], R('tb_' + WT_ROOM[k])])));
@@ -1310,7 +1440,7 @@ const fnText = (name) => {
 /* [名, 関数, 壊す字, 替える字, 2つ目の替え（無ければ null）, 狙った試験の名の頭] */
 const WAZA = [
   ['素点の範囲を見ない（表の行で赤になるか）', 'mahjong_private.mj_w_op', 'if v_x not between -200000 and 200000 or v_x % 100 <> 0 then', 'if false then', null, '⑩ 表：cell_set の 200,100 は range'],
-  ['op_results を書かない', 'public.mj_write', 'insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id, v_ret, v_me);', 'null;', null, '⑨ 同じ人の同じ op_id 2回'],
+  ['op_results を書かない', 'public.mj_write', "insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id,\n        case when (p_ops -> 0 ->> 'op') = 'room_secret' then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end, v_me);", 'null;', null, '⑨ 同じ人の同じ op_id 2回'],
   ['卓の部屋を確かめない', 'mahjong_private.mj_w_t', 'where x.id = p_tid and x.room_id = p_room for update', 'where x.id = p_tid for update', null, '② 別の部屋の table_id'],
   ['MJ001 を値に直さない（internal に化ける）', 'public.mj_write', 'v_ret := sqlerrm::jsonb; v_n := 0;', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '② 別の部屋の hanchan_id'],
   ['limits を塊の中で数える（弾きで戻る）', 'public.mj_write', "    v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);",
@@ -1380,6 +1510,23 @@ const WAZA = [
   ["やきとりで mj_w_changed を呼ばない", 'mahjong_private.mj_w_op', "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);\n    perform mahjong_private.mj_w_changed(h.id, p_me);", "      'yakitori', h.yakitori, v_j, h.yakitori_version + 1);", null, '⑬ ⑥ 締めた後の印'],
   ["yakitori_set に 'fresh' を付ける", 'mahjong_private.mj_w_op', "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id);", "'v', h.yakitori_version + 1), 'made', 0, 'hist', 1, 'h', h.id, 'fresh', true);", null, '⑬ S3'],
   ["hstate がやきとりの端数を見ない", 'mahjong_private.mj_w_hstate', "mj_needs_order(rs, v_cells, h.yakitori) ?| array['tie', 'yaki']", "mj_needs_order(rs, v_cells, h.yakitori) ? 'tie'", null, '⑬ S1 split の端数'],
+  /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1 S1〜S4・K-3・組に1つ） */
+  ["room_secret の前と同じパスを見ない", 'mahjong_private.mj_w_op', "if extensions.crypt(v_key, s.pass_hash) = s.pass_hash then", "if false then", null, '⑮ room_secret：前と同じパス'],
+  ["room_secret のよくあるパスを見ない", 'mahjong_private.mj_w_op', "if exists (select 1 from mahjong.mj_common_pass x where x.key = v_key) then", "if false then", null, '⑮ room_secret：よくあるパス'],
+  ["room_secret の今と同じ URL を見ない", 'mahjong_private.mj_w_op', "if v_s = s.url_token_hash then", "if false then", null, '⑮ room_secret：今と同じ URL'],
+  ["op_results に channel_key を残す", 'public.mj_write', "case when (p_ops -> 0 ->> 'op') = 'room_secret' then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end", "v_ret", null, '⑮ room_secret：送り直しの答えに channel_key を書かない'],
+  ["送り直しで channel_key を読み直さない", 'public.mj_write', "if (p_ops -> 0 ->> 'op') = 'room_secret' and (v_x ->> 'ok') = 'true' then", "if false then", null, '⑮ room_secret：送り直し →'],
+  ["履歴に channel_key を書く", 'mahjong_private.mj_w_op', "'secret', null, null, null);", "'secret', null, pg_catalog.to_jsonb(v_kd), null);", null, '⑮ room_secret：履歴に'],
+  ["room_secret で名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.member_id = any(v_ids) or (x.room_id = p_room and x.user_id = any(v_us));", "null;", null, '⑮ room_secret：管が押す'],
+  ["room_secret で L の行も消す", 'mahjong_private.mj_w_op', "and a.role = 'nyu'\n       and not exists (select 1 from mahjong.leagues l where l.room_id = p_room and l.owner_user_id = a.user_id);", "and a.role = 'nyu';", null, '⑮ room_secret：管が押す'],
+  ["room_secret で出した印を消さない", 'mahjong_private.mj_w_op', "delete from mahjong.room_bans b where b.room_id = p_room;", "null;", null, '⑮ room_secret：出した人'],
+  ["継ぐ順で管を先にしない", 'mahjong_private.mj_w_inherit', "order by (a.role = 'kan') desc, a.joined_at", "order by a.joined_at", null, '⑮ K-3 段1：持ち主のアカウントが消えた'],
+  ["継ぎでリーグを移さない", 'mahjong_private.mj_w_inherit', "where l.room_id = p_room and l.owner_user_id = p_from;", "where l.room_id = p_room and l.owner_user_id = p_from and false;", null, '⑮ room_leave：持ち主が抜ける'],
+  ["継いだ人の役を kan に直さない", 'mahjong_private.mj_w_inherit', "update mahjong.room_accounts a set role = 'kan' where a.room_id = p_room and a.user_id = v_to;", "null;", null, '⑮ room_leave：管が居ない'],
+  ["room_leave の alone を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'op', 'reason', 'alone'));", "null;", null, '⑮ room_leave：ほかに誰も居ない'],
+  ["room_leave でつなぎと名乗りを外さない", 'mahjong_private.mj_w_op', "update mahjong.members m set user_id = null, version = m.version + 1 where m.id = any(v_ids);\n    delete from mahjong.member_claims x where x.member_id = any(v_ids) or (x.room_id = p_room and x.user_id = p_me);", "null;", null, '⑮ room_leave：入が抜ける'],
+  ["部屋の op を組に混ぜてよい", 'public.mj_write', "if v_len > 1 and v_name in ('room_leave', 'room_delete', 'room_undelete', 'room_secret') then", "if false then", null, '⑮ 組に1つだけ'],
+  ["K-3 段1 を外す", 'public.mj_write', "if v_role is not null and not exists (select 1 from auth.users u where u.id = r.owner_user_id) then", "if false then", null, '⑮ K-3 段1'],
   /* ⑭ 2c-2b 人の op 5つ（紙 write4_shiken_keikaku.md の13本） */
   ["役の門を外す（kan の case）", 'mahjong_private.mj_w_need', "when p_who in ('kan', 'owner_or_kan') then case when mahjong_private.mj_w_is_kan(p_role) then null else 'kan' end", "when p_who in ('kan', 'owner_or_kan') then null", null, '⑭ 役：入の member_relink・account_remove'],
   ["owner を kan で通す", 'mahjong_private.mj_w_need', "when p_who = 'owner' then case when p_role = 'owner' then null else 'owner' end", "when p_who = 'owner' then case when mahjong_private.mj_w_is_kan(p_role) then null else 'owner' end", null, '⑭ 役：管の role_set'],
@@ -1406,12 +1553,15 @@ else {
     const base = await runSql(mkSql());
     const bl = [];
     const b0 = base.err ? null : check(base.out, lib, (s) => bl.push(s));
+    /* MJ_WAZA_ONLY＝名にこの字を含む壊しだけ回す（直した1本の回し直し用・数は「回した数」で出す） */
+    const only = process.env.MJ_WAZA_ONLY;
+    const WZ = only ? WAZA.filter(([n]) => n.includes(only)) : WAZA;
     if (!b0 || b0.f > 0) {
       console.log('★中止★ 壊す前の素の回りが緑でない＝--waza は数えない: ' + (base.err || bl.filter((s) => s.startsWith('  ✗')).slice(0, 5).join(' ／ ')));
       exit = 1;
     } else {
       console.log(`  素の回り：${b0.p} passed, 0 failed（緑）`);
-      for (const [name, fn, from, to, extra, want] of WAZA) {
+      for (const [name, fn, from, to, extra, want] of WZ) {
         let t = fnText(fn);
         if (!t.includes(from)) { console.log(`  ✗ 壊す字が無い（${name}）`); exit = 1; continue; }
         t = t.split(from).join(to);
@@ -1427,8 +1577,8 @@ else {
       }
     }
     console.log(`
-write --waza: ${red}/${WAZA.length} 狙いが赤になった`);
-    if (red !== WAZA.length) exit = 1;
+write --waza: ${red}/${WZ.length} 狙いが赤になった${only ? `（MJ_WAZA_ONLY で ${WAZA.length} 本から絞った）` : ''}`);
+    if (red !== WZ.length) exit = 1;
   } else {
     const r = await runSql(mkSql());
     if (r.err) { console.log('★失敗★ ' + r.err); exit = 1; }
