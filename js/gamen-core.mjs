@@ -152,6 +152,16 @@ export function rememberRoom(uid, room) {
   a.unshift({ ...old, ...room, at: Date.now() });
   localStorage.setItem(ROOMS_KEY(uid), JSON.stringify(a.slice(0, 30)));
 }
+/* 控えの行だけを書き換える（★並びと at を変えない＝rememberRoom の unshift を通さない★・2d §3／B3b-1 約束④⑦）。
+ * 部屋の rules・closed を足す時に使う。控えに無い部屋は何もしない（null）。返し＝書き換えた後の行 */
+export function patchRoom(uid, roomId, patch) {
+  const a = myRooms(uid);
+  const i = a.findIndex((x) => x.room_id === roomId);
+  if (i < 0) return null;
+  a[i] = { ...a[i], ...patch, at: a[i].at };
+  localStorage.setItem(ROOMS_KEY(uid), JSON.stringify(a));
+  return a[i];
+}
 export function forgetRoom(uid, roomId) {
   localStorage.setItem(ROOMS_KEY(uid), JSON.stringify(myRooms(uid).filter((x) => x.room_id !== roomId)));
 }

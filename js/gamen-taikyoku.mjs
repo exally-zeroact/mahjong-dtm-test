@@ -6,11 +6,11 @@
  *       mj_room_join(p_way 'name'|'url', p_room_no null, p_key, p_pass, p_name)（番号の道 'pass' は画面から呼ばない）
  * ★送り直しは同じ op_id と同じ token で★（返事が切れても部屋を2つ作らない・token が変わると mismatch）。
  */
-import { needLogin, showLogin, rpc, errText, rememberRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
+import { needLogin, showLogin, rpc, errText, rememberRoom, patchRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
-import { mountRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
+import { mountRoom, readRoom, markSynced } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
@@ -105,6 +105,7 @@ async function doCreate() {
   const solo = res.kind === 'solo';
   const room = { room_id: res.room_id, kind: solo ? 'solo' : 'shared', name: solo ? '対局' : name, role: 'kan', owner: true, token: solo ? undefined : p.token, channel_key: res.channel_key, rules: rulesOk(rules).rules };
   rememberRoom(me.id, room);
+  markSynced(me.id, room.room_id); // 作った時の写しは空＝倉庫と同じ（2d の印・2d より前の写しと分ける）・他の端末の rules は openRoom の mj_read で控えに入る
   lastMade = { body, room };
   made(room, pass);
 }
@@ -185,6 +186,7 @@ async function urlJoin(token) {
 }
 
 /* ── 部屋の中 ── */
+let openSeq = 0; // 開き直したら前の「ルールを読む」の続きを捨てる
 async function openRoom(roomId) {
   const room = myRooms(me.id).find((x) => x.room_id === roomId);
   if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
@@ -192,7 +194,47 @@ async function openRoom(roomId) {
   obi('');
   show('vRoom');
   // 部屋なしは URL で入れない（倉庫が潰す）＝［部屋名と URL］を出さない（B3b で［みんなで見る部屋にする］に替わる）
-  mountRoom($('vRoom'), { me, room, showShare: room.kind !== 'solo' ? () => showMade(room, null) : null, bar });
+  const share = room.kind !== 'solo' ? () => showMade(room, null) : null;
+  const seq = ++openSeq;
+  if (!room.rules) { readRules(roomId, share, seq); return; }
+  mountRoom($('vRoom'), { me, room, showShare: share, bar, relogin });
+}
+/* rules の無い端末（join・一覧から入った）＝mountRoom の前に mj_read（2d §3・B3b-1 約束④）。
+ * 読めるまで「部屋のルールを読んでいます」＋［もう一度］・10秒ごと（頁が見えている間・mountRoom の外で回す）。
+ * rules と closed は控えの行だけを書き換える（ホームの並びと at を変えない＝rememberRoom を通さない・約束⑦） */
+function readRules(roomId, share, seq) {
+  bar({ back: 'ホーム', title: '対局' });
+  $('vRoom').innerHTML = '<p class="setsumei" id="rReading">部屋のルールを読んでいます</p><p class="err" id="rReadErr"></p><button class="btn btn-line" id="rReadAgain">もう一度</button>' +
+    (share ? '<button class="btn" id="rShare">部屋名と URL</button>' : '');
+  if (share) $('rShare').onclick = share;
+  let timer = null, busyRead = false;
+  const alive = () => seq === openSeq && !!$('rReading') && !$('vRoom').hidden;
+  const once = async () => {
+    if (!alive() || busyRead) return;
+    if (navigator.onLine === false) { $('rReadErr').textContent = errText({ err: 'offline' }); return; }
+    busyRead = true;
+    const res = await readRoom(roomId, null);
+    busyRead = false;
+    if (!alive()) { clearInterval(timer); return; }
+    const d = res && res.data;
+    if (d && d.ok === true && d.room && d.room.rules) {
+      clearInterval(timer);
+      const patch = { rules: d.room.rules };
+      if (d.room.closed === true) patch.closed = true;
+      const room = patchRoom(me.id, roomId, patch);
+      if (!room) { openRoom(roomId); return; }
+      mountRoom($('vRoom'), { me, room, showShare: share, bar, relogin });
+      return;
+    }
+    const e = res && res.error;
+    const err = d && d.ok === false ? d.err : e && (e.status === 401 || res.status === 401 || /jwt/i.test(e.message || '')) ? 'mj_session' : 'net';
+    if (err === 'mj_session') { clearInterval(timer); relogin(() => openRoom(roomId)); return; }
+    if (err === 'gone') { clearInterval(timer); $('rReadErr').textContent = 'この部屋は消されているか、入れなくなりました。'; $('rReadAgain').hidden = true; return; }
+    $('rReadErr').textContent = errText({ err });
+  };
+  $('rReadAgain').onclick = once;
+  timer = setInterval(() => { if (!alive()) { clearInterval(timer); return; } if (document.visibilityState === 'visible') once(); }, 10000);
+  once();
 }
 
 /* 上の帯（‹ 戻る・題・右の字）。onBack が無ければホームへの道のまま。ten＝［点数］の行き先（対局のページだけ・設計図§2「右上の［ルール］の隣に［点数］」） */

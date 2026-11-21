@@ -1,7 +1,7 @@
 /* outbox.test.mjs — ★lib/outbox.mjs（未送信の並びの受け方）が取り決め §6-11・12・14・14' の通りに振り分けるか★（CI）
  * 使い方: node tests/outbox.test.mjs  /  node tests/outbox.test.mjs --self-test（振り分けをわざと壊して赤になるか）
  */
-import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo } from '../lib/outbox.mjs';
+import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed } from '../lib/outbox.mjs';
 
 const CASES = [
   // [名前, res, kind, err?]
@@ -25,7 +25,7 @@ const CASES = [
   ['err が無い ok:false は stop', { data: { ok: false } }, 'stop'],
 ];
 
-function run(step) {
+function run(step, drop = dropHead) {
   let p = 0, f = 0;
   const ok = (name, cond, why = '') => { if (cond) p++; else { f++; console.log('  ✗ ' + name + (why ? ' — ' + why : '')); } };
   for (const [name, res, kind, err] of CASES) {
@@ -38,6 +38,31 @@ function run(step) {
   ok('linked は stop で member_id を添える（2c-2b）', l.kind === 'stop' && l.err === 'linked' && l.member_id === 'm8', JSON.stringify(l));
   const m = step({ data: { ok: false, err: 'mj_role', i: 0, need: 'kan' } });
   ok('mj_role は名の在る stop（known）', m.kind === 'stop' && m.known === true, JSON.stringify(m));
+  // ── 2d（2d_sadame.md v2.1 §3）──
+  const c = step({ data: { ok: false, err: 'bad', at: 'closed', i: 0 } });
+  ok('2d bad かつ at closed は closed（at を添える）', c.kind === 'closed' && c.err === 'bad' && c.at === 'closed', JSON.stringify(c));
+  const b0 = step({ data: { ok: false, err: 'bad' } });
+  ok('2d at の無い bad は stop のまま', b0.kind === 'stop' && b0.err === 'bad' && b0.at === undefined, JSON.stringify(b0));
+  const bk = step({ data: { ok: false, err: 'bad', at: 'kind', i: 2 } });
+  ok('2d bad at kind は stop で at を残す', bk.kind === 'stop' && bk.at === 'kind', JSON.stringify(bk));
+  const rg = step({ data: { ok: false, err: 'range', at: 'value', what: 'cell', i: 1 } });
+  ok('2d range は stop で at と what を残す', rg.kind === 'stop' && rg.err === 'range' && rg.at === 'value' && rg.what === 'cell', JSON.stringify(rg));
+  const dw = step({ data: { ok: false, err: 'dup', what: 'session', session_id: 's1' } });
+  ok('2d dup session は stop で what を残す', dw.kind === 'stop' && dw.err === 'dup' && dw.what === 'session', JSON.stringify(dw));
+  const f1 = step({ data: null, error: { message: 'permission denied for function mj_write', code: '42501' }, status: 403 });
+  ok('2d 403（返しの status）は stop server（回し続けない）', f1.kind === 'stop' && f1.err === 'server' && f1.status === 403, JSON.stringify(f1));
+  const f2 = step({ error: { message: 'Forbidden', status: 403 } });
+  ok('2d 403（error の status）は stop server', f2.kind === 'stop' && f2.err === 'server', JSON.stringify(f2));
+  const f3 = step({ data: null, error: { message: 'JWT expired', code: 'PGRST301' }, status: 401 });
+  ok('2d 401 は 403 より先に login', f3.kind === 'login', JSON.stringify(f3));
+  const f4 = step({ data: null, error: { message: 'upstream' }, status: 503 });
+  ok('2d 503 は retry のまま', f4.kind === 'retry', JSON.stringify(f4));
+  const hc = [{ op_id: 'a', ops: [1], held: { err: 'closed' } }, { op_id: 'b', ops: [2] }];
+  const hd = drop(hc);
+  ok('2d 先頭が held closed なら［捨てる］でも外さない', hd.length === 2 && hd[0].op_id === 'a' && hd[0].held.err === 'closed' && !hd[1].held_after_drop, JSON.stringify(hd));
+  ok('2d heldClosed は held closed の先頭だけ真', heldClosed(hc) && !heldClosed([{ op_id: 'a', held: { err: 'range' } }]) && !heldClosed([]) && !heldClosed([{ op_id: 'a' }]));
+  const hr = drop([{ op_id: 'a', held: { err: 'stale' } }, { op_id: 'b' }]);
+  ok('2d held stale は［捨てる］で外せる', hr.length === 1 && hr[0].op_id === 'b' && hr[0].held_after_drop === true, JSON.stringify(hr));
   return { p, f };
 }
 
@@ -78,11 +103,17 @@ if (!self) {
     ['知らない err を done にする', wrap((res, r) => (r.err === 'zzz' ? { kind: 'done', err: null } : r))],
     ['dup の member_id を落とす', wrap((res, r) => (r.err === 'dup' ? { kind: 'stop', err: 'dup' } : r))],
     ['55P03 を stop にする', wrap((res, r) => (r.err === '55P03' ? { kind: 'stop', err: '55P03' } : r))],
+    ['2d bad closed を stop にする（［捨てる］の帯に倒す）', wrap((res, r) => (r.kind === 'closed' ? { kind: 'stop', err: 'bad' } : r))],
+    ['2d at の無い bad も closed にする', wrap((res, r) => (r.kind === 'stop' && r.err === 'bad' ? { kind: 'closed', err: 'bad', at: 'closed' } : r))],
+    ['2d stop の at を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, at: undefined } : r))],
+    ['2d stop の what を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, what: undefined } : r))],
+    ['2d 403 を retry にする（回し続ける）', wrap((res, r) => (r.err === 'server' ? { kind: 'retry', err: 'net' } : r))],
+    ['2d held closed も［捨てる］で外す', outboxStep, (ob) => ob.slice(1).map((it) => ({ ...it, held_after_drop: true }))],
   ];
   let p = 0, f = 0;
   console.log('[outbox --self-test] 振り分けをわざと壊して赤になるか');
   if (run(outboxStep).f) { console.log('  ✗ 壊す前から赤'); process.exit(1); }
-  for (const [n, step] of T) { if (run(step).f) { p++; console.log('  ✓ ' + n); } else { f++; console.log('  ✗ ' + n + ' — 赤にならなかった'); } }
+  for (const [n, step, drop] of T) { if (run(step, drop).f) { p++; console.log('  ✓ ' + n); } else { f++; console.log('  ✗ ' + n + ' — 赤にならなかった'); } }
   console.log('\n' + p + ' passed, ' + f + ' failed');
   console.log('自己確認: ' + p + '/' + (p + f));
   process.exit(f ? 1 : 0);
