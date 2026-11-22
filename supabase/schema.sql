@@ -3866,13 +3866,13 @@ grant execute on function public.mj_write(uuid, uuid, jsonb) to authenticated;
 -- ── 2d 読む口 public.mj_read（2d_sadame.md v2.1 §1・設計図 §G）──────────────────────────────
 --   通す人＝mj_write 段1 と同じ（持ち主か room_accounts の行・出された人は通さない）。無い・入っていない・消した印（deleted_at）＝gone（在るかを見せない）
 --   閉じた部屋も読める（closed true）・部屋なし（solo）も持ち主は読める。p_what は 'room' だけ。p_args＝{since?:int}＝今の read_ver なら same（中身を返さない）
---   st は端末の写し（lib/room-state.mjs）と★同じ形・同じ鍵だけ★（写しに無い欄を出すと端末の門が newer で止まる）。リーグの日とその卓・半荘・extras・締めは出さない
+--   st は端末の写し（lib/room-state.mjs）と★同じ形・同じ鍵だけ★（写しに無い欄を出すと端末の門が newer で止まる）。D1：leagues は st の外の段（same の時は返さない）。リーグの日とその卓・半荘・extras・締めは出さない
 --   並び＝members・sessions・tables・hanchans は (created_at, id)（写しの配列の順＝pickSession が最後を見る）・hanchans.no は卓の中の (created_at, id) の順の番号
 --   数えない（上限の数えに入れない・後にした守り＝回数の上限）。last_seen は mj_write 段1 と同じ（1時間以上前の時だけ）
 create or replace function public.mj_read(p_room_id uuid, p_what text, p_args jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
-  v_me uuid; v_role text; r record; v_since jsonb; v_rules jsonb; v_st jsonb;
+  v_me uuid; v_role text; r record; v_since jsonb; v_rules jsonb; v_st jsonb; v_lg jsonb;
 begin
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
@@ -3943,11 +3943,24 @@ begin
                            order by z.made_at, z.session_id, z.rev) from mahjong.settle_snaps z join ss on ss.id = z.session_id), '[]'::jsonb))
     into v_st;
 
+  -- D1 §2（d1_sadame v2.1）：その部屋のリーグ（取り消した物も・並び created_at, id）。★st の外の段★（st は写しと同じ形のまま）
+  --   l＝自分が L か（owner_user_id が自分／L のアカウントが無く自分が部屋の持ち主＝書きの時に倉庫が継ぐ）。owner_user_id そのものは返さない
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('league_id', l.id, 'name', l.name,
+           'date_from', pg_catalog.to_char(l.date_from, 'YYYY-MM-DD'), 'date_to', pg_catalog.to_char(l.date_to, 'YYYY-MM-DD'),
+           'rank_by', l.rank_by, 'min_games', l.min_games, 'players_main', l.players_main,
+           'rules', (select q.rules from mahjong.rule_sets q where q.id = l.rule_set_id and q.version = l.rule_version),
+           'rules_alt', (select q.rules from mahjong.rule_sets q where l.rule_set_id_alt is not null and q.id = l.rule_set_id_alt and q.version = l.rule_version_alt),
+           'version', l.version,
+           'l', l.owner_user_id = v_me or (v_role = 'owner' and not exists (select 1 from auth.users u where u.id = l.owner_user_id)))
+           || case when l.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
+           order by l.created_at, l.id), '[]'::jsonb)
+    into v_lg from mahjong.leagues l where l.room_id = p_room_id;
+
   return pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
     'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
                                           'channel_key', r.channel_key)   -- 2c-2f §1：room_secret の後に新しい名を知る道
             || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
-    'st', v_st);
+    'st', v_st, 'leagues', v_lg);
 end $fn$;
 revoke all on function public.mj_read(uuid, text, jsonb) from public, anon, authenticated;
 grant execute on function public.mj_read(uuid, text, jsonb) to authenticated;

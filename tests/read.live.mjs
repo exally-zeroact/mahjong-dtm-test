@@ -9,6 +9,7 @@
  * §4-2 門：ログイン無し mj_session・入っていない人 gone・無い部屋 gone・出された人 gone・消した部屋 gone・閉じた部屋 closed:true で読める・solo の持ち主・
  *   入の役・what 違い bad・since の形・since 同じで same・書いた後 read_ver+1・弾かれた組と送り直しは +1 しない・開催の重なりの門（dup what session）
  * §4-3 room_close：history_count＝F の部屋で ok（F+1 になる）・他の op は full what history
+ * D1（d1_sadame v2.1 §4）：leagues は st の外の段・形・版・取り消し・l・他の部屋・same・取り消したリーグの L を外す道
  * --waza：壊して狙った試験が赤になるか（壊した関数は塊の初めに当てる＝塊ごと戻る）
  * 使い方: node tests/read.live.mjs [--waza]
  */
@@ -67,6 +68,11 @@ const undo = (key, body) => `
     if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('${key}_err', sqlerrm); end if;
   end;`;
 const NOW = '2026-11-22T12:00:00Z';
+const L1 = 'a0000000-0000-4000-8000-00000000d101';
+const LC1 = { op: 'league_create', league_id: L1, name: 'D1 リーグ', date_from: '2026-11-01', date_to: null, rank_by: 'avg_pt', min_games: 10,
+  players_main: 4, rules: { players: 4, rate: 100 }, rules_alt: { players: 3 } };
+const LCF = { op: 'league_create', league_id: 'a0000000-0000-4000-8000-00000000d102', name: '別の部屋', players_main: 4, rules: { players: 4 } };
+const RM4 = `public.mj_write(rg, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', 'account_remove', 'user_id', us[4])))`;
 
 /* ── 写しと倉庫の st を同じ形に揃える（§ 頭の注の4つだけ） ── */
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -236,6 +242,27 @@ begin
     ${ROW('gs_n', `select count(*) from mahjong.sessions where room_id = rg`)}
     ${T('gs_v', WR('rg', [{ op: 'session_edit', session_id: 'a0000000-0000-4000-8000-00000000d301', voided: true }]))}
     ${T('gs_3', WR('rg', [{ op: 'session_add', session_id: U(), date: '2026-11-23', rate: null }]))}`)}
+  /* D1 リーグの段（塊ごと戻す） */
+  ${undo('lg', `${asWho(1)} ${RS}
+    v0 := (select read_ver from mahjong.rooms where id = rg);
+    ${ROW('lg_v0', 'v0')}
+    ${T('lg_c', WR('rg', [LC1]))}
+    ${RS} ${T('lg_cf', WR('rf', [LCF]))}
+    ${T('lg_since', `public.mj_read(rg, 'room', jsonb_build_object('since', v0))`)}
+    ${T('lg_r1', RD('rg'))}
+    ${asWho(2)} ${T('lg_r2', RD('rg'))}
+    ${asWho(1)} ${RS} ${T('lg_s', WR('rg', [{ op: 'league_save', league_id: L1, base_version: 1, rules: { players: 4, rate: 200 } }]))}
+    ${T('lg_r3', RD('rg'))}
+    update mahjong.leagues set voided = true where id = ${lit(L1)}::uuid;
+    ${T('lg_r4', RD('rg'))}
+    update mahjong.leagues set owner_user_id = us[2] where id = ${lit(L1)}::uuid;
+    ${T('lg_r5', RD('rg'))} ${asWho(2)} ${T('lg_r6', RD('rg'))}
+    update mahjong.leagues set owner_user_id = gen_random_uuid() where id = ${lit(L1)}::uuid;
+    ${asWho(1)} ${T('lg_r7', RD('rg'))} ${asWho(2)} ${T('lg_r8', RD('rg'))}
+    update mahjong.leagues set owner_user_id = us[4] where id = ${lit(L1)}::uuid;
+    ${asWho(1)} ${RS} ${T('lg_k1', RM4)}
+    ${RS} ${T('lg_o', WR('rg', [{ op: 'league_owner_set', league_id: L1 }]))}
+    ${RS} ${T('lg_k2', RM4)}`)}
   /* solo */
   ${asWho(1)}
   ${T('made_rs', CR(null, { players: 4 }))} rs := (r->>'room_id')::uuid;
@@ -326,6 +353,30 @@ function check(o) {
   ok('§4-2 solo：重なりの門を見ない（2つ目の開催も ok）・持ち主が読める（kind solo・name の鍵なし）', isOk(o.s_w) && isOk(o.s_w2) && isOk(o.s_own) && o.s_own.room.kind === 'solo'
     && !('name' in o.s_own.room) && o.s_own.room.owner === true && o.s_own.st.sessions.length === 2, J([o.s_w, o.s_w2, o.s_own && o.s_own.room]));
   ok('§4-2 solo：他の人 → gone', isErr(o.s_other, 'gone'), J(o.s_other));
+  /* D1 */
+  const ST_KEYS = 'extras,hanchans,members,sessions,settles,tables,v';
+  const lg = (x) => (x && Array.isArray(x.leagues) ? x.leagues : []);
+  const g1 = lg(o.lg_r1)[0] || {};
+  ok('D1 塊が回った', !o.lg_err, o.lg_err);
+  ok('D1 リーグの段は st の外・st の鍵は今のまま・リーグ無しは []', isOk(g) && canon(g.leagues) === '[]' && !('leagues' in g.st) && Object.keys(g.st).sort().join(',') === ST_KEYS
+    && isOk(o.lg_r1) && !('leagues' in o.lg_r1.st) && Object.keys(o.lg_r1.st).sort().join(',') === ST_KEYS, J([g && g.leagues, g && Object.keys(g.st)]));
+  ok('D1 作ったリーグの形（欄11・期間・rules と rules_alt・version 1・l true・取り消し印なし・持ち主の id を出さない）', isOk(o.lg_c) && lg(o.lg_r1).length === 1
+    && g1.league_id === L1 && g1.name === 'D1 リーグ' && g1.date_from === '2026-11-01' && g1.date_to === null && g1.rank_by === 'avg_pt' && g1.min_games === 10
+    && g1.players_main === 4 && g1.rules && g1.rules.players === 4 && g1.rules.rate === 100 && g1.rules_alt && g1.rules_alt.players === 3
+    && g1.version === 1 && g1.l === true && Object.keys(g1).length === 11 && !J(o.lg_r1.leagues).includes('owner'), J([o.lg_c, o.lg_r1 && o.lg_r1.leagues]));
+  ok('D1 他の部屋のリーグが出ない', isOk(o.lg_cf) && lg(o.lg_r1).length === 1, J([o.lg_cf, lg(o.lg_r1).map((x) => x.league_id)]));
+  ok('D1 l は L の人だけ true（入は false）', isOk(o.lg_r2) && lg(o.lg_r2).length === 1 && lg(o.lg_r2)[0].l === false, J(o.lg_r2 && o.lg_r2.leagues));
+  ok('D1 league の書きの後は same にならない（read_ver+1）', isOk(o.lg_since) && !o.lg_since.same && o.lg_since.read_ver === Number(o.lg_v0) + 1
+    && Array.isArray(o.lg_since.leagues) && o.lg_since.leagues.length === 1, J([o.lg_v0, o.lg_since && o.lg_since.read_ver, o.lg_since && o.lg_since.same]));
+  ok('D1 league_save の後 version+1・rules が新しい版・rules_alt は前の版', isOk(o.lg_s) && lg(o.lg_r3)[0] && lg(o.lg_r3)[0].version === 2
+    && lg(o.lg_r3)[0].rules.rate === 200 && lg(o.lg_r3)[0].rules_alt.players === 3, J([o.lg_s, o.lg_r3 && o.lg_r3.leagues]));
+  ok('D1 取り消したリーグも返す（voided true）', lg(o.lg_r4).length === 1 && lg(o.lg_r4)[0].voided === true, J(o.lg_r4 && o.lg_r4.leagues));
+  ok('D1 L が他の人なら持ち主も l false・その人が true', lg(o.lg_r5)[0] && lg(o.lg_r5)[0].l === false && lg(o.lg_r6)[0] && lg(o.lg_r6)[0].l === true,
+    J([lg(o.lg_r5), lg(o.lg_r6)]));
+  ok('D1 L のアカウントが無いと部屋の持ち主が l true・入は false', lg(o.lg_r7)[0] && lg(o.lg_r7)[0].l === true && lg(o.lg_r8)[0] && lg(o.lg_r8)[0].l === false,
+    J([lg(o.lg_r7), lg(o.lg_r8)]));
+  ok('D1 取り消したリーグの L は外せない（bad user_id league）→持ち主が league_owner_set→外せる', isErr(o.lg_k1, 'bad', { at: 'user_id', reason: 'league' })
+    && isOk(o.lg_o) && isOk(o.lg_k2), J([o.lg_k1, o.lg_o, o.lg_k2]));
   /* §4-3 */
   ok('§4-3 F の部屋で member_add → full what history', isErr(o.fc_ma, 'full', { what: 'history' }), J(o.fc_ma));
   ok('§4-3 F の部屋で room_close → ok（history_count は F+1）', isOk(o.fc_cl) && Number(o.fc_hc) === 1, J([o.fc_cl, o.fc_hc]));
@@ -361,6 +412,14 @@ const WZ = [
     ['§4-1 流れ 5 cell を2つ直す']],
   ['W7 extras の値を版に替える', () => brk('public.mj_read', [["'kind', e.kind, 'value', e.value,", "'kind', e.kind, 'value', e.version,"]]),
     ['§4-1 流れ 10 extras 全種']],
+  ['W8 leagues の段を外す', () => brk('public.mj_read', [["'st', v_st, 'leagues', v_lg);", "'st', v_st);"]]),
+    ['D1 リーグの段は st の外']],
+  ['W9 l を常に true', () => brk('public.mj_read', [["'l', l.owner_user_id = v_me or", "'l', true or"]]),
+    ['D1 l は L の人だけ']],
+  ['W10 他の部屋の where を外す', () => brk('public.mj_read', [['into v_lg from mahjong.leagues l where l.room_id = p_room_id;', 'into v_lg from mahjong.leagues l where true;']]),
+    ['D1 他の部屋のリーグが出ない']],
+  ['W11 版の結びを外す（いつも1版）', () => brk('public.mj_read', [['q.id = l.rule_set_id and q.version = l.rule_version)', 'q.id = l.rule_set_id and q.version = 1)']]),
+    ['D1 league_save の後']],
 ];
 
 let pass = 0, fail = 0;
