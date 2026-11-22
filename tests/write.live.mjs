@@ -178,7 +178,8 @@ const extraOps = (room) => A(...CASES.filter((c) => c[1] === room).flatMap((c) =
 const NAMES31 = ['member_add', 'session_add', 'table_add', 'hanchan_start', 'hanchan_order', 'cell_set', 'tobi_set', 'kyotaku_set', 'extra_add', 'settle_snap', 'hanchan_void', 'hanchan_unvoid',
   'member_rename', 'member_active', 'session_edit', 'table_edit', 'hanchan_seats', 'table_seats', 'extra_set',
   'member_link', 'member_unlink', 'member_relink', 'role_set', 'account_remove', 'room_leave', 'room_delete', 'room_undelete', 'room_secret', 'room_share', 'room_close',   // 段C で2つ
-  'league_create', 'league_save', 'league_owner_set'];
+  'league_create', 'league_save', 'league_owner_set',
+  'table_rules'];   // C4 で足した（中身の試験は tests/c4.live.mjs）
 /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1）：⑭ の H14 で人と名簿の人をそろえる・送り直しは決めた op_id で */
 const WAo = (key, who, amr, room, ops, opid) => W(key, who, room, ops, opid).replace(asWho(who), asWhoA(who, amr));
 const OPL = U(), OPD = U(), OPS = U();

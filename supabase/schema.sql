@@ -3735,7 +3735,9 @@ begin
     --   行ごとに b（組の前＝最初の before）・a（組の後＝最後の after）→ 人と種で B＝sum(b)（全部 null なら null）・A＝sum(coalesce(a,0))。
     --   ルールの区切りで行を移しても合計は変わらない＝通る。席＝鎖のどれかの卓の取り消していない半荘の seats か tables.seats。
     --   鎖の頭の字順（C）→ kind → member_id の順に見る（lib と同じ i）
-    for v_k in select distinct (mahjong_private.mj_w_chain(t.k::uuid))[1]::text from pg_catalog.jsonb_object_keys(v_ts) t(k) order by 1 collate "C" loop
+    --   ★「order by 1 collate "C"」は列の番号でなく整数 1 の式になり全部の書きが internal（42804）＝字の列に名を付けて外で並べる★
+    for v_k in select hd.x from (select distinct (mahjong_private.mj_w_chain(t.k::uuid))[1]::text as x from pg_catalog.jsonb_object_keys(v_ts) t(k)) hd
+               order by hd.x collate "C" loop
       v_ch := mahjong_private.mj_w_chain(v_k::uuid);
       for e in select q.m, q.kd, pg_catalog.sum(q.b) as b, pg_catalog.sum(coalesce(q.a, 0)) as a, pg_catalog.max(q.i) as i
                  from (select h.row_key ->> 'member_id' as m, h.row_key ->> 'kind' as kd,

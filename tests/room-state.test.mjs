@@ -1020,5 +1020,95 @@ console.log('■ B1 卓の席 table_seats（b1_sadame_v2.md v2.1・写しの分�
   const h1 = applyOps(st0, [{ op: 'table_seats', table_id: 't1', seats: SEATS }, { op: 'member_add', member_id: 'm5', name: '渡辺' }, { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m5', 'm2', 'm3', 'm4'], cells: [40000, 30000, 20000, 10000] }]);
   ok('B1 半荘の後も卓の席の人（半荘に居ない m1）は ± を打てる', h1.ok && one(h1.state, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1 }).ok);
 }
+
+console.log('■ C4 途中でルールを変える（c4_sadame v3.3 §2・§3・§3a・§6＝倉庫 write.live と同じ答え）');
+{
+  const T2 = '00000000-0000-4000-8000-0000000000c2', T3 = '00000000-0000-4000-8000-0000000000c3';
+  const K = { direct: true, role: 'kan' };
+  const Tb = (x, id) => x.tables.find((y) => y.table_id === id);
+  const err = (r) => (r.ok ? 'ok' : r.res.err + '@' + (typeof r.res.at === 'object' ? J(r.res.at) : r.res.at));
+  const X = (x, t, m, k = 'chip') => x.extras.find((e) => e.table_id === t && e.member_id === m && e.kind === k);
+  const run = (x, ops, o) => { const r = applyOps(x, ops, o); if (!r.ok) throw new Error('C4 の台が当たらない：' + J(r.res)); return r.state; };
+  const tr = (rules2, id = T2, tid = 't1') => ({ op: 'table_rules', table_id: tid, new_table_id: id, rules: rules2 });
+  const ea = (m, add, extra = {}) => ({ op: 'extra_add', table_id: 't1', member_id: m, kind: 'chip', add, ...extra });
+  const umaR = (u) => ({ ...rules, uma: u });
+  // 台：h1（m1 トップ）・チップ m1 +3 / m2 -3
+  const st0 = run(base(umaR([30, 10, -10, -30])), [hs('h1', [40000, 30000, 20000, 10000]), ea('m1', 3), ea('m2', -3)]);
+  const R2 = umaR([40, 20, -20, -40]);
+  // 役・direct
+  ok('C4 table_rules は並びに積めない（err direct）', err(applyOps(st0, [tr(R2)], { role: 'kan' })) === 'direct@undefined');
+  ok('C4 table_rules は kan の役（nyu は mj_role）', applyOps(st0, [tr(R2)], { direct: true, role: 'nyu' }).res.err === 'mj_role');
+  // 区切り（鍵同じ）
+  const a = applyOps(st0, [tr(R2)], K);
+  ok('C4 区切り（チップの鍵同じ）→ ok・前の卓に next_table_id と split_same true', a.ok && Tb(a.state, 't1').next_table_id === T2 && Tb(a.state, 't1').split_same === true, J(a.res));
+  ok('C4 新しい卓は label・seats・新しいルールを写し・rate_mode は session（鍵なし）', a.ok && Tb(a.state, T2).label === '卓1' && J(Tb(a.state, T2).rules.uma) === J([40, 20, -20, -40]) && !('rate_mode' in Tb(a.state, T2)));
+  ok('C4 鍵同じ→枚が新しい卓へ移る（前の卓は0行・値は同じ）', a.ok && !X(a.state, 't1', 'm1') && X(a.state, T2, 'm1').value === 3 && X(a.state, T2, 'm2').value === -3);
+  ok('C4 h1 は前の卓のまま（前の回は前のルール）', a.ok && H(a.state, 'h1').table_id === 't1');
+  ok('C4 2回目の区切りは conflict（cur に next）', (() => { const r = applyOps(a.state, [tr(umaR([20, 10, -10, -20]), T3)], K); return !r.ok && r.res.err === 'conflict' && r.res.cur.next_table_id === T2; })());
+  ok('C4 同じ new_table_id の送り直しは ok（何も足さない）', (() => { const r = applyOps(a.state, [tr(R2)], K); return r.ok && r.state.tables.length === a.state.tables.length; })());
+  ok('C4 同じ rules は区切らずに ok', (() => { const r = applyOps(st0, [tr(clone(Tb(st0, 't1').rules))], K); return r.ok && r.state.tables.length === 1 && Tb(r.state, 't1').next_table_id == null; })());
+  ok('C4 players 違い → bad at players', err(applyOps(st0, [tr({ ...defaultRules(3), rate: 100 })], K)) === 'bad@players');
+  ok('C4 取り消した卓 → bad at table_id', err(applyOps(st0, [{ op: 'table_edit', table_id: 't1', voided: true }, tr(R2)], K)) === 'bad@table_id');
+  ok('C4 new_table_id が UUID でない → bad at new_table_id', err(applyOps(st0, [tr(R2, 'tx')], K)) === 'bad@new_table_id');
+  // rate 3通り
+  ok('C4 rules.rate null → rate_mode none', (() => { const r = applyOps(st0, [tr({ ...R2, rate: null })], K); return r.ok && Tb(r.state, T2).rate_mode === 'none' && tableRate(Tb(r.state, T2), r.state.sessions[0]) === null; })());
+  ok('C4 rules.rate 50（開催日 100）→ rate_mode num・rate 50', (() => { const r = applyOps(st0, [tr({ ...R2, rate: 50 })], K); return r.ok && Tb(r.state, T2).rate_mode === 'num' && Tb(r.state, T2).rate === 50; })());
+  ok('C4 rate が変わると鍵が違う側（チップ合計0なら前の卓に残る・split_same false）', (() => { const r = applyOps(st0, [tr({ ...R2, rate: 50 })], K); return r.ok && Tb(r.state, 't1').split_same === false && X(r.state, 't1', 'm1').value === 3 && !X(r.state, T2, 'm1'); })());
+  // T1 num の卓（t.rate 50）を rules.rate 100（開催日と同じ＝session）で区切る＝実際のレートが違う→移さない
+  const n50 = clone(st0); Object.assign(Tb(n50, 't1'), { rate_mode: 'num', rate: 50 });
+  ok('C4 T1 num の卓（50）→ rules.rate 100（session）＝実際のレートが違う＝移さず残す', (() => { const r = applyOps(n50, [tr(R2)], K); return r.ok && Tb(r.state, 't1').split_same === false && X(r.state, 't1', 'm1').value === 3; })());
+  // 鍵違い・合計0でない
+  const odd = run(st0, [ea('m3', 2)]);
+  ok('C4 鍵違い（チップ単価）で合計≠0 → bad at extras・kind chip', (() => { const r = applyOps(odd, [tr({ ...rules, uma: [30, 10, -10, -30], chip_pt10: 10 })], K); return err(r) === 'bad@extras' && r.res.kind === 'chip'; })());
+  ok('C4 鍵同じなら合計≠0 でも区切れる（移すだけ・お金は変わらない）', applyOps(odd, [tr(R2)], K).ok);
+  // follow
+  ok('C4 follow 無しの hanchan_start が区切られた卓 → bad at table_id', err(applyOps(a.state, [hs('h2', [10000, 20000, 30000, 40000])])) === 'bad@table_id');
+  ok('C4 follow 無しの extra_add が区切られた卓 → bad at table_id', err(applyOps(a.state, [ea('m1', 1), ea('m2', -1)])) === 'bad@table_id');
+  ok('C4 follow が真偽でない → bad at follow', err(applyOps(a.state, [hs('h2', [10000, 20000, 30000, 40000], { follow: 1 })])) === 'bad@follow');
+  ok('C4 区切っていない卓では follow:true は無視（そのまま入る）', (() => { const r = applyOps(st0, [hs('h2', [10000, 20000, 30000, 40000], { follow: true })]); return r.ok && H(r.state, 'h2').table_id === 't1'; })());
+  const b = applyOps(a.state, [hs('h2', [10000, 20000, 30000, 40000], { follow: true }), ea('m3', 1, { follow: true }), ea('m4', -1, { follow: true })]);
+  ok('C4 follow:true の hanchan_start・extra_add は鎖の最後（T2）へ', b.ok && H(b.state, 'h2').table_id === T2 && X(b.state, T2, 'm3').value === 1 && !X(b.state, 't1', 'm3'), J(b.res));
+  const c3 = applyOps(b.state, [tr(umaR([20, 10, -10, -20]), T3, T2)], K);
+  ok('C4 2つ区切った鎖（鍵同じ）でも t1 への follow は最後（T3）へ', c3.ok && (() => { const r = applyOps(c3.state, [ea('m1', 1, { follow: true }), ea('m2', -1, { follow: true })]); return r.ok && X(r.state, T3, 'm1').value === 4; })());
+  // 鍵違いの区切りの後の遅れた extra_add・split_same 欠け
+  const zs = run(base({ ...rules, chip_pt10: 10 }), [hs('h1', [40000, 30000, 20000, 10000]), ea('m1', 2), ea('m2', -2)]);
+  const d = applyOps(zs, [tr({ ...rules, chip_pt10: 20 })], K);
+  ok('C4 鍵違い・合計0 → ok・前の卓に残る（split_same false）', d.ok && Tb(d.state, 't1').split_same === false && X(d.state, 't1', 'm1').value === 2 && !X(d.state, T2, 'm1'), J(d.res));
+  ok('C4 T3 鍵違いの区切りの後の遅れた extra_add（follow:true）→ bad at table_id', err(applyOps(d.state, [ea('m1', 1, { follow: true })])) === 'bad@table_id');
+  ok('C4 鍵違いの区切りの後の hanchan_start（follow:true）は鎖の最後へ', (() => { const r = applyOps(d.state, [hs('h2', [10000, 20000, 30000, 40000], { follow: true })]); return r.ok && H(r.state, 'h2').table_id === T2; })());
+  const miss = clone(a.state); delete Tb(miss, 't1').split_same;
+  ok('C4 N1 写しに split_same が無い卓を通る extra_add → bad at table_id（分からない時は通さない）', err(applyOps(miss, [ea('m1', 1, { follow: true })])) === 'bad@table_id');
+  // §3b extra_set は前の卓のまま
+  const ver = X(d.state, 't1', 'm1').version;
+  ok('C4 §3b 前の卓への extra_set は前の卓の行を直す（鎖の最後へ行かない）', (() => { const r = applyOps(d.state, [{ op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'chip', value: 1, base_version: ver }, { op: 'extra_set', table_id: 't1', member_id: 'm2', kind: 'chip', value: -1, base_version: X(d.state, 't1', 'm2').version }]); return r.ok && X(r.state, 't1', 'm1').value === 1 && !X(r.state, T2, 'm1'); })());
+  ok('C4 §3b 前の卓への extra_set の版違い → conflict', applyOps(d.state, [{ op: 'extra_set', table_id: 't1', member_id: 'm1', kind: 'chip', value: 1, base_version: ver + 5 }]).res?.err === 'conflict');
+  // §3a 正味の門＝鎖
+  const sub = run(base(umaR([30, 10, -10, -30])), [{ op: 'member_add', member_id: 'm5', name: '渡辺' }, { op: 'member_add', member_id: 'm6', name: '伊藤' }, { op: 'table_seats', table_id: 't1', seats: SEATS },
+    { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m5', 'm2', 'm3', 'm4'], cells: [40000, 30000, 20000, 10000] }, ea('m5', 2), ea('m2', -2)]);
+  const e = run(sub, [tr(R2)], K);
+  ok('C4 §3a 区切り（鍵同じ）の後、前の卓の半荘にだけ座った代打ち m5 への extra_add（新しい卓へ）は ok', (() => { const r = applyOps(e, [ea('m5', 1, { follow: true }), ea('m1', -1, { follow: true })]); return r.ok && X(r.state, T2, 'm5').value === 3; })(), err(applyOps(e, [ea('m5', 1, { follow: true }), ea('m1', -1, { follow: true })])));
+  ok('C4 §3a 同じ m5 への extra_set（新しい卓）も ok', applyOps(e, [{ op: 'extra_set', table_id: T2, member_id: 'm5', kind: 'chip', value: 1, base_version: X(e, T2, 'm5').version }]).ok);
+  ok('C4 §3a 鎖のどこにも座っていない m6 への足しは bad at member_id', err(applyOps(e, [ea('m6', 1, { follow: true })])) === 'bad@member_id');
+  ok('C4 --waza 門を自分の卓だけで見ると m5 は弾かれる形（新しい卓に半荘0・m5 は卓の席に無い）', !Tb(e, T2).seats.includes('m5') && !e.hanchans.some((h) => h.table_id === T2));
+  // v3.1 取り消した半荘だけに座った人の枚を鍵同じで区切る
+  const vd = run(sub, [{ op: 'hanchan_void', hanchan_id: 'h1' }]);
+  const f2 = applyOps(vd, [tr(R2)], K);
+  ok('C4 取り消した半荘だけに座った m5 が枚を持つ時に鍵同じで区切る → ok・行が移る', f2.ok && X(f2.state, T2, 'm5').value === 2 && !X(f2.state, 't1', 'm5'), J(f2.res));
+  // §6 精算の期待値（手で数えた・1pt＝100円・オカ 20）
+  //  例1 ウマ 10-30→20-40・チップ単価同じ（2.0pt）＝枚が移る
+  //   h1（t1・ウマ30-10）：m1 +10+30+20=60／m2 0+10=10／m3 -10-10=-20／m4 -20-30=-50
+  //   h2（T2・ウマ40-20）：m4 +10+40+20=70／m3 0+20=20／m2 -10-20=-30／m1 -20-40=-60
+  //   チップ m1 +3・m2 -3（区切り前）・m3 +1・m4 -1（区切り後）×2.0pt
+  //   m1 60-60+6=6→600／m2 10-30-6=-26→-2600／m3 -20+20+2=2→200／m4 -50+70-2=18→1800
+  const s1 = sessionSeisan(b.state, 's1');
+  ok('C4 精算 例1（ウマ 10-30→20-40・枚が移る）＝ m1 600・m2 -2600・m3 200・m4 1800', s1.ok && J([s1.ten.m1, s1.ten.m2, s1.ten.m3, s1.ten.m4]) === J([600, -2600, 200, 1800]), J(s1.ten));
+  //  例2 チップ単価 1.0→2.0pt・前の卓は合計0で締めて区切る（ウマ 10-20）
+  //   h1（t1）：m1 10+20+20=50／m2 0+10=10／m3 -10-10=-20／m4 -20-20=-40・チップ m1 +2・m2 -2 ×1.0pt
+  //   h2（T2）：m4 50／m3 10／m2 -20／m1 -40・チップ m3 +1・m4 -1 ×2.0pt
+  //   m1 50+2-40=12→1200／m2 10-2-20=-12→-1200／m3 -20+10+2=-8→-800／m4 -40+50-2=8→800
+  const g = applyOps(d.state, [hs('h2', [10000, 20000, 30000, 40000], { follow: true }), { op: 'extra_add', table_id: T2, member_id: 'm3', kind: 'chip', add: 1 }, { op: 'extra_add', table_id: T2, member_id: 'm4', kind: 'chip', add: -1 }]);
+  const s2 = g.ok ? sessionSeisan(g.state, 's1') : {};
+  ok('C4 精算 例2（チップ 1→2pt・0で締めて区切る）＝ m1 1200・m2 -1200・m3 -800・m4 800', s2.ok && J([s2.ten.m1, s2.ten.m2, s2.ten.m3, s2.ten.m4]) === J([1200, -1200, -800, 800]), J(g.res) + J(s2.ten));
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
