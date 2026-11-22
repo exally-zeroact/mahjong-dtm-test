@@ -763,7 +763,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (e === 'mj_role') { dropClose(); room.not_owner = true; patchRoom(uid, rid, { not_owner: true }); closeUi = { open: false, msg: errText(res, 'close'), retry: false }; rerender(); return; }
     if (e === 'net' || e === 'offline' || e === 'busy' || e === 'server' || e === undefined || e === null) { closeUi.msg = errText(res, 'close'); closeUi.retry = true; rerender(); return; } // 印は残す
     if (e === 'internal') { closeUi.msg = errText(res, 'close'); closeUi.retry = false; rerender(); return; } // 印は残す
-    // gone・mj_op_other_user・full（記録がいっぱい）・bad kind・知らない err＝同じ op_id で送り直しても同じ＝印を消す（黙らない）
+    // gone・mj_op_other_user・full（op_results の mj_caps 行の欠け）・bad kind・知らない err＝同じ op_id で送り直しても同じ＝印を消す（黙らない）
     dropClose(); closeUi = { open: false, msg: errText(res, 'close'), retry: false }; rerender();
   }
 

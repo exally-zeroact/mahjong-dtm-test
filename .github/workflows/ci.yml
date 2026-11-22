@@ -89,6 +89,10 @@ jobs:
         run: node tests/outbox.test.mjs
       - name: 送り口の見張りの自己確認（振り分けをわざと壊して赤になるか）
         run: node tests/outbox.test.mjs --self-test
+      - name: 返しの字の full（js/gamen-core.mjs errText）＝H2 の後に close と league で「記録がいっぱい」を出さない・入る／作るの字は残す（fullji_sadame v1.1）
+        run: node tests/fullji.test.mjs
+      - name: full の字の見張りの自己確認（字を前に戻す・league の枝を消すと赤になるか）
+        run: node tests/fullji.test.mjs --self-test
 
       # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
       - name: 早見表（lib/score-table.mjs）が正解表の 605 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）

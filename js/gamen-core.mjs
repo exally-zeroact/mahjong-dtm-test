@@ -52,7 +52,8 @@ export function errText(res, way) {
     const at = res && (res.at || res.what);
     if (e === 'bad' && at === 'closed') return 'この部屋はもう終わっています。';
     if (e === 'bad' && at === 'kind') return '部屋なしの対局は終えられません。';
-    if (e === 'full') return 'この部屋は記録がいっぱいのため、今は終えられません。';
+    // full＝H2（h1b_sadame v2.3）の後は op_results の mj_caps 行の欠けだけ（記録の上限は無い・fullji_sadame v1.1 §2）
+    if (e === 'full') return '倉庫で止まりました。今は終えられません。';
     if (e === 'mj_reauth') return '部屋を終えるには、パスワードでもう一度ログインしてください。';
     if (e === 'mj_role') return '部屋を終えられるのは部屋の持ち主だけです。';
   }
@@ -61,12 +62,8 @@ export function errText(res, way) {
   if (way === 'league') {
     const at = res && (res.at || res.what);
     if (e === 'too_many') return '24時間に作れるリーグは5つまでです。';
-    if (e === 'full') {
-      if (at === 'leagues') return 'この部屋のリーグは50までです。';
-      if (at === '*') return 'この部屋は記録がいっぱいです（行）。';
-      if (at === 'history') return 'この部屋は記録がいっぱいです（履歴）。';
-      return 'この部屋は記録がいっぱいです（' + (typeof at === 'string' ? at : '?') + '）。';
-    }
+    // full＝H2 の後は op_results の mj_caps 行の欠けだけ（leagues・*・history・rule_sets の上限は無い・fullji_sadame v1.1 §2）
+    if (e === 'full') return '倉庫で止まりました。もう一度押しても同じです。';
     if (e === 'mj_role') return 'この操作は管か持ち主だけです（リーグの設定はそのリーグの L だけ）。';
     if (e === 'mj_reauth') return 'パスワードでもう一度ログインしてください。';
     if (e === 'gone') return 'この部屋は消されているか、入れなくなりました。';
