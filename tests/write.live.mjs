@@ -371,9 +371,11 @@ const body = `
   ${W('rs0', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: 0, content: {}, used: {}, missing: [] })))}
   ${W('rsz', 2, 'ra', A(O('settle_snap', { session_id: SA, rev: 2, content: { big: BIG }, used: {}, missing: [] })))}
   /* ③ 通る端（11-20 叩き直し 注意2＝厳しくしすぎても緑のままにしない・塊の中で書いて戻す） */
+  /* 2d：開催の重なりの門（shared で締めの無い開催が在ると dup）＝re2 は re1 と別の塊（同じ塊だと re1 の開催が締め無しで残って dup） */
+  ${undo('re2b', `${RS}
+    ${W('re2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 100000, place: 'あ'.repeat(40) })))}`)}
   ${undo('re', `${RS}
     ${W('re1', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 10 })))}
-    ${W('re2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 100000, place: 'あ'.repeat(40) })))}
     ${W('re3', 2, 'ra', A(O('table_add', { table_id: U(), session_id: SA, label: 'あ'.repeat(20) })))}
     ${W('re4', 2, 'ra', A(ma(U(), 'い'.repeat(20))))}
     res := res || jsonb_build_object('re5_len', octet_length(jsonb_build_object('big', '${EDGE}')::text) + octet_length('{}'::jsonb::text) + octet_length('[]'::jsonb::text));
@@ -1223,7 +1225,7 @@ function check(out, lib, say) {
   ok('③ label 空白だけ・21字 → bad at label', isErr('rl1', 'bad', { at: 'label' }) && isErr('rl2', 'bad', { at: 'label' }), J([R('rl1'), R('rl2')]));
   ok('③ name 21字・空白だけ → bad at name', isErr('rn1', 'bad', { at: 'name' }) && isErr('rn2', 'bad', { at: 'name' }), J([R('rn1'), R('rn2')]));
   ok('③ settle_snap rev 0 → bad at rev・32KB 越え → range at size', isErr('rs0', 'bad', { at: 'rev' }) && isErr('rsz', 'range', { at: 'size' }) && has('rsz', rejNyu), J([R('rs0'), R('rsz'), d('rsz')]));
-  ok('③ 通る端：rate 10・100,000・place 40字 → ok', isOk('re1') && isOk('re2'), J([R('re1'), R('re2'), out.re_err]));
+  ok('③ 通る端：rate 10・100,000・place 40字 → ok', isOk('re1') && isOk('re2'), J([R('re1'), R('re2'), out.re_err, out.re2b_err]));
   ok('③ 通る端：label 20字・name 20字 → ok', isOk('re3') && isOk('re4'), J([R('re3'), R('re4'), out.re_err]));
   {
     const libLen = Buffer.byteLength(J(MANY(MANY_N + 1))) + 8;   // 写しは content・used・missing を配列ごと stringify＝［］と区切り2つで +8

@@ -38,5 +38,9 @@
   "tests/write.live.mjs": {
     "why": "本物のテスト倉庫の public.mj_write を呼ぶ（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる（--waza も手元）",
     "back": "CI に倉庫の鍵を置いた日"
+  },
+  "tests/read.live.mjs": {
+    "why": "本物のテスト倉庫で 2d の読む口 public.mj_read を叩く（写しと倉庫の st の対応・門・room_close を F の外）（鍵 ~/.supabase-token が要る・1つの塊で全部戻す）＝手元で schema.sql を当てた後に走らせる（--waza も手元）",
+    "back": "CI に倉庫の鍵を置いた日"
   }
 }
