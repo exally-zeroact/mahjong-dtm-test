@@ -20,7 +20,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const COLS = ['who_plain', 'who_league', 'on_deleted', 'writes_history', 'revert', 'versioned', 're'];
 const o = true, x = false;
 export const FIXED = {
-  count: 37,
+  count: 38,   // C4：table_rules
   /* 種に書いてはいけない v15 の列（倉庫では空だけ＝mj_ops_old_empty） */
   oldEmpty: ['kan', 'nyu', 'needs_secret'],
   rows: {
@@ -46,6 +46,7 @@ export const FIXED = {
     hanchan_order:    ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     extra_set:        ['nyu',          'nyu',             x, o, 'prev',          o, 'no'],
     extra_add:        ['nyu',          'nyu',             x, o, 'neg',           x, 'no'],
+    table_rules:      ['kan',          'same',            x, o, 'none',          x, 'no'],   // C4 途中でルールを変える（c4_sadame v3.3 §2）
     history_revert:   ['revert_rule',  'revert_rule',     x, o, 'prev',          x, 'no'],
     settle_snap:      ['nyu',          'nyu',             x, o, 'none',          x, 'no'],
     league_create:    ['kan',          'same',            x, o, 'void',          x, 'no'],

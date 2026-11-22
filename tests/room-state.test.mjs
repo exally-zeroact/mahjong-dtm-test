@@ -45,7 +45,7 @@ ok('素点は ±200,000', CELL_MAX === 200000);
 ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
-ok('op は33個（B1 で table_seats を足した・2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個・段C の room_share・room_close を足した・2c-3c’ で yakitori_set を外した）', OP_NAMES.length === 33 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_close', 'room_delete', 'room_leave', 'room_secret', 'room_share', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'table_seats', 'tobi_set']), J(OP_NAMES));
+ok('op は33個（B1 で table_seats を足した・2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個・段C の room_share・room_close を足した・2c-3c’ で yakitori_set を外した・C4 で table_rules を足した）', OP_NAMES.length === 34 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_close', 'room_delete', 'room_leave', 'room_secret', 'room_share', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'table_rules', 'table_seats', 'tobi_set']), J(OP_NAMES));
 
 console.log('■ 範囲の端の表（tests/fixtures/write-cases.json＝倉庫の試験と同じ表）');
 {
@@ -580,7 +580,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   const bad = clone(st); bad.tables[0].rules.zzz = 1; const keepB = J(bad);
   let all = true;
   for (const name of OP_NAMES) { const r = applyOps(bad, [{ op: name }]); if (r.ok || r.res.err !== 'newer' || r.state !== bad || r.idx !== 0) all = false; }
-  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 33);
+  ok('newer の部屋へ ' + OP_NAMES.length + ' の op 全部 → 何も当たらない（{ok:false, idx:0, res:{err:newer}, state}）', all && J(bad) === keepB && OP_NAMES.length === 34);
   ok('opts.roomRules に知らない鍵 → newer で組ごと止まる', applyOps(st, [{ op: 'member_add', member_id: 'm9', name: '新' }], { roomRules: { ...rules, zzz: 1 } }).res.err === 'newer');
   ok('opts に roomRules が無ければ部屋の判じは飛ばす（st.rules の知らない鍵は今の table_add の bad）', (() => { const x = clone(st); x.rules = { ...rules, zzz: 1 }; const r = applyOps(x, [{ op: 'table_add', table_id: 'tz', session_id: 's1', label: '卓9' }]); return !r.ok && r.res.err === 'bad'; })());
   ok('tobiSetOp は opts を applyOps へ渡す（roomRules が newer なら試し当てが当たらない）', (() => { const h = st.hanchans[0]; const ops = [{ op: 'cell_set', hanchan_id: h.hanchan_id, seat: 0, value: h.cells[0] + 100, base_version: h.cell_ver[0] }]; const a = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to); const b = tobiSetOp(st, ops, h.hanchan_id, h.tobi_to, { roomRules: { ...rules, zzz: 1 } }); return a === null && b === null; })());
@@ -826,13 +826,13 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
 {
   const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'supabase', 'schema.sql'), 'utf8');
   const rows = Object.fromEntries(readOps(sql).map((r) => [r.name, r]));
-  ok('WHO・WHO_LEAGUE・RE は33個とも schema の mj_ops の who_plain・who_league・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].who_league === WHO_LEAGUE[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].who_league !== WHO_LEAGUE[n] || rows[n].re !== RE[n])));
+  ok('WHO・WHO_LEAGUE・RE は34個とも schema の mj_ops の who_plain・who_league・re と同じ字', OP_NAMES.every((n) => rows[n] && rows[n].who_plain === WHO[n] && rows[n].who_league === WHO_LEAGUE[n] && rows[n].re === RE[n]), J(OP_NAMES.filter((n) => !rows[n] || rows[n].who_plain !== WHO[n] || rows[n].who_league !== WHO_LEAGUE[n] || rows[n].re !== RE[n])));
   const NY = Object.keys(rows).filter((n) => !OP_NAMES.includes(n)).sort();
   ok('mj_ops に在って写しに無い op は4つ（not_yet＝rules_save・rerev_ok・history_revert・room_export）', J(NY) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']), J(NY));
   const ck = /c_keys\s+(?:constant\s+)?jsonb\s*:=\s*'(\{[\s\S]*?\})'::jsonb/.exec(sql);
   const cKeys = ck ? JSON.parse(ck[1]) : null;
-  ok('KEYS の名と鍵は schema の c_keys と同じ（33個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
-  ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu').sort()), J(PERSON_OPS));
+  ok('KEYS の名と鍵は schema の c_keys と同じ（34個）', !!cKeys && OP_NAMES.length === Object.keys(cKeys).length && OP_NAMES.every((n) => J(cKeys[n]) === J(KEYS_OF(n))), ck ? J(Object.keys(cKeys)) : 'c_keys が読めない');
+  ok('PERSON_OPS＝who_plain が nyu でない c_keys の op（schema から引く）', !!cKeys && J([...PERSON_OPS].sort()) === J(Object.keys(cKeys).filter((n) => rows[n] && rows[n].who_plain !== 'nyu' && n !== 'table_rules').sort()), J(PERSON_OPS));   // C4 table_rules は役 kan だが状態を変える op（direct の門は applyOps で別に見る）
   ok('needOf＝mj_w_need（nyu/self/self_or_kan 通す・kan は kan/owner・owner は owner だけ・知らない who は閉じる）',
     needOf('self', 'nyu') === null && needOf('self_or_kan', 'nyu') === null && needOf('kan', 'nyu') === 'kan' && needOf('kan', 'kan') === null && needOf('kan', 'owner') === null &&
     needOf('owner_or_kan', 'nyu') === 'kan' && needOf('owner', 'kan') === 'owner' && needOf('owner', 'owner') === null && needOf('revert_rule', 'owner') === 'revert_rule' && needOf(undefined, 'owner') === 'none');
