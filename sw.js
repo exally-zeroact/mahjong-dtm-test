@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '8937a8847e0b';
+const VER = 'a8bbab8cebbb';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '3419661ea186be7f2e279f29b148dc25a01d94acd2532af26d2e56e004deb762'],
@@ -19,10 +19,10 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '486fc9bf3f6f9adf7b14c3de7f02b321d056d89252294f4781f7a145e1fff2c8'],
-  ['/js/gamen-home.mjs', '815fa436786c070f73ed99a3c0609627f973bceda89084a7586ed0718a1ed047'],
-  ['/js/gamen-room.mjs', '2ab869708603e541c19630281833c7211dbb91825c684e2cb59df87c573d7317'],
-  ['/js/gamen-rules.mjs', 'dda182b290ec486b9438f148d631e61e05b17c77afd166de5524fdff19769ede'],
-  ['/js/gamen-taikyoku.mjs', 'b0b60e603d206d9f9b408396f21bbe427390b56e061bc7ccf2472c5b1776738a'],
+  ['/js/gamen-home.mjs', 'bb367076bfa392758c49414777530878568d47dfac28f12fc546fa6496f6039c'],
+  ['/js/gamen-room.mjs', 'de40ebfe720249e7a1b3b2dacb4633f04cbe5e4e633a20a222825f2db9a5d35e'],
+  ['/js/gamen-rules.mjs', '8d078e22e70a034d578d53cfff787ce6c58730c9608d0a6d3f13daa487868851'],
+  ['/js/gamen-taikyoku.mjs', '65fcc88b2de1266bd12ef84883bb053d83d10be7f3b3fd99a324028ee8159c72'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/sw-reg.js', '3dbafecd87029e9eb4f3165e7b2f01011ca3f289030a25c92a7a530109bf2c85'],
@@ -33,7 +33,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', '54e4ca25a6efee57b71f1856406f6b33b5808c0f4b07dd162831dc53dee0714c'],
   ['/lib/outbox.mjs', '040883989d65aee242d6d628043a39dd254e821d6040312ee881925e7e9839f8'],
-  ['/lib/room-state.mjs', '6d3663dff24cb3667170c982c05c42337c117db89b5f8012488db6a3fc9e7912'],
+  ['/lib/room-state.mjs', '132363dd2d9b2c90f7fa0501167efb240d7018b0f496487d712055b6a5f64b67'],
   ['/lib/rules.mjs', '060d48a267043999ffae45b50bdb6e7883587cf281d5442bafc4557f23626c01'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],
   ['/lib/score.mjs', '8bb312dcb210b70cf618df8f3b8bf30a40260f21a3943443cefe0fddb118d824'],

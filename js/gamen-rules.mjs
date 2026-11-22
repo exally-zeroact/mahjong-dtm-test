@@ -1,6 +1,7 @@
 /* gamen-rules.mjs — ★ルール設定の画面★（絵 mahjong_home_v154 ③）
  * =============================================================================
- * mountRules(el, { rules, readOnly }) → { read() }
+ * mountRules(el, { rules, readOnly, lockPlayers }) → { read() }
+ *   lockPlayers＝人数は見せるだけ（C4 対局の［ルール］で次の回から変える時＝人数は変えられない・倉庫は bad at players）
  *   部屋を作る時（打てる）と、対局の右上［ルール］から見る時（readOnly＝見るだけ）の両方で使う。
  *   並び＝人数とレート（人数 4人/3人・1pt＝[ ]点・なし/50/100/200/500）→ 点（持ち点／返し・ウマ・オカ・飛び賞＝行の右に値 ›）
  *        → チップ・祝儀（1枚＝[ ]pt＋入切）→ 詳しいルール ›
@@ -10,6 +11,16 @@ import { defaultRules } from '../lib/rules.mjs';
 import { esc } from './gamen-core.mjs';
 
 const RATES = [null, 50, 100, 200, 500];
+// ルールの門（rulesOk）の err の字（部屋を作る所と対局の［ルール］の両方）
+export const RULE_ERR = {
+  rate: 'レートは10の倍数で 10〜100,000 か「なし」です。',
+  start_pts: '持ち点は 1,000〜200,000 の100の倍数です。',
+  return_pts: '返しは持ち点以上・100の倍数です。',
+  uma: 'ウマは人数分の整数で、上から大きい順・合計0にしてください。',
+  tobi_pt: '飛び賞は 0〜999 の整数です。',
+  chip_pt10: 'チップ1枚の pt は 0.1〜999.9 です（0.1 単位）。',
+  shugi_pt10: '祝儀1枚の pt は 0.1〜999.9 です（0.1 単位）。',
+};
 const DETAIL = [
   { key: 'round', label: '端数', vals: [['gosha', '五捨六入'], ['shisha', '四捨五入'], ['kirisute', '切り捨て'], ['none', '丸めない']] },
   { key: 'tie', label: '同じ点', vals: [['kamicha', '上家取り'], ['split', '分ける']] },
@@ -33,7 +44,7 @@ export function umaText(uma) {
   return uma.map((u) => (okInt(u) ? sgn(u) : '—')).join('／');
 }
 
-export function mountRules(el, { rules, readOnly }) {
+export function mountRules(el, { rules, readOnly, lockPlayers }) {
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
   const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi・detail）
 
@@ -58,7 +69,7 @@ export function mountRules(el, { rules, readOnly }) {
   function render() {
     const n = r.players;
     let h = '<h3 class="sec">人数とレート</h3><div class="list">';
-    h += li('人数', mini('players', [[4, '4人'], [3, '3人']], n));
+    h += li('人数', lockPlayers ? esc(n + '人') : mini('players', [[4, '4人'], [3, '3人']], n));
     h += li('レート', '1pt ＝ ' + (r.rate === null && readOnly ? '' : box('rRate', r.rate === null ? '' : String(r.rate))) + (r.rate === null && readOnly ? 'なし' : ' 点'));
     if (!readOnly) h += '<div class="li li-sub"><span class="mini">' + RATES.map((v) => '<button type="button" data-rate="' + (v === null ? '' : v) + '" aria-pressed="' + (r.rate === v) + '">' + (v === null ? 'なし' : v) + '</button>').join('') + '</span></div>';
     h += '</div><h3 class="sec">点</h3><div class="list">';

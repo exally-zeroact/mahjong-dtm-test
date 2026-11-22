@@ -8,7 +8,7 @@
  */
 import { needLogin, showLogin, rpc, errText, rememberRoom, patchRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
-import { mountRules } from './gamen-rules.mjs';
+import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
 import { mountRoom, readRoom, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
@@ -36,16 +36,6 @@ function obi(msg, kind) {
   o.innerHTML = msg || '';
 }
 function busy(btn, on) { btn.disabled = on; btn.setAttribute('aria-busy', on ? 'true' : 'false'); }
-
-const RULE_ERR = {
-  rate: 'レートは10の倍数で 10〜100,000 か「なし」です。',
-  start_pts: '持ち点は 1,000〜200,000 の100の倍数です。',
-  return_pts: '返しは持ち点以上・100の倍数です。',
-  uma: 'ウマは人数分の整数で、上から大きい順・合計0にしてください。',
-  tobi_pt: '飛び賞は 0〜999 の整数です。',
-  chip_pt10: 'チップ1枚の pt は 0.1〜999.9 です（0.1 単位）。',
-  shugi_pt10: '祝儀1枚の pt は 0.1〜999.9 です（0.1 単位）。',
-};
 
 /* ── 作る ── */
 const PENDING = () => 'mj-pending-create:' + me.id;

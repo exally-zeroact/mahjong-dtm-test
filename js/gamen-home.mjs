@@ -3,7 +3,7 @@
  * 日・回・人は端末の写し（mj-room:<uid>:<room_id>）の一番新しい卓から出す＝無ければその行は出さない。
  */
 import { currentUser, showLogin, logout, myRooms, esc, $, sb } from './gamen-core.mjs';
-import { tableView, migrateState, gateText } from '../lib/room-state.mjs';
+import { chainView, migrateState, gateText } from '../lib/room-state.mjs';
 
 const md = (d) => (d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
 
@@ -14,7 +14,7 @@ function lastTable(uid, rid) {
   const m = migrateState(st); // 古い形の写しも読む（★ここでは保存しない＝直して保存するのは部屋を開いた時だけ・並びと一緒に★）
   if (m.gate.mode !== 'ok') return { gate: m.gate }; // ③-0 の門：ok でない部屋は表を出さず帯だけ
   st = m.st;
-  return tableView(st, st.tables[st.tables.length - 1].table_id);
+  return chainView(st, st.tables[st.tables.length - 1].table_id); // C4 §5a：区切った卓の鎖は1つ（「n回目まで」は鎖の通し番号）
 }
 
 async function draw() {
