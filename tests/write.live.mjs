@@ -1645,8 +1645,8 @@ const WAZA = [
   ['正味の門が行の無い人を見ない', 'public.mj_write', 'and (e.b is null or pg_catalog.abs', 'and (false or pg_catalog.abs', null, "①' extra_add：部屋の人だがその卓の席にも行にもいない"],
   ['取り消した開催日を見ない', 'mahjong_private.mj_w_op', 'if s.voided then', 'if false then', null, "③' 取り消した開催日に table_add"],
   ['リーグの日を見ない（卓から）', 'mahjong_private.mj_w_t', 'select s.league_id into v_l from mahjong.sessions s where s.id = t.session_id;', 'v_l := null;', null, '⑪ リーグの日の session_edit・table_edit：L でない入'],
-  ['正味の門の |a| ≤ |b| を外す', 'public.mj_write', 'pg_catalog.abs((e.a)::int) > pg_catalog.abs((e.b)::int)', 'false', null, "⑦' 正味の門：3 → 4"],
-  ['正味の門の符号の比べを外す', 'public.mj_write', ' or (e.a)::int * (e.b)::int < 0', '', null, "⑦' 正味の門：3 → −2"],
+  ['正味の門の |a| ≤ |b| を外す', 'public.mj_write', 'pg_catalog.abs(e.a) > pg_catalog.abs(e.b)', 'false', null, "⑦' 正味の門：3 → 4"],
+  ['正味の門の符号の比べを外す', 'public.mj_write', ' or e.a * e.b < 0', '', null, "⑦' 正味の門：3 → −2"],
   ['卓の印を書かない', 'public.mj_write', 'if v_f0 and v_mk then perform mahjong_private.mj_w_tchanged', 'if false then perform mahjong_private.mj_w_tchanged', null, "⑦' そろった卓を ng に壊す"],
   ['一度そろったに (b) 0でない行を見ない', 'mahjong_private.mj_w_tstate', "v_done := v_es = 'ok' and exists", "v_done := v_es = 'ok' or exists", null, "⑦' 生まれた卓は first_complete_at 空"],
   ['tstate の where の足しを外す', 'mahjong_private.mj_w_tstate', '\n     or (v_done and t.first_complete_at is null));', ');', null, "⑦' 1組［A +3・B −3］でそろう"],
@@ -1690,7 +1690,7 @@ const WAZA = [
   ['外へ払う種の負の門を外す', 'mahjong_private.mj_w_op', "if v_kd = 'out' and", 'if false and', null, '⑫ 外へ払う種：'],
   ['tstate が合計0の自由な項目を見ない', 'mahjong_private.mj_w_tstate', " or v_why is not null then 'ng'", " then 'ng'", null, '⑫ 合計0の種 c:ko に +3'],
   ['一度そろったに外へ払う種も数える', 'mahjong_private.mj_w_tstate', 'or e.kind = any (v_sum0)));', "or e.kind like 'c:%'));", null, '⑫ 外へ払う種だけ'],
-  ['正味の門の字順を C にしない（libc の en_US は : を飛ばす＝khaw の既定 ICU では割れない）', 'public.mj_write', 'order by h.row_key::text collate "C" loop', 'order by h.row_key::text collate "en_US.utf8" loop', null, '⑫ 正味の門で chip と c:ko'],
+  ['正味の門の字順を C にしない（libc の en_US は : を飛ばす＝khaw の既定 ICU では割れない）', 'public.mj_write', 'order by q.kd collate "C", q.m collate "C" loop', 'order by q.kd collate "en_US.utf8", q.m collate "C" loop', null, '⑫ 正味の門で chip と c:ko'],
   ['理由を id の順にする', 'mahjong_private.mj_w_tstate', '   order by u.n limit 1;', '   order by u.k limit 1;', null, '⑫ 合計0の種が2つ ng'],
   /* 2c-3c（write3_sekkei.md §4 --waza・v1.1 S1 S3） */
   /* ── 2c-3c’ やきとり＝extras の種 yaki（write6_yaki_sadame.md v1.1）── */
@@ -1706,7 +1706,7 @@ const WAZA = [
   ["④を残す（飛んだら why tobi で待つ）", "mahjong_private.mj_w_hstate", "    v_st := 'ok'; v_why := null;", "    v_st := case when exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then 'input' else 'ok' end; v_why := case when v_st = 'input' then 'tobi' end;", null, "⑤ 飛んだ席の鍵が無くても ok"],
   ["段1 で tobi_set を捨てる", "mahjong_private.mj_w_op", "update mahjong.hanchans x set tobi_to = v_j, tobi_version = x.tobi_version + 1 where x.id = h.id;", "update mahjong.hanchans x set tobi_to = x.tobi_to where x.id = h.id;", null, "⑤ tobi_set で入れて ok"],
   /* ── ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）── */
-  ['正味の門が卓の席を見ない', 'public.mj_write', "\n           and not exists (select 1 from mahjong.tables y, pg_catalog.jsonb_array_elements_text(y.seats) s\n                            where y.id = v_k::uuid and s.value = e.row_key ->> 'member_id')", '', null, '⑰ 卓の席の人に半荘0の卓で chip +3'],
+  ['正味の門が卓の席を見ない', 'public.mj_write', "\n           and not exists (select 1 from mahjong.tables y, pg_catalog.jsonb_array_elements_text(y.seats) s\n                            where y.id = any (v_ch) and s.value = e.m)", '', null, '⑰ 卓の席の人に半荘0の卓で chip +3'],
   ['table_seats が長さを見ない', 'mahjong_private.mj_w_op', " or pg_catalog.jsonb_array_length(v_j) <> t.players then", ' then', null, '⑰ table_seats：長さ違い'],
   ['table_seats がよその部屋を見ない', 'mahjong_private.mj_w_op', "where x.room_id = p_room and x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))) <> t.players then", "where x.id in (select (q.v #>> '{}')::uuid from pg_catalog.jsonb_array_elements(v_j) q(v))) <> t.players then", null, '⑰ table_seats：よその部屋の人'],
   /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1 S1〜S4・K-3・組に1つ） */
