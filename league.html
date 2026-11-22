@@ -8,14 +8,49 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="theme-color" content="#14213D">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/gamen.css">
 <script src="js/supa-config.js"></script>
 <script src="js/env-badge.js"></script>
+<script src="vendor/supabase-2.112.4.js"></script>
+<script src="js/exally-login.js"></script>
 <script src="/js/sw-reg.js" defer></script>
 </head>
 <body>
-<header class="appbar"><a class="back" href="index.html">‹ ホーム</a><h1>リーグ</h1></header>
+<!-- D1 リーグを作る（d1_sadame v2.1 §1・絵 mahjong_league_v157 ①）＝js/gamen-league.mjs。一覧の部屋は倉庫の mj_my_rooms・?room=<id> でその部屋だけ -->
+<header class="appbar"><a class="back" id="barBack" href="index.html">‹ ホーム</a><h1 id="title">リーグ</h1></header>
 <main>
-<p class="soon">準備中</p>
+<section id="vLogin" class="view" hidden>
+  <button class="btn btn-main" type="button" id="btnLoginOpen">ログイン・新規登録</button>
+</section>
+
+<!-- 一覧（部屋ごとのリーグ・持ち主にだけ取り消したリーグの畳んだ段）と［＋ リーグ］ -->
+<section id="vList" class="view" hidden></section>
+
+<!-- ［＋ リーグ］の部屋を選ぶ（管か持ち主の共有の部屋で、終えていない物だけ） -->
+<section id="vPick" class="view" hidden></section>
+
+<!-- リーグを作る → ルール設定（絵 v157 ①）・設定を変える頁も同じ形（主ボタン［保存］） -->
+<section id="vForm" class="view lg-form" hidden>
+  <div class="list">
+    <label class="li"><span>リーグの名前</span><input class="h-in" id="fName" maxlength="40" autocomplete="off" placeholder="金曜リーグ"></label>
+    <div class="li"><span>期間</span><span class="li-v lg-dates"><input class="h-in lg-date" type="date" id="fFrom" aria-label="期間の始め"><span>〜</span><input class="h-in lg-date" type="date" id="fTo" aria-label="期間の終わり"></span></div>
+  </div>
+  <div id="fRules"></div>
+  <h3 class="sec">もう一方の打ち方</h3>
+  <div class="list" id="fAlt"></div>
+  <p class="r-hint">入の時だけ［＋卓］で4人卓／3人卓を選べる。</p>
+  <h3 class="sec">順位の決め方</h3>
+  <div class="list">
+    <div class="li"><span>並べる数</span><span class="mini" id="fRank"></span></div>
+    <div class="li"><span>規定の半荘数</span><span class="li-v"><input class="box" id="fMin" inputmode="numeric" autocomplete="off"> 半荘</span></div>
+  </div>
+  <div class="err" id="fMsg"></div>
+  <button class="btn btn-line" type="button" id="fAgain" hidden>もう一度</button>
+  <button class="btn btn-line" type="button" id="fReread" hidden>読み直す</button>
+  <button class="btn btn-main" type="button" id="fGo">このルールでリーグを作る</button>
+  <p class="r-hint">ルールは打ち方ごとに1つ。途中で変えた時は、変えた後の半荘から新しいルールで数える（前の半荘は前のルールのまま）。</p>
+</section>
 </main>
+<script type="module" src="js/gamen-league.mjs"></script>
 </body>
 </html>

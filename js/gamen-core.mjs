@@ -41,7 +41,7 @@ export async function rpc(fn, args) {
 }
 
 /* ── 返しの字（客に見せる字・ここ1か所） ──
- * way＝'create'（作る）｜'name'（部屋名＋パスで入る）｜'url'（URL・QR で入る）｜'close'（部屋を終える・B3b-1）。同じ err でも道で意味が違う（gamen_b3a_sadame v1.1）：
+ * way＝'create'（作る）｜'name'（部屋名＋パスで入る）｜'url'（URL・QR で入る）｜'close'（部屋を終える・B3b-1）｜'league'（リーグの op・D1）。同じ err でも道で意味が違う（gamen_b3a_sadame v1.1）：
  * busy user（作る＝1人1日5つ／入る＝1分10回の外れ）・full（作る＝倉庫の枠／入る＝部屋の人数）・wrong（名前の道／URL の道）・locked（作る＝名前の止め） */
 export function errText(res, way) {
   const e = res && res.err;
@@ -55,6 +55,30 @@ export function errText(res, way) {
     if (e === 'full') return 'この部屋は記録がいっぱいのため、今は終えられません。';
     if (e === 'mj_reauth') return '部屋を終えるには、パスワードでもう一度ログインしてください。';
     if (e === 'mj_role') return '部屋を終えられるのは部屋の持ち主だけです。';
+  }
+  // way 'league'＝リーグの op（league_create・league_save・league_owner_set／d1_sadame v2.1 §1 の表・bad は at か what を見る）。
+  // 表に無い err（mj_session・busy・net・offline・server・mj_op_other_user・dup・知らない err）は下の今の字のまま
+  if (way === 'league') {
+    const at = res && (res.at || res.what);
+    if (e === 'too_many') return '24時間に作れるリーグは5つまでです。';
+    if (e === 'full') {
+      if (at === 'leagues') return 'この部屋のリーグは50までです。';
+      if (at === '*') return 'この部屋は記録がいっぱいです（行）。';
+      if (at === 'history') return 'この部屋は記録がいっぱいです（履歴）。';
+      return 'この部屋は記録がいっぱいです（' + (typeof at === 'string' ? at : '?') + '）。';
+    }
+    if (e === 'mj_role') return 'この操作は管か持ち主だけです（リーグの設定はそのリーグの L だけ）。';
+    if (e === 'mj_reauth') return 'パスワードでもう一度ログインしてください。';
+    if (e === 'gone') return 'この部屋は消されているか、入れなくなりました。';
+    if (e === 'internal') return '倉庫で止まりました。もう一度押しても同じです。';
+    if (e === 'conflict') return '他の人が先に変えました。新しい中身で開き直しました。';
+    if (e === 'bad') {
+      if (at === 'closed') return 'この部屋は終わっているのでリーグを作れません。';
+      if (at === 'league' || at === 'league_id') return 'このリーグは見つかりません。読み直しました。';
+      if (at === 'name') return 'リーグの名前は1〜40字で入れてください。';
+      if (at === 'date_from' || at === 'date_to') return '期間は始め≦終わりで入れてください。';
+      if (at === 'rules' || at === 'rules_alt') return 'ルールの人数が合いません。';
+    }
   }
   switch (e) {
     case 'mj_session': return 'ログインが切れました。ログインし直してください。';

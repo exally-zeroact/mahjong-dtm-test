@@ -232,3 +232,15 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .li > span:first-child { flex: none; white-space: nowrap; }
 .li-v { flex-wrap: wrap; justify-content: flex-end; }
 #pCand > .btn { margin-top: 8px; }
+/* リーグ（D1・絵 mahjong_league_v157 ①・一覧は今の部品の型＝.list・.li・.btn-s・.sec） */
+.lg-owari { margin-left: 8px; font-size: 12px; font-weight: 600; }
+.lg-row { flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
+.li.lg-row > span.lg-l { display: flex; white-space: normal; flex-direction: column; min-width: 0; flex: 1 1 140px; }
+.lg-l .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.lg-btns:empty { display: none; }
+.li > span.lg-names { flex: 1 1 auto; white-space: normal; color: var(--c-ji-usui); }
+.lg-dates { flex-wrap: nowrap; gap: 4px; }
+.lg-date { width: 124px; max-width: none; flex: none; font-size: 15px; }
+.lg-mbtn { margin-left: 8px; }
+.lg-form .err { margin: 4px 4px 0; }

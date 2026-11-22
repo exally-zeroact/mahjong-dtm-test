@@ -1,6 +1,7 @@
 /* gamen-rules.mjs — ★ルール設定の画面★（絵 mahjong_home_v154 ③）
  * =============================================================================
- * mountRules(el, { rules, readOnly, lockPlayers }) → { read() }
+ * mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) → { read() }
+ *   labels＝{ sec, players }（リーグを作る頁＝「打ち方とレート」「主の打ち方」・絵 mahjong_league_v157 ①）・onPlayers(n)＝人数を替えた時（リーグのもう一方の打ち方を替える）
  *   lockPlayers＝人数は見せるだけ（C4 対局の［ルール］で次の回から変える時＝人数は変えられない・倉庫は bad at players）
  *   部屋を作る時（打てる）と、対局の右上［ルール］から見る時（readOnly＝見るだけ）の両方で使う。
  *   並び＝人数とレート（人数 4人/3人・1pt＝[ ]点・なし/50/100/200/500）→ 点（持ち点／返し・ウマ・オカ・飛び賞＝行の右に値 ›）
@@ -44,7 +45,8 @@ export function umaText(uma) {
   return uma.map((u) => (okInt(u) ? sgn(u) : '—')).join('／');
 }
 
-export function mountRules(el, { rules, readOnly, lockPlayers }) {
+export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) {
+  const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
   const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi・detail）
 
@@ -68,8 +70,8 @@ export function mountRules(el, { rules, readOnly, lockPlayers }) {
 
   function render() {
     const n = r.players;
-    let h = '<h3 class="sec">人数とレート</h3><div class="list">';
-    h += li('人数', lockPlayers ? esc(n + '人') : mini('players', [[4, '4人'], [3, '3人']], n));
+    let h = '<h3 class="sec">' + esc(LB.sec) + '</h3><div class="list">';
+    h += li(esc(LB.players), lockPlayers ? esc(n + '人') : mini('players', [[4, '4人'], [3, '3人']], n));
     h += li('レート', '1pt ＝ ' + (r.rate === null && readOnly ? '' : box('rRate', r.rate === null ? '' : String(r.rate))) + (r.rate === null && readOnly ? 'なし' : ' 点'));
     if (!readOnly) h += '<div class="li li-sub"><span class="mini">' + RATES.map((v) => '<button type="button" data-rate="' + (v === null ? '' : v) + '" aria-pressed="' + (r.rate === v) + '">' + (v === null ? 'なし' : v) + '</button>').join('') + '</span></div>';
     h += '</div><h3 class="sec">点</h3><div class="list">';
@@ -130,7 +132,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers }) {
       else if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
       else if (b.dataset.players !== undefined) {
         const n = JSON.parse(b.dataset.players);
-        if (n !== r.players) { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); }
+        if (n !== r.players) { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); if (onPlayers) onPlayers(n); }
       } else if (b.dataset.rate !== undefined) r.rate = b.dataset.rate === '' ? null : Number(b.dataset.rate);
       else if (b.classList.contains('tg')) {
         const on = b.getAttribute('aria-checked') !== 'true';
