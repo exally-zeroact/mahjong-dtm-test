@@ -8,7 +8,7 @@
  *   ・卓の rate_mode 'session' の鍵を外す（倉庫は 'session' の時に鍵を出さない＝rateModeOf が 'session' に倒す）
  * §4-2 門：ログイン無し mj_session・入っていない人 gone・無い部屋 gone・出された人 gone・消した部屋 gone・閉じた部屋 closed:true で読める・solo の持ち主・
  *   入の役・what 違い bad・since の形・since 同じで same・書いた後 read_ver+1・弾かれた組と送り直しは +1 しない・開催の重なりの門（dup what session）
- * §4-3 room_close：history_count＝F の部屋で ok・H1 で数えは実の数に置き直す（F を超えない）＝本当の満ちは write.live ⑧'' H1
+ * §4-3 room_close：history_count 20000 の部屋でも member_add・room_close が ok（H1′＝F の門もたたみも無い）
  * D1（d1_sadame v2.1 §4）：leagues は st の外の段・形・版・取り消し・l・他の部屋・same・取り消したリーグの L を外す道
  * --waza：壊して狙った試験が赤になるか（壊した関数は塊の初めに当てる＝塊ごと戻る）
  * 使い方: node tests/read.live.mjs [--waza]
@@ -271,12 +271,12 @@ begin
   ${T('s_own', RD('rs'))}
   ${asWho(2)} ${T('s_other', RD('rs'))}
 
-  /* §4-3 room_close は F の外 */
+  /* §4-3 H1'（h1b_sadame v2）：history_count が大きい部屋でも書ける・閉じられる（F の門は無い） */
   ${undo('fc', `${asWho(1)} ${RS}
-    update mahjong.rooms set history_count = (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room') where id = rg;
+    update mahjong.rooms set history_count = 20000 where id = rg;
     ${T('fc_ma', WR('rg', [{ op: 'member_add', member_id: U(), name: '戊' }]))}
     ${T('fc_cl', WR('rg', [{ op: 'room_close' }]))}
-    ${ROW('fc_hc', `select history_count - (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room') from mahjong.rooms where id = rg`)}`)}
+    ${ROW('fc_hc', `select history_count - 20000 from mahjong.rooms where id = rg`)}`)}
 
   raise exception 'MJRESULT%', res::text;
 end ${q('rd')};`;
@@ -378,8 +378,8 @@ function check(o) {
   ok('D1 取り消したリーグの L は外せない（bad user_id league）→持ち主が league_owner_set→外せる', isErr(o.lg_k1, 'bad', { at: 'user_id', reason: 'league' })
     && isOk(o.lg_o) && isOk(o.lg_k2), J([o.lg_k1, o.lg_o, o.lg_k2]));
   /* §4-3 */
-  ok('§4-3（H1）history_count だけ F の部屋で member_add → ok（実の数で置き直す）', isOk(o.fc_ma), J(o.fc_ma));
-  ok('§4-3（H1）room_close → ok・history_count ≤ F', isOk(o.fc_cl) && Number(o.fc_hc) <= 0, J([o.fc_cl, o.fc_hc]));
+  ok('§4-3（H1′）history_count 20000 の部屋で member_add → ok', isOk(o.fc_ma), J(o.fc_ma));
+  ok('§4-3（H1′）その部屋で room_close → ok・数えは書いた分だけ増える（たたまない）', isOk(o.fc_cl) && Number(o.fc_hc) >= 2, J([o.fc_cl, o.fc_hc]));
   return L;
 }
 
@@ -400,8 +400,6 @@ const brk = (fn, pairs) => {
 const WZ = [
   ['W1 ok の組で read_ver を足さない', () => brk('public.mj_write', [['update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;', 'null;']]),
     ['§4-2 書いた後 read_ver+1']],
-  ['W2 room_close も F の門を見る', () => brk('public.mj_write', [["if v_n > 0 and not (v_len = 1 and v_op0 = 'room_close') then", 'if v_n > 0 then']]),
-    ['§4-3 F の部屋で room_close']],
   ['W3 開催の重なりの門を外す', () => brk('mahjong_private.mj_w_op', [['if v_ida is not null and not exists (select 1 from mahjong.settle_snaps z where z.session_id = v_ida) then', 'if false then']]),
     ['§4-2 開催の重なりの門：締めの無い']],
   ['W4 出された人を通す', () => brk('public.mj_read', [['if v_role is not null and exists (select 1 from mahjong.room_bans b', 'if false and exists (select 1 from mahjong.room_bans b']]),

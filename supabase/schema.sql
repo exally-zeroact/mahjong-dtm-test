@@ -572,7 +572,7 @@ alter table mahjong.mj_ops add constraint mj_ops_who_ok check (
 
 -- ── 表ごとの行の上限（段6＝当てた後に実の数で見る・§3.2） ──────────────────
 --   scope: room＝部屋ごと／session＝開催日ごと／table＝卓ごと
---   '*' の room＝P（履歴・room_accounts・room_bans・member_claims 以外の全部の行＝room_bans と member_claims は自分の上限 200 で数える）・history の room＝F（要約の行も数える）
+--   H1'（h1b_sadame v2・11-23 司さん「勝手に上限決めんな」）：対局の記録（P・F・日・卓・半荘・リーグ・ルール）の上限は無い。残るのは人の上限と rooms・op_results だけ。rooms.row_count は数えだけ残す（門には使わない・mj_sweep は読まない）
 --   ★op_results は P に数えない★（自分の上限 op_results/room 10,000＝越えたら mj_write が古い物から消す・mj_sweep が row_count を減らさずに消すため）
 create table if not exists mahjong.mj_caps (
   tbl   text not null,
@@ -584,15 +584,7 @@ create table if not exists mahjong.mj_caps (
 do $capsdo$ begin
 with up as (
 insert into mahjong.mj_caps (tbl, scope, cap) values
-  ('*',             'room',    30000),   -- P
-  ('history',       'room',    10000),   -- F
-  ('history_fold',  'room',    1000),    -- H1：F を超えたら F−幅 以下までたたむ（幅が無い・≤0・≥F はたたまず full）
   ('members',       'room',    300),
-  ('sessions',      'room',    3000),
-  ('tables',        'session', 10),
-  ('hanchans',      'table',   60),
-  ('leagues',       'room',    50),
-  ('rule_sets',     'room',    500),
   ('room_accounts', 'room',    200),     -- 1部屋の人（人×部屋の行）
   ('admins',        'room',    5),       -- 管の人（持ち主も数える）
   ('room_bans',     'room',    200),     -- 出した人の印（満ちたら account_remove を止める）
@@ -1770,50 +1762,8 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_hist(uuid, uuid, text, uuid, text, text, jsonb, text, jsonb, jsonb, int) from public, anon, authenticated;
 
--- H1（h1_sadame v1.1 §2）履歴のたたみ：F を超えた部屋の古い組を要約1行へ（今の組 p_gid は除く・組の途中で切らない・要約は1部屋1行でいつも一番古い id）
--- 返し＝たたんだ後の実の数（今の組も入る）・null＝幅か F が読めない（幅 ≤ 0・幅 ≥ F も）＝1行もたたまない＝呼んだ側が full にする
--- rooms の行は呼ぶ側（mj_write）が押さえている。rooms.history_count はここでは変えない（呼ぶ側が返しで置き直す）
-create or replace function mahjong_private.mj_w_fold(p_room uuid, p_gid uuid) returns int
-language plpgsql set search_path = '' as $fn$
-declare
-  v_f int; v_w int; v_all int; v_need int; v_c0 bigint; v_cut bigint; v_first bigint; v_sum jsonb;
-begin
-  select m.cap into v_f from mahjong.mj_caps m where m.tbl = 'history' and m.scope = 'room';
-  select m.cap into v_w from mahjong.mj_caps m where m.tbl = 'history_fold' and m.scope = 'room';
-  if v_f is null or v_w is null or v_w <= 0 or v_w >= v_f then return null; end if;
-  v_all := (select pg_catalog.count(*) from mahjong.history h where h.room_id = p_room);
-  if v_all <= v_f then return v_all; end if;   -- 数えだけがずれていた＝実の数で置き直すだけ
-  -- たたむ行の数（要約の1行を足して F−幅 以下）＝v_all − (F − 幅) + 1
-  v_need := v_all - (v_f - v_w) + 1;
-  select q.id into v_c0 from (select h.id from mahjong.history h where h.room_id = p_room and h.group_id <> p_gid
-                               order by h.id limit v_need) q order by q.id desc limit 1;
-  if v_c0 is null then return v_all; end if;
-  -- 組の切れ目まで（同じ部屋の取引は rooms の行で1列に並ぶ＝1組の行は id が続く）
-  select pg_catalog.max(h.id) into v_cut from mahjong.history h
-   where h.room_id = p_room and h.group_id = (select z.group_id from mahjong.history z where z.id = v_c0);
-  with s as (select h.id, h.kind, h.op, h.group_id, h.at, h.fold from mahjong.history h
-              where h.room_id = p_room and h.id <= v_cut and h.group_id <> p_gid),
-       o as (select q.k, pg_catalog.sum(q.v)::int as v from (
-               select h.op as k, 1 as v from s h where h.kind = 'row'
-               union all select e.key, e.value::int from s h, pg_catalog.jsonb_each_text(h.fold -> 'ops') e where h.kind = 'fold') q
-             group by q.k)
-  select pg_catalog.min(s.id),
-         pg_catalog.jsonb_build_object(
-           'rows',    pg_catalog.sum(case when s.kind = 'fold' then (s.fold ->> 'rows')::int else 1 end),
-           'groups',  (pg_catalog.count(distinct s.group_id) filter (where s.kind = 'row'))
-                        + coalesce(pg_catalog.sum((s.fold ->> 'groups')::int) filter (where s.kind = 'fold'), 0),
-           'from_at', pg_catalog.min(case when s.kind = 'fold' then (s.fold ->> 'from_at')::timestamptz else s.at end),
-           'to_at',   pg_catalog.max(case when s.kind = 'fold' then (s.fold ->> 'to_at')::timestamptz else s.at end),
-           'ops',     coalesce((select pg_catalog.jsonb_object_agg(o.k, o.v order by o.k collate "C") from o), '{}'::jsonb))
-    into v_first, v_sum from s;
-  delete from mahjong.history h where h.room_id = p_room and h.id <= v_cut and h.group_id <> p_gid and h.id <> v_first;
-  update mahjong.history h set kind = 'fold', op = 'fold', fold = v_sum, group_id = pg_catalog.gen_random_uuid(),
-         orig_op = null, tbl = null, row_key = null, col = null, before_value = null, after_value = null, after_version = null,
-         actor_user_id = null, actor_role = null, member_name = null
-   where h.id = v_first;
-  return (select pg_catalog.count(*) from mahjong.history h where h.room_id = p_room);
-end $fn$;
-revoke all on function mahjong_private.mj_w_fold(uuid, uuid) from public, anon, authenticated;
+-- H1'（h1b_sadame v1・11-23 司さん「履歴に上限作るな」）＝履歴に上限もたたみも置かない＝前に当てた mj_w_fold を消す
+drop function if exists mahjong_private.mj_w_fold(uuid, uuid);
 
 -- 卓を引いて押さえる（違う部屋・無い → bad）＋役（2c-2d1＝開催日のリーグで mj_w_role・取り消したリーグの日は bad at league）
 --   ★前の3つの引数の版は落とす（残すと役を見ない道が残る）★
@@ -2443,8 +2393,7 @@ begin
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'sessions', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('date', v_d, 'rate', v_rate, 'place', v_s)
         || case when v_id2 is null then '{}'::jsonb else pg_catalog.jsonb_build_object('league_id', v_id2) end, 1);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1,
-      'cap', pg_catalog.jsonb_build_object('tbl', 'sessions', 'id', p_room));
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1);
 
   elsif v_op = 'table_add' then
     v_id := mahjong_private.mj_w_uuid(p_o, 'table_id', p_i);
@@ -2466,8 +2415,7 @@ begin
       values (v_id, p_room, v_id2, v_s, (v_rules ->> 'players')::smallint, s.rule_set_id, s.rule_version, 'ok', 'unused', 'unused', pg_catalog.clock_timestamp());
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'tables', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('session_id', v_id2, 'label', v_s), 1);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1, 't', v_id,
-      'cap', pg_catalog.jsonb_build_object('tbl', 'tables', 'id', v_id2));
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1, 'hist', 1, 't', v_id);
 
   elsif v_op = 'hanchan_start' then
     v_id := mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i);
@@ -2522,7 +2470,7 @@ begin
         'value', null, p_o -> 'cells' -> k, 1);
     end loop;
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 1 + v_n, 'hist', 1 + v_n,
-      'h', v_id, 'fresh', true, 't', t.id, 'cap', pg_catalog.jsonb_build_object('tbl', 'hanchans', 'id', t.id));
+      'h', v_id, 'fresh', true, 't', t.id);
 
   -- ── 版つきの op ──
   elsif v_op = 'cell_set' then
@@ -3079,8 +3027,7 @@ begin
         v_n := v_n + 2;
       end loop;
     end if;
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 2, 'hist', v_n, 't', v_id, 't2', t.id,
-      'cap', pg_catalog.jsonb_build_object('tbl', 'tables', 'id', t.session_id), 'cap2', pg_catalog.jsonb_build_object('tbl', 'rule_sets', 'id', p_room));
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', 2, 'hist', v_n, 't', v_id, 't2', t.id);
 
   -- ── 2c-2b 人の op 5つ（write4_sekkei.md §3＋v1.1 S1・S2＋v1.2 N3・N4）・役は mj_write の門が先に見た ──
   elsif v_op = 'member_link' then
@@ -3442,8 +3389,7 @@ begin
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'leagues', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('name', v_s, 'date_from', v_d, 'date_to', v_d2, 'rank_by', v_rk, 'min_games', v_x, 'players_main', v_n,
         'alt', v_id2 is not null), 1);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', case when v_id2 is null then 2 else 3 end, 'hist', 1,
-      'cap', pg_catalog.jsonb_build_object('tbl', 'leagues', 'id', p_room), 'cap2', pg_catalog.jsonb_build_object('tbl', 'rule_sets', 'id', p_room));
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', 1), 'made', case when v_id2 is null then 2 else 3 end, 'hist', 1);
 
   elsif v_op = 'league_save' then
     v_id := mahjong_private.mj_w_uuid(p_o, 'league_id', p_i);
@@ -3518,8 +3464,7 @@ begin
     update mahjong.leagues x set name = v_s, date_from = v_d, date_to = v_d2, rank_by = v_rk, min_games = v_x,
       rule_version = v_rv, rule_set_id_alt = v_ida, rule_version_alt = v_rva, version = x.version + 1 where x.id = v_id;
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'leagues', pg_catalog.jsonb_build_object('id', v_id), null, v_j, v_j2, g.version + 1);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version + 1), 'made', v_n, 'hist', 1)
-      || case when v_n > 0 then pg_catalog.jsonb_build_object('cap2', pg_catalog.jsonb_build_object('tbl', 'rule_sets', 'id', p_room)) else '{}'::jsonb end;
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', g.version + 1), 'made', v_n, 'hist', 1);
 
   elsif v_op = 'league_owner_set' then
     -- 押せるのは部屋の持ち主（③'・入り直し10分）＝L を自分に。もう自分＝書かない
@@ -3582,7 +3527,7 @@ declare
   v_me uuid; v_role text; v_ret jsonb; v_o jsonb; v_x jsonb; v_name text; v_k text; v_uid uuid; v_i int; v_len int;
   v_n int := 0; v_made int := 0; v_items jsonb := '[]'::jsonb; v_gid uuid := pg_catalog.gen_random_uuid();
   v_b0 jsonb := '{}'::jsonb; v_hs jsonb := '{}'::jsonb; v_fresh jsonb := '{}'::jsonb; v_ts jsonb := '{}'::jsonb; v_caps jsonb := '{}'::jsonb;
-  v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text; v_hc int;
+  v_cap int; v_c bigint; v_rid uuid; v_tbl text; v_hid text;
   v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record; v_ch uuid[];
   v_who text; v_re text; v_need text; v_ra boolean; v_wl text; v_lg record;
   v_pre jsonb; v_op0 text;
@@ -3823,36 +3768,13 @@ begin
     end loop;
 
     -- 上限（実際に足した後の行・cap の行が無い＝full）
-    if v_made > 0 then
-      select m.cap into v_cap from mahjong.mj_caps m where m.tbl = '*' and m.scope = 'room';
-      if v_cap is null or r.row_count + v_made > v_cap then
-        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', '*'));
-      end if;
-    end if;
-    -- H1（h1_sadame v1.1 §2）：F を超えたら古い組をたたむ（今の組は除く・room_close も・継ぎだけの組 v_n=0 も）
-    v_hc := null;
-    select m.cap into v_cap from mahjong.mj_caps m where m.tbl = 'history' and m.scope = 'room';
-    if v_cap is null or v_cap < r.history_count + v_n then
-      v_hc := mahjong_private.mj_w_fold(p_room_id, v_gid);   -- 実の数（今の組の v_n も入る）・null＝たためない
-      if v_hc is not null then r.history_count := v_hc - v_n; end if;
-    end if;
-    -- たたんだ後でも F を超える（幅か F が読めない・今の組だけで溢れる）時は full＝［部屋を終える］（組が room_close の1つだけ）だけは通す（2d §2）
-    if v_n > 0 and not (v_len = 1 and v_op0 = 'room_close') then
-      if v_cap is null or r.history_count + v_n > v_cap then
-        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'history'));
-      end if;
-    end if;
+    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）
     for v_k in select t.k from pg_catalog.jsonb_object_keys(v_caps) t(k) order by t.k loop
       v_tbl := pg_catalog.split_part(v_k, '|', 1); v_rid := pg_catalog.split_part(v_k, '|', 2)::uuid;
       select m.cap into v_cap from mahjong.mj_caps m
-       where m.tbl = v_tbl and m.scope = case v_tbl when 'tables' then 'session' when 'hanchans' then 'table' else 'room' end;
+       where m.tbl = v_tbl and m.scope = 'room';
       v_c := case v_tbl
-        when 'members'  then (select pg_catalog.count(*) from mahjong.members x where x.room_id = v_rid)
-        when 'sessions' then (select pg_catalog.count(*) from mahjong.sessions x where x.room_id = v_rid)
-        when 'tables'   then (select pg_catalog.count(*) from mahjong.tables x where x.session_id = v_rid)
-        when 'hanchans' then (select pg_catalog.count(*) from mahjong.hanchans x where x.table_id = v_rid)
-        when 'leagues'  then (select pg_catalog.count(*) from mahjong.leagues x where x.room_id = v_rid)
-        when 'rule_sets' then (select pg_catalog.count(*) from mahjong.rule_sets x where x.room_id = v_rid) end;
+        when 'members'  then (select pg_catalog.count(*) from mahjong.members x where x.room_id = v_rid) end;
       -- 2c-2d1 止め4：数えの無い表（v_c null）も full＝閉じる側
       if v_cap is null or v_c is null or v_c > v_cap then
         perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', v_tbl));
@@ -3861,11 +3783,8 @@ begin
 
     -- 部屋の数え
     if v_n > 0 then
-      -- H1：たたんだ時は実の数 v_hc に置き直す（v_hc に今の組 v_n が入っている＝足さない）
-      update mahjong.rooms x set row_count = x.row_count + v_made, history_count = coalesce(v_hc, x.history_count + v_n), last_write_at = pg_catalog.now()
+      update mahjong.rooms x set row_count = x.row_count + v_made, history_count = x.history_count + v_n, last_write_at = pg_catalog.now()
        where x.id = p_room_id;
-    elsif v_hc is not null then
-      update mahjong.rooms x set history_count = v_hc where x.id = p_room_id;
     end if;
 
     -- 後見（実の履歴の行で）

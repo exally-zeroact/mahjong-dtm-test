@@ -813,14 +813,22 @@ const body = `
   ${RS}
   ${undo('fm', `update mahjong.mj_caps set cap = (select count(*) from mahjong.members where room_id = ra) where tbl = 'members' and scope = 'room';
     ${W('fm', 2, 'ra', A(ma(U(), '満ち')))}`)}
-  ${undo('ft', `update mahjong.mj_caps set cap = (select count(*) from mahjong.tables where session_id = '${SA}') where tbl = 'tables' and scope = 'session';
-    ${W('ft', 2, 'ra', A(O('table_add', { table_id: U(), session_id: SA, label: '満ち' })))}`)}
-  ${undo('fh', `update mahjong.mj_caps set cap = (select count(*) from mahjong.hanchans where table_id = '${TA}') where tbl = 'hanchans' and scope = 'table';
-    ${W('fh', 2, 'ra', A(O('hanchan_start', { hanchan_id: U(), table_id: TA, seats: MA.slice(0, 4), cells: C4 })))}`)}
-  ${undo('fs', `update mahjong.mj_caps set cap = (select count(*) from mahjong.sessions where room_id = ra) where tbl = 'sessions' and scope = 'room';
-    ${W('fs', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-21', rate: null })))}`)}
-  ${undo('fp', `update mahjong.mj_caps set cap = (select row_count from mahjong.rooms where id = ra) where tbl = '*' and scope = 'room';
-    ${W('fp', 2, 'ra', A(ma(U(), 'P 満ち')))}`)}
+  /* H1'（h1b_sadame v2）：前の上限を1つ越える数でも書ける（full にならない） */
+  ${undo('ft', `insert into mahjong.tables select (jsonb_populate_record(null::mahjong.tables, to_jsonb(t) || jsonb_build_object('id', gen_random_uuid(), 'next_table_id', null))).*
+      from mahjong.tables t, generate_series(1, 10 - (select count(*) from mahjong.tables where session_id = '${SA}')::int) k where t.id = '${TA}';
+    ${W('ft', 2, 'ra', A(O('table_add', { table_id: U(), session_id: SA, label: '11卓目' })))}
+    ${ROW('ft_n', `select count(*) from mahjong.tables where session_id = '${SA}'`)}`)}
+  ${undo('fh', `insert into mahjong.hanchans select (jsonb_populate_record(null::mahjong.hanchans, to_jsonb(h) || jsonb_build_object('id', gen_random_uuid()))).*
+      from (select * from mahjong.hanchans where table_id = '${TA}' limit 1) h, generate_series(1, 60 - (select count(*) from mahjong.hanchans where table_id = '${TA}')::int) k;
+    ${W('fh', 2, 'ra', A(O('hanchan_start', { hanchan_id: U(), table_id: TA, seats: MA.slice(0, 4), cells: C4 })))}
+    ${ROW('fh_n', `select count(*) from mahjong.hanchans where table_id = '${TA}'`)}`)}
+  ${undo('fs', `insert into mahjong.sessions select (jsonb_populate_record(null::mahjong.sessions, to_jsonb(x) || jsonb_build_object('id', gen_random_uuid(), 'voided', true, 'created_at', x.created_at - interval '1 day'))).*   -- 取り消した古い日（開催の重なりの門に当てない）
+      from (select * from mahjong.sessions where room_id = ra limit 1) x, generate_series(1, 3000 - (select count(*) from mahjong.sessions where room_id = ra)::int) k;
+    ${W('fs', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-21', rate: null })))}
+    ${ROW('fs_n', `select count(*) from mahjong.sessions where room_id = ra`)}`)}
+  ${undo('fp', `update mahjong.rooms set row_count = 30000 where id = ra;
+    ${W('fp', 2, 'ra', A(ma(U(), 'P 越え')))}
+    ${ROW('fp_n', `select row_count from mahjong.rooms where id = ra`)}`)}
   ${undo('fn', `delete from mahjong.mj_caps where tbl = 'members' and scope = 'room';
     ${W('fn', 2, 'ra', A(ma(U(), 'cap 無し')))}`)}
   ${undo('fo', `update mahjong.mj_caps set cap = 1 where tbl = 'op_results' and scope = 'room';
@@ -834,56 +842,9 @@ const body = `
     update mahjong.op_results set at = now() - interval '3 hours' where room_id = ra and op_id = '${OPQ2}';
     ${W('fq3', 2, 'ra', A(ma(U(), '順3')), OPQ3)}
     ${ROW('fq_left', `select jsonb_agg(op_id::text order by op_id) from mahjong.op_results where room_id = ra`)}`)}
-  ${undo('fhi', `update mahjong.mj_caps set cap = (select history_count from mahjong.rooms where id = ra) where tbl = 'history' and scope = 'room';
-    ${W('fhi', 2, 'ra', A(ma(U(), '履歴満ち')))}`)}
-
-  /* ⑧'' H1 履歴のたたみ（h1_sadame v1.1 §3）＝F を今の数＋40・幅 10 にして 3行の組60＋12行の組を書く（塊の中だけ・組の切れ目が要る形） */
-  ${undo('fd', `${asWho(2)} delete from mahjong.limits where kind like 'write:%';
-    update mahjong.mj_caps set cap = 1000 where tbl = 'members' and scope = 'room';
-    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) + 40 where tbl = 'history' and scope = 'room';
-    update mahjong.mj_caps set cap = 10 where tbl = 'history_fold' and scope = 'room';
-    declare fF int := (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room');
-      fX0 bigint := (select count(*) from mahjong.history where room_id = ra and kind = 'row') + coalesce((select sum((fold ->> 'rows')::int) from mahjong.history where room_id = ra and kind = 'fold'), 0);
-      fW bigint := 0; fBad jsonb := '[]'::jsonb; fG jsonb := '{}'::jsonb; fgid uuid; fn int; fr jsonb; fhc int; fh int;
-    begin
-      for i in 1..61 loop
-        delete from mahjong.limits where kind like 'write:%';   -- 1分の上限（ur1m 120 行）に当てない
-        fr := public.mj_write(ra, gen_random_uuid(), case when i = 61
-          then (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fd大' || k)) from generate_series(1, 12) k)
-          else (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fd' || i || '-' || k)) from generate_series(1, 3) k) end);
-        select group_id into fgid from mahjong.history where room_id = ra order by id desc limit 1;
-        fn := (select count(*) from mahjong.history where room_id = ra and group_id = fgid);
-        fW := fW + fn; fG := fG || jsonb_build_object(fgid::text, fn);
-        fhc := (select history_count from mahjong.rooms where id = ra); fh := (select count(*) from mahjong.history where room_id = ra);
-        if fr ->> 'ok' is distinct from 'true' or fhc <> fh or fhc > fF then fBad := fBad || jsonb_build_array(jsonb_build_object('i', i, 'r', fr, 'hc', fhc, 'h', fh, 'F', fF)); end if;
-      end loop;
-      res := res || jsonb_build_object('fd', jsonb_build_object('bad', fBad, 'big', fn,
-        'folds', (select count(*) from mahjong.history where room_id = ra and kind = 'fold'),
-        'fold_first', (select min(id) from mahjong.history where room_id = ra) = (select id from mahjong.history where room_id = ra and kind = 'fold'),
-        'sum', (select count(*) from mahjong.history where room_id = ra and kind = 'row') + coalesce((select sum((fold ->> 'rows')::int) from mahjong.history where room_id = ra and kind = 'fold'), 0) - fX0 - fW,
-        'split', (select count(*) from jsonb_each_text(fG) e where exists (select 1 from mahjong.history z where z.group_id = e.key::uuid)
-                    and (select count(*) from mahjong.history z where z.group_id = e.key::uuid) <> e.value::int),
-        'fold_ok', (select fold ? 'ops' and fold ? 'from_at' and actor_user_id is null and tbl is null from mahjong.history where room_id = ra and kind = 'fold')));
-    end;`)}
-  ${undo('fdc', `${asWho(2)} delete from mahjong.limits where kind like 'write:%';
-    update mahjong.mj_caps set cap = 1000 where tbl = 'members' and scope = 'room';
-    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) + 3 where tbl = 'history' and scope = 'room';
-    update mahjong.mj_caps set cap = (select cap - 5 from mahjong.mj_caps where tbl = 'history' and scope = 'room') where tbl = 'history_fold' and scope = 'room';
-    declare cr jsonb; cg uuid;
-    begin
-      cr := public.mj_write(ra, gen_random_uuid(), (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fdc' || k)) from generate_series(1, 12) k));
-      select group_id into cg from mahjong.history where room_id = ra and kind = 'row' order by id desc limit 1;
-      res := res || jsonb_build_object('fdc', jsonb_build_object('r', cr, 'cur', (select count(*) from mahjong.history where group_id = cg),
-        'hc', (select history_count from mahjong.rooms where id = ra), 'h', (select count(*) from mahjong.history where room_id = ra),
-        'F', (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room'),
-        'old', (select count(*) from mahjong.history where room_id = ra and kind = 'row' and group_id <> cg)));
-    end;`)}
-  ${undo('fdn', `delete from mahjong.mj_caps where tbl = 'history_fold' and scope = 'room';
-    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history' and scope = 'room';
-    ${W('fdn', 2, 'ra', A(ma(U(), '幅無し')))}`)}
-  ${undo('fdw', `update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history' and scope = 'room';
-    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history_fold' and scope = 'room';
-    ${W('fdw', 2, 'ra', A(ma(U(), '幅がF')))}`)}
+  ${undo('fhi', `update mahjong.rooms set history_count = 10000 where id = ra;
+    ${W('fhi', 2, 'ra', A(ma(U(), '履歴越え')))}
+    ${ROW('fhi_n', `select history_count from mahjong.rooms where id = ra`)}`)}
 
   /* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2・各節を undo で分ける） */
   ${undo('qr', `${H14('qr')}
@@ -1096,11 +1057,10 @@ const body = `
       select ra, 'c' || k, (select rule_set_id from mahjong.rooms where id = ra), (select rule_version from mahjong.rooms where id = ra), us[1]
         from generate_series(1, 50 - (select count(*) from mahjong.leagues where room_id = ra)::int) k;
     ${W('g2a', 1, 'ra', A(lc(GB)))}
-    delete from mahjong.leagues where room_id = ra and name = 'c1';
-    ${W('g2b', 1, 'ra', A(lc(GB)))}`)}
+    ${ROW('g2a_n', `select count(*) from mahjong.leagues where room_id = ra`)}`)}
   ${RS}
   ${undo('g3', `insert into mahjong.rule_sets (id, version, room_id, rules)
-      select gen_random_uuid(), 1, ra, '{"players":4}'::jsonb from generate_series(1, 499 - (select count(*) from mahjong.rule_sets where room_id = ra)::int) k;
+      select gen_random_uuid(), 1, ra, '{"players":4}'::jsonb from generate_series(1, 500 - (select count(*) from mahjong.rule_sets where room_id = ra)::int) k;
     ${W('g3a', 1, 'ra', A(lc(GB)))}
     ${ROW('g3a_n', `select count(*) from mahjong.rule_sets where room_id = ra`)}
     ${W('g3b', 1, 'ra', A(lc(GC)))}
@@ -1501,23 +1461,14 @@ function check(out, lib, say) {
   ['55P03', '40P01', '40001'].forEach((c) => ok(`⑧ 一時の失敗（${c}）→ busy lock・何も書かない・ur1m +1・rn1d 0`, isErr('ie_' + c, 'busy', { what: 'lock' }) && has('ie_' + c, busyD), J([R('ie_' + c), d('ie_' + c)])));
   /* ⑧' */
   ok("⑧' members が上限 → full members・何も書かない", isErr('fm', 'full', { what: 'members' }) && has('fm', busyD), J([R('fm'), d('fm'), out.fm_err]));
-  ok("⑧' tables（開催日ごと）が上限 → full tables", isErr('ft', 'full', { what: 'tables' }), J([R('ft'), out.ft_err]));
-  ok("⑧' hanchans（卓ごと）が上限 → full hanchans", isErr('fh', 'full', { what: 'hanchans' }), J([R('fh'), out.fh_err]));
-  ok("⑧' sessions が上限 → full sessions", isErr('fs', 'full', { what: 'sessions' }), J([R('fs'), out.fs_err]));
-  ok("⑧' P（部屋の行）が上限 → full *", isErr('fp', 'full', { what: '*' }), J([R('fp'), out.fp_err]));
+  ok("⑧' H1' tables：開催日に10卓ある所へ11卓目 → ok（full にならない）", isOk('ft') && Number(out.ft_n) >= 11, J([R('ft'), out.ft_n, out.ft_err]));
+  ok("⑧' H1' hanchans：卓に60半荘ある所へ61本目 → ok", isOk('fh') && Number(out.fh_n) >= 61, J([R('fh'), out.fh_n, out.fh_err]));
+  ok("⑧' H1' sessions：部屋に3000日ある所へ3001日目 → ok", isOk('fs') && Number(out.fs_n) >= 3001, J([R('fs'), out.fs_n, out.fs_err]));
+  ok("⑧' H1' P：部屋の行 30000 の所へ書く → ok・数えは増える", isOk('fp') && Number(out.fp_n) > 30000, J([R('fp'), out.fp_n, out.fp_err]));
   ok("⑧' mj_caps の行が無い → full", isErr('fn', 'full', { what: 'members' }), J([R('fn'), out.fn_err]));
   ok("⑧' op_results が上限を越えると古い物が消える（full にならない）", isOk('fo1') && isOk('fo2') && Number(out.fo2_c1?.op) === 1, J([R('fo2'), out.fo2_c1, out.fo_err]));
   ok("⑧' op_results は at の古い物から消す（op_id の順でない）・今の組は残る", ['fq1', 'fq2', 'fq3'].every(isOk) && J(out.fq_left) === J([OPQ1, OPQ3].sort()), J([out.fq_left, out.fq_err]));
-  ok("⑧' history（F）が上限 → full history・何も書かない", isErr('fhi', 'full', { what: 'history' }) && has('fhi', busyD), J([R('fhi'), d('fhi'), out.fhi_err]));
-  { const z = out.fd || {};
-    ok("⑧'' H1 61組（最後は12行の組・幅10）→ 全部 ok・どの取引の後も history_count＝実の数 ≤ F", Array.isArray(z.bad) && z.bad.length === 0 && Number(z.big) >= 12, J([z.bad, z.big, out.fd_err]));
-    ok("⑧'' H1 要約は1行で一番古い id・中身（ops・from_at・押した人は空）", Number(z.folds) === 1 && z.fold_first === true && z.fold_ok === true, J(z));
-    ok("⑧'' H1 要約の rows＋残りの行＝前＋書いた行（数が消えない）", Number(z.sum) === 0, J(z.sum));
-    ok("⑧'' H1 残った組は途中で切れていない（今の組も）", Number(z.split) === 0, J(z.split)); }
-  { const c = out.fdc || {};
-    ok("⑧'' H1 今の組：F−幅が今の組（12行）より小さい → ok・今の組12行は残り・古い行は全部要約へ・history_count＝実の数 ≤ F", c.r && c.r.ok === true && Number(c.cur) === 12 && Number(c.old) === 0 && Number(c.hc) === Number(c.h) && Number(c.h) <= Number(c.F), J([c, out.fdc_err])); }
-  ok("⑧'' H1 幅の行が無い → たたまず full history・何も書かない", isErr('fdn', 'full', { what: 'history' }) && has('fdn', { h: 0, hc: 0 }), J([R('fdn'), d('fdn'), out.fdn_err]));
-  ok("⑧'' H1 幅が F 以上 → たたまず full history・何も書かない", isErr('fdw', 'full', { what: 'history' }) && has('fdw', { h: 0, hc: 0 }), J([R('fdw'), d('fdw'), out.fdw_err]));
+  ok("⑧' H1' history：history_count 10000 の所へ書く → ok・数えは増える（F の門もたたみも無い）", isOk('fhi') && Number(out.fhi_n) > 10000, J([R('fhi'), out.fhi_n, out.fhi_err]));
   /* ⑨ */
   ok('⑨ 同じ人の同じ op_id 2回 → 同じ答え・extra は1回だけ足す', isOk('rs1') && J(R('rs2')) === J(R('rs1')) && Number(out.rs1_x) === 1 && Number(out.rs2_x) === 1 && has('rs2', { ...none, ur: 1, rn: 0 }),
     J([R('rs1'), R('rs2'), out.rs1_x, out.rs2_x, d('rs2')]));
@@ -1635,9 +1586,9 @@ function check(out, lib, say) {
   ok('⑯ league_save：rules_alt null → alt を外す（rule_sets の行は残す）・同じ rules をもう一度 → 版を足さない', isOk('g1n') && g('g1n_r').alt === false && g('g1n_r').rva === null && has('g1n', { rc: 0, hc: 1 })
     && isOk('g1n2') && has('g1n2', { rc: 0 }) && g('g1n_r').rv === 2, J([R('g1n'), d('g1n'), g('g1n_r'), out.g1n_rs, R('g1n2'), d('g1n2')]));
   ok('⑯ 取り消したリーグ：session_add → bad at league_id・league_save → bad at league', isErr('g1l', 'bad', { at: 'league_id' }) && isErr('g1m', 'bad', { at: 'league' }), J([R('g1l'), R('g1m')]));
-  ok('⑯ 上限：leagues 50本の部屋で league_create → full what leagues・49本なら通る', isErr('g2a', 'full', { what: 'leagues' }) && has('g2a', { rc: 0, hc: 0 }) && isOk('g2b'), J([R('g2a'), d('g2a'), R('g2b'), out.g2_err]));
-  ok('⑯ 上限：rule_sets 499 → 作って500で通る・501 → full what rule_sets・league_save で版を足す → full・名だけの save は数えない', isOk('g3a') && Number(out.g3a_n) === 500
-    && isErr('g3b', 'full', { what: 'rule_sets' }) && isErr('g3c', 'full', { what: 'rule_sets' }) && isOk('g3d'), J([R('g3a'), out.g3a_n, R('g3b'), R('g3c'), R('g3d'), out.g3_err]));
+  ok("⑯ H1' leagues：50本の部屋で league_create → ok（51本目・full にならない）", isOk('g2a') && Number(out.g2a_n) >= 51, J([R('g2a'), out.g2a_n, out.g2_err]));
+  ok("⑯ H1' rule_sets：500 の部屋で作って 501・もう1本・league_save で版を足す → 全部 ok・名だけの save も ok", isOk('g3a') && Number(out.g3a_n) === 501
+    && isOk('g3b') && isOk('g3c') && isOk('g3d'), J([R('g3a'), out.g3a_n, R('g3b'), R('g3c'), R('g3d'), out.g3_err]));
   ok('⑯ 人ごと24時間5本：2部屋で5本は通る・6本目 → too_many what league_create・別の人は通る・25時間前の1本は数えない', ['g4a', 'g4b', 'g4c', 'g4d', 'g4e'].every(isOk)
     && isErr('g4f', 'too_many', { what: 'league_create' }) && has('g4f', { rc: 0, hc: 0 }) && isOk('g4g') && isOk('g4h'), J(['g4a', 'g4b', 'g4c', 'g4d', 'g4e', 'g4f', 'g4g', 'g4h'].map(R).concat([out.g4_err])));
   ok('⑯ 消えた L：部屋に居る人の呼びで持ち主へ継ぐ（取り消したリーグも）・版+1・履歴は1リーグ1行で同じ group_id・数えに足す・居る L は変えない・2回目は継がない', isOk('g5a')
@@ -1714,13 +1665,14 @@ const WAZA = [
   ['卓の締めの made_at < now() を外す', 'mahjong_private.mj_w_tf0', 'z.session_id = x.session_id and z.made_at < pg_catalog.now()', 'z.session_id = x.session_id', null, "⑦' 同じ取引の締め（made_at = now()）"],
   ['半荘の締めの判じを外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where false', null, "⑦' 前の組で締めた開催日：そろっていない半荘"],
   ['半荘の締めの made_at < now() を外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where t.id = x.table_id', null, "⑦' 同じ取引の締めだけ：そろっていない半荘"],
-  ['履歴の上限（F）を見ない', 'public.mj_write', 'if v_cap is null or r.history_count + v_n > v_cap then', 'if false then', null, "⑧' history（F）が上限"],
-  ['H1 たたみを呼ばない', 'public.mj_write', 'v_hc := mahjong_private.mj_w_fold(p_room_id, v_gid);', 'v_hc := null;', null, "⑧'' H1 61組"],
-  /* 11-22 直し：v_c0 の1か所だけ外すと s と delete の除きが残って同じ動きになる（どの試験も赤にならない同値の壊し）＝今の組の除き3か所を全部外す */
-  ['H1 今の組もたたむ', 'mahjong_private.mj_w_fold', ' and h.group_id <> p_gid', '', null, "⑧'' H1 今の組"],
-  ['H1 幅の確かめを外す', 'mahjong_private.mj_w_fold', 'or v_w <= 0 or v_w >= v_f then return null; end if;', 'then return null; end if;', null, "⑧'' H1 幅が F 以上"],
-  ['H1 たたんだ後も v_n を足す（二重）', 'public.mj_write', 'history_count = coalesce(v_hc, x.history_count + v_n)', 'history_count = coalesce(v_hc + v_n, x.history_count + v_n)', null, "⑧'' H1 61組"],
-  ['H1 組の切れ目まで取らない', 'mahjong_private.mj_w_fold', 'select pg_catalog.max(h.id) into v_cut from mahjong.history h', 'select v_c0 into v_cut from mahjong.history h', null, "⑧'' H1"],
+  /* H1'（h1b_sadame v2 §3）：消した上限の門を1つずつ戻す＝「越えても ok」の試験が赤になるか */
+  ["P の門を戻す（30000）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if r.row_count + v_made > 30000 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', '*')); end if;\n", null, "⑧' H1' P："],
+  ["F の門を戻す（10000）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if r.history_count + v_n > 10000 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'history')); end if;\n", null, "⑧' H1' history："],
+  ["日の上限を戻す（3000）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if (select pg_catalog.count(*) from mahjong.sessions x where x.room_id = p_room_id) > 3000 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'sessions')); end if;\n", null, "⑧' H1' sessions："],
+  ["卓の上限を戻す（10）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if coalesce((select pg_catalog.max(c) from (select pg_catalog.count(*) c from mahjong.tables x where x.room_id = p_room_id group by x.session_id) z), 0) > 10 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'tables')); end if;\n", null, "⑧' H1' tables："],
+  ["半荘の上限を戻す（60）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if coalesce((select pg_catalog.max(c) from (select pg_catalog.count(*) c from mahjong.hanchans x where x.room_id = p_room_id group by x.table_id) z), 0) > 60 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'hanchans')); end if;\n", null, "⑧' H1' hanchans："],
+  ["リーグの上限を戻す（50）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if (select pg_catalog.count(*) from mahjong.leagues x where x.room_id = p_room_id) > 50 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'leagues')); end if;\n", null, "⑯ H1' leagues："],
+  ["ルールの上限を戻す（500）", 'public.mj_write', "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n", "    -- H1'（h1b_sadame v2）：対局の記録に上限を置かない＝P・F・日・卓・半荘・リーグ・ルールの門は無い（行は全部残す・人の上限 members だけ下の輪で見る）\n    if (select pg_catalog.count(*) from mahjong.rule_sets x where x.room_id = p_room_id) > 500 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'rule_sets')); end if;\n", null, "⑯ H1' rule_sets："],
   /* ── 2c-2a2（作り write_2c2a2_tsukuri.md の 4）── */
   ['rename の dup で自分を除かない', 'mahjong_private.mj_w_op', 'x.name_key = v_key and x.id <> v_m.id limit 1', 'x.name_key = v_key limit 1', null, '⑪ member_rename：Ab → aB'],
   ['active に戻す時の dup を見ない', 'mahjong_private.mj_w_op', 'if v_b then\n        select x.id, x.name into c', 'if false then\n        select x.id, x.name into c', null, '⑪ member_active：true に戻す時だけ'],
@@ -1807,9 +1759,6 @@ const WAZA = [
   ["③' で who_league を見ずに全部の op を見る", 'public.mj_write', "v_need := case when v_wl = 'same' or v_wl = v_who then mahjong_private.mj_w_need(v_who, v_role) end;", "v_need := mahjong_private.mj_w_need(v_who, v_role);", null, '⑯ league_save：L は通る'],
   ["league_save の役の門を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_role(p_room, v_op, v_id, null, p_me, p_role, p_i);   -- L・取り消したリーグ＝bad at league", "null;", null, '⑯ league_save：L でない管'],
   ["session_add が rooms の版を写す", 'mahjong_private.mj_w_op', "select g.rule_set_id, g.rule_version into s;", "select x.rule_set_id, x.rule_version into s from mahjong.rooms x where x.id = p_room;", null, '⑯ league_save でルールを替えた後'],
-  ["数えの輪の leagues を外す（無い表は閉じる）", 'public.mj_write', "when 'leagues'  then (select pg_catalog.count(*) from mahjong.leagues x where x.room_id = v_rid)\n", "", null, '⑯ league_create：管は通る'],
-  ["数えの輪の leagues を外し null の閉じも外す", 'public.mj_write', "when 'leagues'  then (select pg_catalog.count(*) from mahjong.leagues x where x.room_id = v_rid)\n", "", ["v_cap is null or v_c is null or v_c > v_cap", "v_cap is null or v_c > v_cap"], '⑯ 上限：leagues 50本'],
-  ["rule_sets の上限を見ない", 'public.mj_write', "when 'rule_sets' then (select pg_catalog.count(*) from mahjong.rule_sets x where x.room_id = v_rid) end;", "when 'rule_sets' then 0 end;", null, '⑯ 上限：rule_sets 499'],
   ["24時間5本を6本にする", 'mahjong_private.mj_w_op', "x.created_at > pg_catalog.now() - interval '24 hours') >= 5 then", "x.created_at > pg_catalog.now() - interval '24 hours') >= 6 then", null, '⑯ 人ごと24時間5本'],
   ["消えた L を継がない", 'public.mj_write', "if v_role is not null then\n    for v_lg in", "if false then\n    for v_lg in", null, '⑯ 消えた L：部屋に居る人'],
   ["owner_or_sole_L で他の L を見ない", 'mahjong_private.mj_w_role', "elsif not exists (select 1 from mahjong.leagues l where l.id = any(v_ls) and l.owner_user_id is distinct from p_me) then v_need := null;", "elsif true then v_need := null;", null, '⑯ owner_or_sole_L'],
