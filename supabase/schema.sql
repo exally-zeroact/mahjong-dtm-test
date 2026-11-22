@@ -2047,6 +2047,20 @@ revoke all on function mahjong_private.mj_w_tvoid(uuid, uuid) from public, anon,
 
 -- 書き込みの数え（§5）：分の窓＝全員 ur1m・u1m・all1m＋入だけ rn1m（max(1,n)）／24時間（時の窓24本）＝入 rn1d・管と持ち主 uk1d・rk1d・全員 all1d（n だけ）
 --   p_room が null＝段①②の弾き＝u1m だけに1。古い窓は同じ取引で消す。(kind, key) の字の順に upsert
+-- 2c-2f 合図（2c2f_sadame v1.2 §1）＝倉庫からの送りは控え（本道は書いた端末の websocket）。中身は版の数だけ。
+-- ★送りの失敗で書きを落とさない★＝自分の begin…exception で包む（realtime の無い倉庫・名の変わり）。呼ぶ側の権限（mj_write の持ち主）で realtime.messages へ入る＝塊が戻れば行も戻る。
+create or replace function mahjong_private.mj_w_signal(p_ch text, p_v bigint) returns void
+language plpgsql set search_path = '' as $fn$
+begin
+  if p_ch is null or p_v is null then return; end if;
+  begin
+    perform realtime.send(pg_catalog.jsonb_build_object('v', p_v), 'w', p_ch, false);
+  exception when others then
+    raise log 'mj_w_signal % %', sqlstate, sqlerrm;
+  end;
+end $fn$;
+revoke all on function mahjong_private.mj_w_signal(text, bigint) from public, anon, authenticated;
+
 create or replace function mahjong_private.mj_w_count(p_room uuid, p_me uuid, p_role text, p_n int) returns void
 language plpgsql set search_path = '' as $fn$
 declare
@@ -3417,6 +3431,7 @@ declare
   v_ei jsonb := '{}'::jsonb; v_f0 boolean; v_mk boolean; e record;
   v_who text; v_re text; v_need text; v_ra boolean; v_wl text; v_lg record;
   v_pre jsonb; v_op0 text;
+  v_rv bigint; v_ch0 text; v_ch1 text;   -- 2c-2f：送る版・組の頭の合図の名・ok の後の合図の名
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -3483,7 +3498,9 @@ begin
       perform mahjong_private.mj_w_count(null, v_me, null, 0);
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone');
     end if;
-    update mahjong.rooms x set history_count = x.history_count + v_n, read_ver = x.read_ver + 1 where x.id = p_room_id;   -- 2d：持ち主が変わる＝読む側の owner・role も変わる
+    update mahjong.rooms x set history_count = x.history_count + v_n, read_ver = x.read_ver + 1 where x.id = p_room_id
+      returning x.read_ver, x.channel_key into v_rv, v_ch1;   -- 2d：持ち主が変わる＝読む側の owner・role も変わる
+    perform mahjong_private.mj_w_signal(v_ch1, v_rv);   -- 2c-2f §1 K-3 の継ぎ（塊の外＝継ぎと一緒に残る）
     select x.id, x.owner_user_id, x.deleted_at, x.row_count, x.history_count, x.kind, x.closed_at into r from mahjong.rooms x where x.id = p_room_id;
     if r.owner_user_id = v_me then v_role := 'owner'; end if;
     v_n := 0;
@@ -3568,6 +3585,7 @@ begin
 
   -- ⑤ 塊（副取引）
   begin
+    select x.channel_key into v_ch0 from mahjong.rooms x where x.id = p_room_id;   -- 2c-2f：組の頭の合図の名（room_secret・room_share で変わる）
     -- 段C §4 終えた shared で通る op＝room_leave・room_export・room_delete・room_undelete だけ（他は塊ごと bad closed）
     if r.closed_at is not null and exists (select 1 from pg_catalog.jsonb_array_elements(p_ops) t(o)
                                             where (t.o ->> 'op') not in ('room_leave', 'room_export', 'room_delete', 'room_undelete')) then
@@ -3673,7 +3691,10 @@ begin
 
     v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);
     -- 2d §1：読む口の版＝ok で返る組は全部 +1（書かなかった組も＝余分な読みは害が無い・塊の中＝弾かれた組は戻る）
-    update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id;
+    update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;
+    v_ret := v_ret || pg_catalog.jsonb_build_object('read_ver', v_rv);   -- 2c-2f v1.2：書いた端末が合図に載せる版
+    perform mahjong_private.mj_w_signal(v_ch0, v_rv);   -- 2c-2f §1 控えの送り（塊の中＝組が戻れば合図も出ない）
+    if v_ch1 is distinct from v_ch0 then perform mahjong_private.mj_w_signal(v_ch1, v_rv); end if;   -- room_secret・room_share＝古い名と新しい名の両方
     -- 送り直しの答え（履歴の行を書いた組だけ・部屋で cap を越えたら古い物から消す＝full にしない）
     if v_n > 0 then
       insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id,
@@ -3736,7 +3757,7 @@ begin
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'since');
   end if;
 
-  select x.id, x.owner_user_id, x.deleted_at, x.kind, x.name, x.closed_at, x.read_ver, x.rule_set_id, x.rule_version into r
+  select x.id, x.owner_user_id, x.deleted_at, x.kind, x.name, x.closed_at, x.read_ver, x.rule_set_id, x.rule_version, x.channel_key into r
     from mahjong.rooms x where x.id = p_room_id;
   if not found or r.deleted_at is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
   if r.owner_user_id = v_me then
@@ -3791,7 +3812,8 @@ begin
     into v_st;
 
   return pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
-    'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules)
+    'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
+                                          'channel_key', r.channel_key)   -- 2c-2f §1：room_secret の後に新しい名を知る道
             || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
     'st', v_st);
 end $fn$;

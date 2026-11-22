@@ -347,7 +347,7 @@ const brk = (fn, pairs) => {
   return t + (fn.startsWith('mahjong_private.') ? `\nrevoke all on function ${fn}${SIG[fn]} from public, anon, authenticated;` : '');
 };
 const WZ = [
-  ['W1 ok の組で read_ver を足さない', () => brk('public.mj_write', [['update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id;', 'null;']]),
+  ['W1 ok の組で read_ver を足さない', () => brk('public.mj_write', [['update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;', 'null;']]),
     ['§4-2 書いた後 read_ver+1']],
   ['W2 room_close も F の門を見る', () => brk('public.mj_write', [["if v_n > 0 and not (v_len = 1 and v_op0 = 'room_close') then", 'if v_n > 0 then']]),
     ['§4-3 F の部屋で room_close']],
