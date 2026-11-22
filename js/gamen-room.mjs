@@ -16,9 +16,13 @@
  *   送る前に必ず flushMerge(true)→未送信0 の門（頁を出す時・窓を開く時・窓の［部屋を終える］の3回）。印 mj-pending-close:<uid>:<rid>＝同じ op_id で送り直す。
  *   書く口は writeBlocked()＝控えの closed か、印がある間（closing）＝commit・plusMinus・flushMerge の3口で止める。
  *   終えた部屋は読み専（見るだけ）・足し①（closed で未送信が在る）は精算と窓の額を出さない。
+ * 2c-2f 合図（2c2f_sadame.md v1.2 §2）：部屋を開いたら控えの channel_key の公開の合図に入る（shared で終えていない部屋だけ）。
+ *   送る＝mj_write が ok と read_ver（数）を返したら今の管から {v: read_ver} を1回（SUBSCRIBED の時だけ・待たない・失敗は捨てる）。
+ *   受け＝v が since より大きい時だけすぐ sync（読み中・送り中は syncAgain）。読みの始めと始めの間は AIZU_GAP_MS（間が足りない読みは遅らせて必ず読む）。
+ *   mj_read の返しの room.channel_key が控えと違えば控えを書き換えて付け直す（roomInfo＝takeRead の門より前）。± のまとめは 0.3秒。
  */
 import { emptyState, applyOps, tableView, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
-import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed } from '../lib/outbox.mjs';
+import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid, sb, patchRoom, rpc, errText } from './gamen-core.mjs';
@@ -41,6 +45,8 @@ export async function readRoom(rid, since) {
   } catch (e) { return { error: { message: String((e && e.message) || e) } }; }
 }
 let unmountPrev = null; // 開き直した時に前の部屋の読み・送り・時計を止める
+/* 開いている部屋を閉じる（読み・送り・時計・合図を止める）＝別の部屋へ移る時（gamen-taikyoku の openRoom の頭・2c-2f） */
+export function leaveRoom() { if (unmountPrev) { const u = unmountPrev; unmountPrev = null; u(); } }
 const NAMES = (uid) => 'mj-names:' + uid;
 // 前の版の卓の人の控え（この端末だけ）。B1（b1_sadame_v2.md v2.1）から卓の席の正本は倉庫の t.seats（op table_seats）＝★もう書かない・開いたら消す★
 const SEATS = (uid, rid) => 'mj-seats:' + uid + ':' + rid;
@@ -68,7 +74,7 @@ if (typeof window !== 'undefined') {
 }
 
 export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, note, closedObi, reopen }) {
-  if (unmountPrev) { const u = unmountPrev; unmountPrev = null; u(); }
+  leaveRoom();
   const uid = me.id, rid = room.room_id;
   // 古い形の写し（st.v が 2 でない）は形だけ直す（値は変えない・needs_upload＝倉庫へ上げるのは 2d）。
   // 直した時は古い並び（古い形の op）を捨て、★並びを先に保存してから写しを保存★（途中で落ちても次に開けば同じ直しになる）
@@ -91,7 +97,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let closeErr = null;    // 対局終了を残せなかった時の err
   let pmErr = null;       // チップ等の［−］［＋］が弾かれた時の字（黙らない・v1.1）
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
-  const merge = new Map(); let mergeTimer = null; // extra_add の1秒まとめ
+  const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
   const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; render(); };
 
   if (!room.rules) {
@@ -126,6 +132,37 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let pendingStart = null; // 並びを送り切ってから始める続き
   let shownTag = null;
   let syncAgain = false;   // 送り・読みの最中に頼まれた読み直し（1本が終わったら読む）
+  // ── 2c-2f 合図（2c2f_sadame v1.2 §2）：合図は読む切っ掛けを足すだけ（10秒の読み・見えた時・online・開いた時・30秒の札はそのまま） ──
+  let chan = null, chanUp = false;       // 今入っている合図の管と、それが SUBSCRIBED か
+  let lastReadAt = 0, gapTimer = null;   // 読みの始め（始めと始めの間を AIZU_GAP_MS 空ける・間が足りない読みは捨てずに遅らせる）
+  function joinChan() {
+    leaveChan();
+    const key = room.channel_key;
+    if (dead || !shared || room.closed || typeof key !== 'string' || !key) return; // 部屋なし（solo）・終えた部屋・名を知らない（一覧から入った＝最初の mj_read の後）は入らない
+    let c = null;
+    try {
+      c = sb().channel(key, { config: { private: false } });
+      chan = c;
+      c.on('broadcast', { event: 'w' }, (m) => { if (chan === c) aizuIn(m && m.payload); })
+        .subscribe((s) => { if (chan === c) chanUp = s === 'SUBSCRIBED'; });
+    } catch { if (chan === c) { chan = null; chanUp = false; } } // 合図が使えなくても10秒の読みが控え
+  }
+  function leaveChan() {
+    const c = chan; chan = null; chanUp = false;
+    if (!c) return;
+    try { const p = sb().removeChannel(c); if (p && p.catch) p.catch(() => {}); } catch { /* 外せなくても chan===c でない＝受けても読まない */ }
+  }
+  // mj_write の返し（data）が ok で read_ver が数の時だけ、今の管から1回（★SUBSCRIBED でない時は送らない＝httpSend にしない★・待たない・失敗は黙って捨てる）
+  function aizuOut(d) {
+    const v = aizuSendV(d);
+    if (v === null || !chan || !chanUp) return;
+    try { const p = chan.send({ type: 'broadcast', event: 'w', payload: { v } }); if (p && p.catch) p.catch(() => {}); } catch { /* 倉庫の送りと10秒の読みが控え */ }
+  }
+  // 受け＝v が since より大きい時だけすぐ読む（★v は since に入れない★）
+  function aizuIn(payload) {
+    if (dead || stopped || aizuReadV(payload, since) === null) return;
+    sync();
+  }
   // 約束③・足し①（held は見ない）。merge＝1秒まとめに残った ±（閉じた部屋では flushMerge が積まない＝写しにだけ在る）も未送信に数える
   const closedHold = () => !!room.closed && (outbox.length > 0 || merge.size > 0 || !!st.needs_upload);
   // ── B3b-1 部屋を終える：印が在る間はずっと closing（網切れ・［もう一度］・ログインし直し・読み込み直しの後も・v4 止め2） ──
@@ -155,14 +192,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const patch = {};
     if (r.rules && typeof r.rules === 'object' && cn(r.rules) !== cn(room.rules)) patch.rules = r.rules;
     if (r.closed === true && !room.closed) patch.closed = true;
+    if (typeof r.channel_key === 'string' && r.channel_key && r.channel_key !== room.channel_key) patch.channel_key = r.channel_key; // 2c-2f：名が変わった（room_secret など）＝控えを書き換えて付け直す
     if (!Object.keys(patch).length) return;
     Object.assign(room, patch);
     patchRoom(uid, rid, patch);
     st.rules = room.rules;
     if (patch.closed) { try { localStorage.removeItem(PCLOSE); } catch { /* 読めなくても closed が勝つ */ } if (!table && !closedHold()) setTable(closedTable()); } // 終わった＝終える送りの印は要らない
+    if ((patch.channel_key || patch.closed) && mounted) joinChan(); // 2c-2f：新しい名へ付け直す（古い名は外す）・終えた部屋は外すだけ
   }
   function loginStop(err) { stopped = 'login'; loginErr = err || 'mj_session'; clearTimeout(retryTimer); rerender(); }
-  function goneStop() { stopped = 'gone'; clearTimeout(retryTimer); rerender(); }
+  function goneStop() { stopped = 'gone'; clearTimeout(retryTimer); leaveChan(); rerender(); }
   // 置き換えた後に描くのは room・seisan・rules の頁だけ（edit・pick は入れ物・focus・打ちかけを壊さない＝出る時に描く・v2 止め2）
   function rerender() { if (!dead && ['room', 'seisan', 'rules'].includes(page)) render(); }
   function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy].join('|'); }
@@ -185,6 +224,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
     lane = false;
     if (dead) return;
+    aizuOut(res && res.data); // 2c-2f：ok と read_ver ならその場で合図（待たない）
     if (!outbox.length || outbox[0].op_id !== head.op_id) { kick(); return; }
     const s = outboxStep(res);
     if (s.kind !== 'retry') { retryN = 0; clearTimeout(retryTimer); }
@@ -209,7 +249,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
   function kick() {
     if (dead || lane) return;
-    if (syncAgain && !stopped) { syncAgain = false; sync(); return; } // sync の終わりでまた kick される
+    if (syncAgain && !stopped) { syncAgain = false; if (sync()) return; } // sync の終わりでまた kick される（読みの間が足りず遅らせた時は送りを先に）
     if (pendingStart) {
       if (heldInfo(outbox) || stopped) { pendingStart = null; startMsg = null; rerender(); return; }
       if (!outbox.length && !merge.size) { const t = pendingStart; pendingStart = null; startShared(t); return; }
@@ -264,11 +304,18 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     repick();
     return 'ok';
   }
-  async function sync() {
-    if (!WRITE_READY || dead || stopped) return;
-    if (lane) { syncAgain = true; return; }
-    if (offline()) { refreshTag(); return; }
-    lane = true;
+  // 読み直しを頼む。返し＝今読み始めたか（false＝止まっている・1本の最中＝syncAgain・網が無い・間が足りず遅らせた）
+  function sync() {
+    if (!WRITE_READY || dead || stopped) return false;
+    if (lane) { syncAgain = true; return false; }
+    if (offline()) { refreshTag(); return false; }
+    const wait = lastReadAt + AIZU_GAP_MS - Date.now(); // 2c-2f 連打の守り：読みの始めと始めの間を空ける（★捨てずに遅らせて必ず1回読む★）
+    if (wait > 0) { if (!gapTimer) gapTimer = setTimeout(() => { gapTimer = null; sync(); }, wait); return false; }
+    readNow();
+    return true;
+  }
+  async function readNow() {
+    lane = true; syncAgain = false; lastReadAt = Date.now(); // 今から読む＝これより前の頼みはこの読みで足りる
     const res = await readRoom(rid, since);
     lane = false;
     if (dead) return;
@@ -349,6 +396,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         } else {
           const s = outboxStep(res);
           if (s.kind === 'done') {
+            aizuOut(d); // 2c-2f
             startOp = null;
             const a = applyOps(st, ops, { now: new Date().toISOString(), roomRules: room.rules });
             if (a.ok) { st = a.state; save(KEY(uid, rid), st); }
@@ -590,6 +638,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const res = await rpc('mj_write', { p_room_id: rid, p_op_id: op, p_ops: [{ op: 'room_close' }] });
     closeBusy = false;
     if (dead) return;
+    aizuOut(res); // 2c-2f：終えた事も合図（他の端末がすぐ読んで読み専になる）・rpc() の返しは data そのもの
     closeReply(res && typeof res === 'object' ? res : {});
   }
   function closeReply(res) {
@@ -598,7 +647,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       // ok／もう終わっている＝控えの行に closed（★rememberRoom を通さない＝ホームの並びと at を変えない★）→ 読み専で開き直す
       dropClose();
       closeUi = { open: false, msg: null, retry: false };
-      room.closed = true; patchRoom(uid, rid, { closed: true });
+      room.closed = true; patchRoom(uid, rid, { closed: true }); leaveChan(); // 終えた部屋は合図から外す
       const nt = res.ok === true ? null : errText(res, 'close');
       if (reopen) { reopen(nt); return; }
       note = nt; page = 'room'; setTable(closedTable()); render(); return;
@@ -976,7 +1025,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const k = mid + '|' + kind;
     merge.set(k, (merge.get(k) || 0) + add);
     clearTimeout(mergeTimer);
-    mergeTimer = setTimeout(flushMerge, 1000);
+    mergeTimer = setTimeout(flushMerge, 300); // 2c-2f：最後の押しから 0.3秒で並べる（1秒未満で他の端末へ）
     render();
   }
   // noSend＝読みの置き換えの前（並びに入れるだけ・送りは置き換えの後）
@@ -1098,11 +1147,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   unmountPrev = () => {
     flushMerge(true, true);
     dead = true;
-    clearInterval(poll); clearInterval(tick); clearTimeout(retryTimer); clearTimeout(mergeTimer);
+    clearInterval(poll); clearInterval(tick); clearTimeout(retryTimer); clearTimeout(mergeTimer); clearTimeout(gapTimer);
+    leaveChan(); // 2c-2f：部屋を出る・別の部屋へ移る時は合図から外す
     document.removeEventListener('visibilitychange', onVis);
     window.removeEventListener('online', onOnline);
   };
   mounted = true;
+  joinChan(); // 2c-2f：控えの channel_key で合図に入る（無ければ最初の mj_read の後に roomInfo で入る）
   render();
   sync(); // 開いた時（読み終えたら並びを送る）
 }

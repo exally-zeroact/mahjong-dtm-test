@@ -1,7 +1,7 @@
 /* outbox.test.mjs — ★lib/outbox.mjs（未送信の並びの受け方）が取り決め §6-11・12・14・14' の通りに振り分けるか★（CI）
  * 使い方: node tests/outbox.test.mjs  /  node tests/outbox.test.mjs --self-test（振り分けをわざと壊して赤になるか）
  */
-import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed } from '../lib/outbox.mjs';
+import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS } from '../lib/outbox.mjs';
 
 const CASES = [
   // [名前, res, kind, err?]
@@ -89,6 +89,14 @@ if (!self) {
   ok('捨てる＝先頭の1件だけ外す', dr.length === 2 && dr[0].op_id === 'b');
   ok('捨てた後も読み直しまで送らない（held_after_drop）', !canSend(dr) && dr.every((x) => x.held_after_drop) && heldInfo(dr).why === 'after_drop');
   ok('空の並びは送らない', !canSend([]) && heldInfo([]) === null);
+  console.log('■ 2c-2f 合図（2c2f_sadame v1.2 §2）');
+  ok('ok と read_ver（数）なら送る v', aizuSendV({ ok: true, read_ver: 7 }) === 7 && aizuSendV({ ok: true, read_ver: 0 }) === 0);
+  ok('ok でない返しは送らない', aizuSendV({ ok: false, err: 'conflict', read_ver: 7 }) === null && aizuSendV(null) === null && aizuSendV(undefined) === null && aizuSendV('x') === null);
+  ok('read_ver が数でない時は送らない', aizuSendV({ ok: true }) === null && aizuSendV({ ok: true, read_ver: '7' }) === null && aizuSendV({ ok: true, read_ver: NaN }) === null && aizuSendV({ ok: true, read_ver: null }) === null);
+  ok('since より大きい v は読む', aizuReadV({ v: 8 }, 7) === 8 && aizuReadV({ v: 1 }, null) === 1);
+  ok('since 以下の v は読まない', aizuReadV({ v: 7 }, 7) === null && aizuReadV({ v: 3 }, 7) === null);
+  ok('v が数でない合図は読まない', aizuReadV({ v: '9' }, 7) === null && aizuReadV({}, 7) === null && aizuReadV(null, 7) === null && aizuReadV({ v: Infinity }, 7) === null);
+  ok('読みの始めの間は 250ms', AIZU_GAP_MS === 250);
   console.log('\n' + p + ' passed, ' + f + ' failed');
   process.exit(f ? 1 : 0);
 } else {

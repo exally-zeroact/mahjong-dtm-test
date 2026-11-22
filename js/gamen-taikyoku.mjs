@@ -10,7 +10,7 @@ import { needLogin, showLogin, rpc, errText, rememberRoom, patchRoom, myRooms, r
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
-import { mountRoom, readRoom, markSynced } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
+import { mountRoom, readRoom, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
@@ -192,6 +192,7 @@ let openSeq = 0; // 開き直したら前の「ルールを読む」の続きを
 const CLOSED_OBI = 'この部屋は終わりました。見ることはできます。';
 /* note＝［部屋を終える］の返しの字（もう終わっていた時など・開き直した部屋の中に出す） */
 async function openRoom(roomId, note) {
+  leaveRoom(); // 前の部屋の読み・送り・時計・合図を止める（ルールを読む道でも・2c-2f）
   const room = myRooms(me.id).find((x) => x.room_id === roomId);
   if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
