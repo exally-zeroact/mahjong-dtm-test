@@ -164,7 +164,9 @@ async function doJoin() {
 function joined(res, token) {
   const old = myRooms(me.id).find((x) => x.room_id === res.room_id);
   // 入れるのは shared だけ（部屋なしは倉庫が潰す）＝kind 'shared'。番号は控えに持たない
-  rememberRoom(me.id, { room_id: res.room_id, kind: 'shared', name: res.name, role: res.role, channel_key: res.channel_key, token: token || (old && old.token) || undefined });
+  // 終えた部屋に入っていた人＝{ok:true, again:true, closed:true}＝控えに closed を足して読み専で開く（B3b-1 §3）
+  const closed = res.again === true && res.closed === true ? { closed: true } : {};
+  rememberRoom(me.id, { room_id: res.room_id, kind: 'shared', name: res.name, role: res.role, channel_key: res.channel_key, token: token || (old && old.token) || undefined, ...closed });
   openRoom(res.room_id);
 }
 
@@ -187,17 +189,28 @@ async function urlJoin(token) {
 
 /* ── 部屋の中 ── */
 let openSeq = 0; // 開き直したら前の「ルールを読む」の続きを捨てる
-async function openRoom(roomId) {
+const CLOSED_OBI = 'この部屋は終わりました。見ることはできます。';
+/* note＝［部屋を終える］の返しの字（もう終わっていた時など・開き直した部屋の中に出す） */
+async function openRoom(roomId, note) {
   const room = myRooms(me.id).find((x) => x.room_id === roomId);
   if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
   obi('');
+  // 終えた部屋の帯は mountRoom の前（ルールが届いていない端末・gateOnly の道でも出る・B3b-1 §3 止め2）。足し①の帯が出る時は mountRoom が外す（帯は1枚）
+  if (room.closed === true) obi(CLOSED_OBI, 'warn');
   show('vRoom');
   // 部屋なしは URL で入れない（倉庫が潰す）＝［部屋名と URL］を出さない（B3b で［みんなで見る部屋にする］に替わる）
   const share = room.kind !== 'solo' ? () => showMade(room, null) : null;
   const seq = ++openSeq;
   if (!room.rules) { readRules(roomId, share, seq); return; }
-  mountRoom($('vRoom'), { me, room, showShare: share, bar, relogin });
+  mountRoom($('vRoom'), roomOpts(room, share, note));
+}
+/* 部屋の中へ渡す物。closedObi(on)＝終えた部屋の帯（on＝出す・false＝外す）・reopen(note)＝終えた後に読み専で開き直す */
+function roomOpts(room, share, note) {
+  const rid = room.room_id;
+  return { me, room, showShare: share, bar, relogin, note,
+    closedObi: (on) => { if (on) obi(CLOSED_OBI, 'warn'); else if ($('obi').textContent === CLOSED_OBI) obi(''); },
+    reopen: (n) => openRoom(rid, n) };
 }
 /* rules の無い端末（join・一覧から入った）＝mountRoom の前に mj_read（2d §3・B3b-1 約束④）。
  * 読めるまで「部屋のルールを読んでいます」＋［もう一度］・10秒ごと（頁が見えている間・mountRoom の外で回す）。
@@ -223,7 +236,7 @@ function readRules(roomId, share, seq) {
       if (d.room.closed === true) patch.closed = true;
       const room = patchRoom(me.id, roomId, patch);
       if (!room) { openRoom(roomId); return; }
-      mountRoom($('vRoom'), { me, room, showShare: share, bar, relogin });
+      mountRoom($('vRoom'), roomOpts(room, share));
       return;
     }
     const e = res && res.error;

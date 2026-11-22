@@ -12,12 +12,16 @@
  *   送りと読みは1つの部屋で1本ずつ（lane）。置き換えは倉庫の st→migrateState→roomGate→並びを先頭から当て直す。
  *   置き換えない時＝st.needs_upload（端末だけの写し・2e まで）／控えが closed で並びが在る（約束③）／先頭に sent_at（送った印）が在り決まっていない。
  *   開催は倉庫で決める（shared は開いた時に作らない・最初の点で mj_read→無ければ [session_add, table_add] を直に送る）。
+ * B3b-1（gamen_b3b_sadame.md v4.1）：［ルール］の頁に［部屋を終える］（kan か owner・shared で終えていない部屋だけ）。
+ *   送る前に必ず flushMerge(true)→未送信0 の門（頁を出す時・窓を開く時・窓の［部屋を終える］の3回）。印 mj-pending-close:<uid>:<rid>＝同じ op_id で送り直す。
+ *   書く口は writeBlocked()＝控えの closed か、印がある間（closing）＝commit・plusMinus・flushMerge の3口で止める。
+ *   終えた部屋は読み専（見るだけ）・足し①（closed で未送信が在る）は精算と窓の額を出さない。
  */
 import { emptyState, applyOps, tableView, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
-import { esc, uuid, sb, patchRoom } from './gamen-core.mjs';
+import { esc, uuid, sb, patchRoom, rpc, errText } from './gamen-core.mjs';
 import { mountRules } from './gamen-rules.mjs';
 
 const WRITE_READY = true; // 2d：倉庫の mj_read が入った（送る所は sendOutbox・直に送るのは開催の始めの startShared だけ）
@@ -63,7 +67,7 @@ if (typeof window !== 'undefined') {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && flushNow) flushNow(); });
 }
 
-export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }) {
+export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, note, closedObi, reopen }) {
   if (unmountPrev) { const u = unmountPrev; unmountPrev = null; u(); }
   const uid = me.id, rid = room.room_id;
   // 古い形の写し（st.v が 2 でない）は形だけ直す（値は変えない・needs_upload＝倉庫へ上げるのは 2d）。
@@ -122,10 +126,19 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   let pendingStart = null; // 並びを送り切ってから始める続き
   let shownTag = null;
   let syncAgain = false;   // 送り・読みの最中に頼まれた読み直し（1本が終わったら読む）
-  const closedHold = () => !!room.closed && (outbox.length > 0 || !!st.needs_upload); // 約束③・足し①（held は見ない）
+  // 約束③・足し①（held は見ない）。merge＝1秒まとめに残った ±（閉じた部屋では flushMerge が積まない＝写しにだけ在る）も未送信に数える
+  const closedHold = () => !!room.closed && (outbox.length > 0 || merge.size > 0 || !!st.needs_upload);
+  // ── B3b-1 部屋を終える：印が在る間はずっと closing（網切れ・［もう一度］・ログインし直し・読み込み直しの後も・v4 止め2） ──
+  const PCLOSE = 'mj-pending-close:' + uid + ':' + rid;
+  const closingOn = () => { try { return !!localStorage.getItem(PCLOSE); } catch { return false; } };
+  const writeBlocked = () => !!room.closed || closingOn();
+  const blockRes = () => ({ ok: false, err: room.closed ? 'closed' : 'closing' });
+  let closeUi = { open: closingOn(), msg: null, retry: false }; // 印が在れば確かめの窓を開いたまま（同じ op_id で送り直せる）
+  let closeBusy = false;
   const staleRead = () => WRITE_READY && !stopped && !st.needs_upload && !closedHold() && Date.now() - lastIn > STALE_MS;
 
   function commit(ops) {
+    if (writeBlocked()) return blockRes(); // ★flushMerge より前で判じる★（終えた部屋・終える送りの最中は写し・merge・並びのどれも変えない）
     flushMerge(true); // 1秒まとめを先に並べる（並びの順＝押した順）
     const r = applyOps(st, ops, { now: new Date().toISOString(), roomRules: room.rules });
     if (!r.ok) return r.res;
@@ -146,12 +159,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
     Object.assign(room, patch);
     patchRoom(uid, rid, patch);
     st.rules = room.rules;
+    if (patch.closed) { try { localStorage.removeItem(PCLOSE); } catch { /* 読めなくても closed が勝つ */ } if (!table && !closedHold()) setTable(closedTable()); } // 終わった＝終える送りの印は要らない
   }
   function loginStop(err) { stopped = 'login'; loginErr = err || 'mj_session'; clearTimeout(retryTimer); rerender(); }
   function goneStop() { stopped = 'gone'; clearTimeout(retryTimer); rerender(); }
   // 置き換えた後に描くのは room・seisan・rules の頁だけ（edit・pick は入れ物・focus・打ちかけを壊さない＝出る時に描く・v2 止め2）
   function rerender() { if (!dead && ['room', 'seisan', 'rules'].includes(page)) render(); }
-  function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed].join('|'); }
+  function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy].join('|'); }
   function refreshTag() { if (!dead && tagKey() !== shownTag) rerender(); }
 
   /* 送り（約束⑤＝sb().rpc を直に呼び {data,error,status} を outboxStep へ） */
@@ -266,7 +280,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   /* ── 卓を決める ── */
   let table = null, R = room.rules, n = R.players, kieru = false;
   function setTable(t) { table = t || null; R = table ? table.rules : room.rules; n = R.players; kieru = R.kyotaku_end === 'kieru'; }
+  // 終えた部屋の卓＝最後の開催（取り消していない最後）の最初の卓（取り消していない卓を先に）＝続きの開催が無くても見せる（B3b-1 §3 止め1）
+  function closedTable() {
+    const ss = st.sessions.filter((s) => !s.voided);
+    const last = ss[ss.length - 1];
+    if (!last) return null;
+    const ts = st.tables.filter((t) => t.session_id === last.session_id);
+    return ts.find((t) => !t.voided) || ts[0] || null;
+  }
   function ensureTable() {
+    if (room.closed) return closedTable(); // ★終えた部屋は何も作らない★
     const sid0 = pickSession(st); // 区切りは［対局終了］を押した時だけ（時間・日付で決めない・司さん 11-20）
     const t0 = sid0 && st.tables.find((t) => t.session_id === sid0);
     if (t0) return t0;
@@ -280,6 +303,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   }
   // 置き換えのたびに開催と卓を決め直す（続きの開催が無くなった時は今の卓が写しに在ればそのまま見せる＝終えた対局を開き直すまで見せる今の動き）
   function repick() {
+    if (room.closed) { setTable(closedTable()); return; }
     const sid = pickSession(st);
     const t = sid && st.tables.find((x) => x.session_id === sid);
     if (t) { setTable(t); return; }
@@ -293,7 +317,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   }
   /* shared：mj_read で続きの開催を探し、無ければ [session_add, table_add] を並びを通さず直に送る（★並びが空の時だけ★） */
   async function startShared(then) {
-    if (dead || stopped) return;
+    if (dead || stopped || writeBlocked()) return;
     if (heldInfo(outbox)) { startMsg = null; render(); return; } // 止まっている間は始めない（今の held の帯）
     if (outbox.length || merge.size) { flushMerge(true, true); pendingStart = then; startMsg = '前に入れた点を送っています。送れたら始めます。'; render(); kick(); return; }
     if (offline()) { startMsg = '電波がつながってから始められます。'; render(); return; }
@@ -379,6 +403,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   }
 
   function render() {
+    // 終えた部屋の頁は room・seisan・rules だけ（他に居たら room へ・B3b-1 §3）
+    if (room.closed && !['room', 'seisan', 'rules'].includes(page)) { page = 'room'; entry = null; picking = null; }
+    if (closedObi) closedObi(!!room.closed && !closedHold()); // 足し①の帯が出る時は「見ることはできます」の帯を外す（帯は1枚）
     if (page === 'edit') return renderEdit();
     if (page === 'pick') return renderPick();
     if (page === 'seisan') return renderSeisan();
@@ -387,11 +414,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
     const ten = '/tensu.html?r=' + encodeURIComponent(JSON.stringify(room.rules)) + '&from=' + encodeURIComponent(location.pathname + location.search);
     bar({ back: 'ホーム', title: '対局', right: 'ルール', onRight: () => { page = 'rules'; render(); }, ten });
     // 卓がまだ無い（shared で開催を倉庫で決める前）＝部屋のルールで空の表だけ出す（最初の点で startShared）
+    const noteHtml = note ? '<p class="r-check bad" id="rCloseNote">' + esc(note) + '</p>' : '';
+    // 終えた部屋に開催が1つも無い＝中身の字だけ（卓を触らない・B3b-1 §3 止め1）
+    if (room.closed && !table) { shownTag = tagKey(); el.innerHTML = bandsHtml() + noteHtml + '<p class="setsumei" id="rEmpty">この部屋は終わりました。中身はありません。</p>'; wireBands(); return; }
     const v = table ? tableView(st, table.table_id) : { date: today(), rate: room.rules.rate ?? null, rows: [], nextNo: 1, windows: [], seatPeople: [] };
     shownTag = tagKey();
-    let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>' + bandsHtml();
+    let h = '<div class="r-top"><span>' + esc(md(v.date)) + '・' + rateText(v.rate) + '</span>' + liveTag() + '</div>' + bandsHtml() + noteHtml;
     h += v.rows.length ? renderTable(v) : renderHead(preSeats());
-    h += '<button class="btn btn-main r-add" id="rAdd">' + v.nextNo + '回目の点を入れる</button>';
+    // 終えた部屋は［n回目の点を入れる］を出さない・終える送りの最中（closing）は押せない形
+    if (!room.closed) h += '<button class="btn btn-main r-add" id="rAdd"' + (closingOn() ? ' disabled' : '') + '>' + v.nextNo + '回目の点を入れる</button>';
     h += staleHtml(); // 窓の上（2d §3 読めない時）
     // B1：席だけの卓（行がまだ無い）も窓と ± を出す＝並べは seatWin（画面だけ）。✓ と［精算を見る］は今まで通り windows が在る時だけ
     if (v.windows.length || v.seatPeople.length) h += renderWindows(v);
@@ -405,8 +436,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
 
   // 0回目（行が0）の表の頭＝卓の人が在れば名前の列・無ければ［＋名前］×n。押すと人を選ぶ（決めるだけ・点の画面へは行かない）
   function renderHead(ps) {
-    const cells = ps ? ps.map((m) => '<th><button type="button" class="r-nm" data-seats="1" aria-label="' + esc(nameOf(m)) + '・人を選び直す">' + esc(nameOf(m)) + '</button></th>')
-      : Array.from({ length: n }, () => '<th><button type="button" class="r-nm r-nm-add" data-seats="1">＋名前</button></th>');
+    const off = room.closed ? ' disabled' : ''; // 終えた部屋は卓の席を決めない（人を選ぶ頁へ行かない）
+    const cells = ps ? ps.map((m) => '<th><button type="button" class="r-nm" data-seats="1"' + off + ' aria-label="' + esc(nameOf(m)) + '・人を選び直す">' + esc(nameOf(m)) + '</button></th>')
+      : Array.from({ length: n }, () => '<th><button type="button" class="r-nm r-nm-add" data-seats="1"' + off + '>＋名前</button></th>');
     return '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + cells.join('') + '</tr></thead></table></div>';
   }
   // 卓の席（倉庫の t.seats＝tableView の seatPeople）。長さ n・全員 active の時だけ使う
@@ -435,7 +467,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
     const ppl = v.people;
     let h = '<div class="r-hyou-wrap"><table class="r-hyou"><thead><tr><th></th>' + ppl.map((p) => '<th>' + esc(p.name) + '</th>').join('') + '</tr></thead><tbody>';
     for (const r of v.rows) {
-      h += '<tr class="' + (r.voided ? 'r-void' : '') + '"><th><button class="r-no" data-h="' + esc(r.hanchan_id) + '" aria-label="' + r.no + '回目を直す">' + r.no + '回</button></th>';
+      h += '<tr class="' + (r.voided ? 'r-void' : '') + '"><th><button class="r-no" data-h="' + esc(r.hanchan_id) + '"' + (room.closed ? ' disabled aria-label="' + r.no + '回目"' : ' aria-label="' + r.no + '回目を直す"') + '>' + r.no + '回</button></th>'; // 終えた部屋は直す頁へ入らない
       for (const p of ppl) {
         const c = r.by[p.member_id];
         if (!c) { h += '<td class="r-na">—</td>'; continue; }
@@ -461,6 +493,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   const KINDS = [{ kind: 'chip', label: 'チップ' }, { kind: 'shugi', label: '祝儀' }, { kind: 'yaki', label: 'やきとり' }, { kind: 'tobi', label: '飛び賞' }];
   const perOf = (v, kind) => (kind === 'chip' ? R.chip_pt10 : kind === 'shugi' ? R.shugi_pt10 : (v.tableForSeisan || {})[kind + '_pt10']);
   function renderWindows(v) {
+    // 足し①（終えた部屋に送れていない点が在る）＝この端末の額は部屋の額と違う＝窓は名前だけと赤い1行（v4 止め4）
+    if (closedHold()) return '<div class="r-mado">' + seatWin(v).map((w) => '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div></div>').join('') + '</div><p class="r-check bad" id="rMadoNo">この端末の点の一部が部屋に入っていないので、額は出しません。</p>';
+    const pmOff = closingOn() ? ' disabled' : ''; // 終える送りの最中は ± を押せない形
     const ten = v.rate !== null;
     const unit = (pt10) => (ten ? (pt10 * v.rate / 10).toLocaleString('ja-JP') : (pt10 / 10).toFixed(1) + 'pt');
     let h = '<div class="r-mado">';
@@ -475,9 +510,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
         const val = ten ? w[kind + 'Big'] : w[kind + 'Pt10'];
         const valText = val === 0 ? '0' : (ten ? fmt(val) : fmtPt(val));
         h += '<div class="r-w-k">' + label + '<span>1枚＝' + unit(per) + '</span></div><div class="r-w-row">' +
-          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="-1" aria-label="' + esc(w.name) + 'の' + label + 'を減らす">−</button>' +
+          (room.closed ? '' : '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="-1"' + pmOff + ' aria-label="' + esc(w.name) + 'の' + label + 'を減らす">−</button>') + // 終えた部屋は［−］［＋］を出さない
           '<span class="r-cnt">' + fmtCnt(w[kind]) + '</span>' +
-          '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="1" aria-label="' + esc(w.name) + 'の' + label + 'を増やす">＋</button>' +
+          (room.closed ? '' : '<button class="r-pm" data-m="' + esc(w.member_id) + '" data-k="' + kind + '" data-a="1"' + pmOff + ' aria-label="' + esc(w.name) + 'の' + label + 'を増やす">＋</button>') +
           '<span class="r-w-val ' + (val === 0 ? 'zero' : sign(val)) + '">' + valText + '</span></div>';
       }
       h += '</div>';
@@ -503,10 +538,82 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
 
   function renderRules() {
     bar({ back: '対局', onBack: toRoom, title: 'ルール' });
+    const close = closeHtml(); // ★数える前に flushMerge(true)（1回目＝頁を出す時）★＝札の数も流した後の数
     shownTag = tagKey();
-    el.innerHTML = '<div id="rRules"></div>' + (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '');
+    el.innerHTML = '<div id="rRules"></div>' + (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '') + close;
     mountRules(el.querySelector('#rRules'), { rules: { ...R, rate: table ? tableView(st, table.table_id).rate : room.rules.rate ?? null }, readOnly: true });
     if (showShare) el.querySelector('#rShare').onclick = showShare;
+    wireClose();
+  }
+
+  // ── ［部屋を終える］（B3b-1 §0〜§2）──
+  // 出すのは shared で終えていない部屋の kan か owner（持ち主かは倉庫が決める）・mj_role を受けた端末（not_owner）には出さない
+  const canClose = () => shared && !room.closed && !room.not_owner && (room.role === 'kan' || room.owner === true);
+  /* 未送信0 の門＝★数える前に必ず flushMerge(true)★（1秒まとめは1秒後まで並びに入らない＝数えずに終えると黙って欠ける・止め2）。null＝送ってよい */
+  function closeGate() {
+    flushMerge(true);
+    if (st.needs_upload) return 'この端末の点がまだ部屋に上がっていません。上がってから終えられます。';
+    if (outbox.length || merge.size) return 'この端末にまだ送れていない点が ' + outbox.length + ' 組あります。' + (heldInfo(outbox) ? '止まっています。' : '') + '送れてから終えられます。';
+    return null;
+  }
+  function closeHtml() {
+    const msg = closeUi.msg ? '<p class="err" id="rCloseMsg">' + esc(closeUi.msg) + '</p>' + (closeUi.retry ? '<button class="btn btn-line" id="rCloseRetry"' + (closeBusy ? ' disabled' : '') + '>もう一度</button>' : '') : '';
+    if (!canClose()) return msg ? '<div class="r-close" id="rCloseBox">' + msg + '</div>' : '';
+    const gate = closeGate();
+    let h = '<div class="r-close" id="rCloseBox">';
+    if (!closeUi.open) h += '<button class="btn btn-aka-line" id="rCloseRoom"' + (gate ? ' disabled' : '') + '>部屋を終える</button>';
+    else {
+      h += '<p class="setsumei" id="rCloseQ">部屋を終えると、この部屋にはもう誰も書けません。入っていた人は見られます。同じ部屋名とパスでまた作れます。</p>' +
+        '<p class="setsumei" id="rCloseOthers">他の人の端末にまだ送れていない点があると、その点は部屋に入りません。</p>' +
+        '<button class="btn btn-aka" id="rCloseGo"' + (gate || closeBusy ? ' disabled' : '') + ' aria-busy="' + (closeBusy ? 'true' : 'false') + '">部屋を終える</button>';
+      if (!closingOn()) h += '<button class="btn btn-line" id="rCloseNo">やめる</button>'; // 送った後（印が在る間）はやめられない＝倉庫で通ったか分からない
+    }
+    if (gate) h += '<p class="err" id="rCloseGate">' + esc(gate) + '</p>';
+    return h + msg + '</div>';
+  }
+  function wireClose() {
+    const q = (s) => el.querySelector(s);
+    if (q('#rCloseRoom')) q('#rCloseRoom').onclick = () => { if (closeBusy) return; closeUi.msg = null; closeUi.retry = false; if (!closeGate()) closeUi.open = true; render(); }; // 2回目＝窓を開く時
+    if (q('#rCloseGo')) q('#rCloseGo').onclick = () => sendClose();
+    if (q('#rCloseRetry')) q('#rCloseRetry').onclick = () => sendClose();
+    if (q('#rCloseNo')) q('#rCloseNo').onclick = () => { if (closingOn()) return; closeUi = { open: false, msg: null, retry: false }; render(); };
+  }
+  const dropClose = () => { try { localStorage.removeItem(PCLOSE); } catch { /* 消せなくても次の ok で消す */ } };
+  /* 送る＝「flushMerge(true)→数える→0 なら closing（印）→送る」（どの送り直しも同じ道・3回目＝窓の［部屋を終える］）。送り直しは印の op_id */
+  async function sendClose() {
+    if (closeBusy || dead || !canClose()) return;
+    if (closeGate()) { closeUi.msg = null; closeUi.retry = false; rerender(); return; } // 増えていたら送らない
+    let op = null;
+    try { op = localStorage.getItem(PCLOSE); } catch { op = null; }
+    if (!op) { op = uuid(); localStorage.setItem(PCLOSE, op); } // ★印を置いた後は ± が merge に入らない（closing）★
+    closeBusy = true; closeUi.open = true; closeUi.msg = null; closeUi.retry = false; rerender();
+    const res = await rpc('mj_write', { p_room_id: rid, p_op_id: op, p_ops: [{ op: 'room_close' }] });
+    closeBusy = false;
+    if (dead) return;
+    closeReply(res && typeof res === 'object' ? res : {});
+  }
+  function closeReply(res) {
+    const e = res.err, at = res.at || res.what;
+    if (res.ok === true || (e === 'bad' && at === 'closed')) {
+      // ok／もう終わっている＝控えの行に closed（★rememberRoom を通さない＝ホームの並びと at を変えない★）→ 読み専で開き直す
+      dropClose();
+      closeUi = { open: false, msg: null, retry: false };
+      room.closed = true; patchRoom(uid, rid, { closed: true });
+      const nt = res.ok === true ? null : errText(res, 'close');
+      if (reopen) { reopen(nt); return; }
+      note = nt; page = 'room'; setTable(closedTable()); render(); return;
+    }
+    if (e === 'mj_reauth' || e === 'mj_session') {
+      // 印は残す＝同じ人が入り直したら同じ op_id で送り直す（別の人なら gamen-taikyoku の relogin が start＝前の人の印は使わない）
+      closeUi.msg = errText(res, 'close'); closeUi.retry = false; rerender();
+      if (relogin) relogin(() => { if (!dead) sendClose(); });
+      return;
+    }
+    if (e === 'mj_role') { dropClose(); room.not_owner = true; patchRoom(uid, rid, { not_owner: true }); closeUi = { open: false, msg: errText(res, 'close'), retry: false }; rerender(); return; }
+    if (e === 'net' || e === 'offline' || e === 'busy' || e === 'server' || e === undefined || e === null) { closeUi.msg = errText(res, 'close'); closeUi.retry = true; rerender(); return; } // 印は残す
+    if (e === 'internal') { closeUi.msg = errText(res, 'close'); closeUi.retry = false; rerender(); return; } // 印は残す
+    // gone・mj_op_other_user・full（記録がいっぱい）・bad kind・知らない err＝同じ op_id で送り直しても同じ＝印を消す（黙らない）
+    dropClose(); closeUi = { open: false, msg: errText(res, 'close'), retry: false }; rerender();
   }
 
   function memberStats(mid) {
@@ -742,6 +849,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
     shownTag = tagKey();
     const top = '<div class="r-top"><span>' + (d.date ? esc(md(d.date)) + '・' : '') + ratesText(d.rates) + '・半荘' + d.count + '回</span>' + liveTag() + '</div>' + bandsHtml() + staleHtml(); // 精算の頁の上（2d §3 読めない時）
     if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; wireBands(); return; }
+    // 足し①＝この端末の写しの点が部屋に入っていない＝partial と同じく誰が誰に・1人ずつの額を1つも出さない（v3 止め2・s.missing が空でも出す）
+    if (closedHold()) { el.innerHTML = top + '<div class="r-red" id="sClosedNo"><b>この端末の点の一部が部屋に入っていないので、精算の額は出しません。</b></div>'; wireBands(); return; }
     const settles = st.settles.filter((x) => x.session_id === d.sid);
     const last = settles[settles.length - 1];
     const lastMissing = last ? (last.missing || []) : [];
@@ -753,9 +862,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
     const goBtn = s.missing.length ? '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>' : '';
     const errLine = closeErr ? '<div class="r-red"><b>対局終了を残せませんでした（' + esc(closeErr) + '）</b></div>' : '';
     // ［対局終了］の所＝入っていない物があれば1回目は確かめ（同じ位置に［戻って入れる］・その下に赤の箱と［n件のまま対局終了］）
-    const closeArea = (label) => (confirming && s.missing.length
-      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2">' + s.missing.length + '件のまま対局終了</button>'
-      : '<button class="btn btn-main" id="sClose">' + label + '</button>');
+    // 終えた部屋は［対局終了］を出さない・終える送りの最中は押せない形（B3b-1 §3）
+    const cz = closingOn() ? ' disabled' : '';
+    const closeArea = (label) => (room.closed ? '' : confirming && s.missing.length
+      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2"' + cz + '>' + s.missing.length + '件のまま対局終了</button>'
+      : '<button class="btn btn-main" id="sClose"' + cz + '>' + label + '</button>');
     let h = top;
     if (last) {
       if (lastMissing.length) h += '<div class="r-red"><b>' + hm(last.at) + ' に対局終了（入っていない物 ' + lastMissing.length + '件のまま・額は出しません）</b></div>';
@@ -808,7 +919,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
       if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
     }
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';
-    else if (!last) {
+    else if (!last && !room.closed) {
       h += errLine + closeArea('対局終了');
       h += '<p class="r-hint">対局終了すると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
     }
@@ -857,6 +968,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   }
 
   function plusMinus(mid, kind, add) {
+    if (writeBlocked()) return blockRes(); // ★写しに直に保存する前（applyOps より前）で止める★（± は commit を通らない・v3.1 naoshi）
     const r = applyOps(st, [{ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }], { roomRules: room.rules });
     if (!r.ok) { pmErr = r.res && r.res.at === 'member_id' ? 'この人はこの卓の席にいないので、入れられませんでした' : '入れられませんでした'; render(); return; }
     pmErr = null;
@@ -870,6 +982,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
   // noSend＝読みの置き換えの前（並びに入れるだけ・送りは置き換えの後）
   function flushMerge(quiet, noSend) {
     clearTimeout(mergeTimer);
+    if (writeBlocked()) return blockRes(); // 並びに積む前で止める（merge も消さない＝閉じた部屋では写しにだけ在る ± を closedHold が数える）
     const ops = [];
     for (const [k, add] of merge) { if (!add) continue; const [mid, kind] = k.split('|'); ops.push({ op: 'extra_add', table_id: table.table_id, member_id: mid, kind, add }); }
     merge.clear();
@@ -883,10 +996,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin }
 
   function wireRoom() {
     const q = (s) => el.querySelector(s);
-    q('#rAdd').onclick = () => needTable(() => startEntry(null));
-    for (const b of el.querySelectorAll('[data-seats]')) b.onclick = () => needTable(() => { picking = { seats: preSeats() || [], only: true }; page = 'pick'; render(); });
+    if (q('#rAdd')) q('#rAdd').onclick = () => { if (!writeBlocked()) needTable(() => startEntry(null)); };
+    for (const b of el.querySelectorAll('[data-seats]')) b.onclick = () => { if (!room.closed) needTable(() => { picking = { seats: preSeats() || [], only: true }; page = 'pick'; render(); }); };
     if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; render(); };
-    for (const b of el.querySelectorAll('.r-no')) b.onclick = () => startEntry(b.dataset.h);
+    for (const b of el.querySelectorAll('.r-no')) b.onclick = () => { if (!room.closed) startEntry(b.dataset.h); };
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
   }
   function wirePick() {

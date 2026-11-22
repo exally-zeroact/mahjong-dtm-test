@@ -41,12 +41,21 @@ export async function rpc(fn, args) {
 }
 
 /* ── 返しの字（客に見せる字・ここ1か所） ──
- * way＝'create'（作る）｜'name'（部屋名＋パスで入る）｜'url'（URL・QR で入る）。同じ err でも道で意味が違う（gamen_b3a_sadame v1.1）：
+ * way＝'create'（作る）｜'name'（部屋名＋パスで入る）｜'url'（URL・QR で入る）｜'close'（部屋を終える・B3b-1）。同じ err でも道で意味が違う（gamen_b3a_sadame v1.1）：
  * busy user（作る＝1人1日5つ／入る＝1分10回の外れ）・full（作る＝倉庫の枠／入る＝部屋の人数）・wrong（名前の道／URL の道）・locked（作る＝名前の止め） */
 export function errText(res, way) {
   const e = res && res.err;
   const w = res && res.what;
   const join = way === 'name' || way === 'url';
+  // way 'close'＝［部屋を終える］（gamen_b3b_sadame v4.1 §2・鍵は at と what の両方を見る）
+  if (way === 'close') {
+    const at = res && (res.at || res.what);
+    if (e === 'bad' && at === 'closed') return 'この部屋はもう終わっています。';
+    if (e === 'bad' && at === 'kind') return '部屋なしの対局は終えられません。';
+    if (e === 'full') return 'この部屋は記録がいっぱいのため、今は終えられません。';
+    if (e === 'mj_reauth') return '部屋を終えるには、パスワードでもう一度ログインしてください。';
+    if (e === 'mj_role') return '部屋を終えられるのは部屋の持ち主だけです。';
+  }
   switch (e) {
     case 'mj_session': return 'ログインが切れました。ログインし直してください。';
     case 'offline': return '電波がありません。つながってからもう一度押してください。';

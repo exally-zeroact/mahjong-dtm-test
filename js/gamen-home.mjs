@@ -36,7 +36,7 @@ async function draw() {
   const v = lt && !lt.gate ? lt : null;
   const m = v ? [md(v.date), v.nextNo > 1 ? '半荘' + (v.nextNo - 1) + '回目まで' : '', v.people.length ? v.people.length + '人' : ''].filter(Boolean).join(' ・ ') : '';
   box.href = '/taikyoku.html?room=' + encodeURIComponent(r.room_id);
-  box.innerHTML = '<span class="h-l">続きの部屋</span><span class="h-r">' + esc(r.name || (r.kind === 'solo' ? '対局' : '部屋')) + '</span>' +
+  box.innerHTML = '<span class="h-l">続きの部屋</span><span class="h-r">' + esc(r.name || (r.kind === 'solo' ? '対局' : '部屋')) + (r.closed === true ? '<small class="h-owari" id="hOwari">終わりました</small>' : '') + '</span>' + // 終えた部屋（B3b-1 §3）
     (m ? '<span class="h-m">' + esc(m) + '</span>' : '') + (lt && lt.gate ? '<span class="h-m" id="hGate">' + esc(gateText(lt.gate)) + '</span>' : '') + '<span class="h-go">対局に戻る ›</span>';
 }
 

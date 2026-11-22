@@ -150,6 +150,11 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .r-er-p { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* 枠の線のボタン */
 .btn-line { background: var(--c-men); color: var(--c-kon); border: 1px solid var(--c-kon); }
+/* ［部屋を終える］（B3b-1）＝赤字の線のボタン・確かめの窓の［部屋を終える］は赤 */
+.btn-aka-line { background: var(--c-men); color: var(--c-aka); border: 1px solid var(--c-aka); }
+.btn-aka { background: var(--c-aka); color: var(--c-kon-ji); border: 1px solid var(--c-aka); }
+.r-close { margin-top: 16px; }
+.r-close .setsumei { margin: 4px 0 8px; }
 /* 行の箱・精算（誰が誰に・1人ずつ） */
 .list { background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 12px; overflow: hidden; }
 .list-gap { margin-top: 12px; }
@@ -189,6 +194,7 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .h-l, .h-m { font-size: 13px; opacity: .85; }
 .h-r { margin-top: 2px; font-size: 18px; font-weight: 700; }
 .h-m { margin-top: 4px; }
+.h-owari { margin-left: 8px; font-size: 13px; font-weight: 600; opacity: .85; }
 .h-go { align-self: flex-start; display: inline-flex; align-items: center; min-height: 36px; margin-top: 10px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 700; background: var(--c-men); color: var(--c-kon); }
 .h-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .h-tile { display: flex; flex-direction: column; gap: 8px; min-height: 120px; padding: 14px; border-radius: 16px; border: 1px solid var(--c-sen); background: var(--c-men); color: var(--c-ji); text-decoration: none; }

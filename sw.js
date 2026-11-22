@@ -7,10 +7,10 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '3c4d037eef24';
+const VER = '0612ec696973';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
-  ['/css/gamen.css', '19f7dd6ca65526f59d73cc385aad8a1bc8eed4823f18382dc9c67c81decd6eda'],
+  ['/css/gamen.css', '3419661ea186be7f2e279f29b148dc25a01d94acd2532af26d2e56e004deb762'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
@@ -18,11 +18,11 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', 'd0b4695ce15c8db59365ca3ffde43e62c7ed98648d90ba246fad971a17711d99'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', '28bb747d94650e3f3a2ef7e71925ae1cf8c4ace3c6ecae50a2f373578db06e5c'],
-  ['/js/gamen-home.mjs', '5e47373820794a79c8469318f7b15be012d77381f9a3bd8018c57ee4b1ed2572'],
-  ['/js/gamen-room.mjs', '61ea9ce61d0e519076669ef4e6e56f4ec3532e8659f305f5793859db5bb70417'],
+  ['/js/gamen-core.mjs', '486fc9bf3f6f9adf7b14c3de7f02b321d056d89252294f4781f7a145e1fff2c8'],
+  ['/js/gamen-home.mjs', '815fa436786c070f73ed99a3c0609627f973bceda89084a7586ed0718a1ed047'],
+  ['/js/gamen-room.mjs', 'f38b73b06d24ef9e5bc0eae0996e86b61e5c14abec024e6bce3793d5882424a5'],
   ['/js/gamen-rules.mjs', 'dda182b290ec486b9438f148d631e61e05b17c77afd166de5524fdff19769ede'],
-  ['/js/gamen-taikyoku.mjs', 'e5f57203fb83dcdbc2663160bdfb8519675feaddc30f99caaced44f6059ff1e5'],
+  ['/js/gamen-taikyoku.mjs', '98eb3c77cf842de84e06cb7eddca93ced2d136d3da450280810f895831790186'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/sw-reg.js', '3dbafecd87029e9eb4f3165e7b2f01011ca3f289030a25c92a7a530109bf2c85'],
