@@ -837,6 +837,54 @@ const body = `
   ${undo('fhi', `update mahjong.mj_caps set cap = (select history_count from mahjong.rooms where id = ra) where tbl = 'history' and scope = 'room';
     ${W('fhi', 2, 'ra', A(ma(U(), '履歴満ち')))}`)}
 
+  /* ⑧'' H1 履歴のたたみ（h1_sadame v1.1 §3）＝F を今の数＋40・幅 10 にして 3行の組60＋12行の組を書く（塊の中だけ・組の切れ目が要る形） */
+  ${undo('fd', `${asWho(2)} delete from mahjong.limits where kind like 'write:%';
+    update mahjong.mj_caps set cap = 1000 where tbl = 'members' and scope = 'room';
+    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) + 40 where tbl = 'history' and scope = 'room';
+    update mahjong.mj_caps set cap = 10 where tbl = 'history_fold' and scope = 'room';
+    declare fF int := (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room');
+      fX0 bigint := (select count(*) from mahjong.history where room_id = ra and kind = 'row') + coalesce((select sum((fold ->> 'rows')::int) from mahjong.history where room_id = ra and kind = 'fold'), 0);
+      fW bigint := 0; fBad jsonb := '[]'::jsonb; fG jsonb := '{}'::jsonb; fgid uuid; fn int; fr jsonb; fhc int; fh int;
+    begin
+      for i in 1..61 loop
+        delete from mahjong.limits where kind like 'write:%';   -- 1分の上限（ur1m 120 行）に当てない
+        fr := public.mj_write(ra, gen_random_uuid(), case when i = 61
+          then (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fd大' || k)) from generate_series(1, 12) k)
+          else (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fd' || i || '-' || k)) from generate_series(1, 3) k) end);
+        select group_id into fgid from mahjong.history where room_id = ra order by id desc limit 1;
+        fn := (select count(*) from mahjong.history where room_id = ra and group_id = fgid);
+        fW := fW + fn; fG := fG || jsonb_build_object(fgid::text, fn);
+        fhc := (select history_count from mahjong.rooms where id = ra); fh := (select count(*) from mahjong.history where room_id = ra);
+        if fr ->> 'ok' is distinct from 'true' or fhc <> fh or fhc > fF then fBad := fBad || jsonb_build_array(jsonb_build_object('i', i, 'r', fr, 'hc', fhc, 'h', fh, 'F', fF)); end if;
+      end loop;
+      res := res || jsonb_build_object('fd', jsonb_build_object('bad', fBad, 'big', fn,
+        'folds', (select count(*) from mahjong.history where room_id = ra and kind = 'fold'),
+        'fold_first', (select min(id) from mahjong.history where room_id = ra) = (select id from mahjong.history where room_id = ra and kind = 'fold'),
+        'sum', (select count(*) from mahjong.history where room_id = ra and kind = 'row') + coalesce((select sum((fold ->> 'rows')::int) from mahjong.history where room_id = ra and kind = 'fold'), 0) - fX0 - fW,
+        'split', (select count(*) from jsonb_each_text(fG) e where exists (select 1 from mahjong.history z where z.group_id = e.key::uuid)
+                    and (select count(*) from mahjong.history z where z.group_id = e.key::uuid) <> e.value::int),
+        'fold_ok', (select fold ? 'ops' and fold ? 'from_at' and actor_user_id is null and tbl is null from mahjong.history where room_id = ra and kind = 'fold')));
+    end;`)}
+  ${undo('fdc', `${asWho(2)} delete from mahjong.limits where kind like 'write:%';
+    update mahjong.mj_caps set cap = 1000 where tbl = 'members' and scope = 'room';
+    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) + 3 where tbl = 'history' and scope = 'room';
+    update mahjong.mj_caps set cap = (select cap - 5 from mahjong.mj_caps where tbl = 'history' and scope = 'room') where tbl = 'history_fold' and scope = 'room';
+    declare cr jsonb; cg uuid;
+    begin
+      cr := public.mj_write(ra, gen_random_uuid(), (select jsonb_agg(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', 'fdc' || k)) from generate_series(1, 12) k));
+      select group_id into cg from mahjong.history where room_id = ra and kind = 'row' order by id desc limit 1;
+      res := res || jsonb_build_object('fdc', jsonb_build_object('r', cr, 'cur', (select count(*) from mahjong.history where group_id = cg),
+        'hc', (select history_count from mahjong.rooms where id = ra), 'h', (select count(*) from mahjong.history where room_id = ra),
+        'F', (select cap from mahjong.mj_caps where tbl = 'history' and scope = 'room'),
+        'old', (select count(*) from mahjong.history where room_id = ra and kind = 'row' and group_id <> cg)));
+    end;`)}
+  ${undo('fdn', `delete from mahjong.mj_caps where tbl = 'history_fold' and scope = 'room';
+    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history' and scope = 'room';
+    ${W('fdn', 2, 'ra', A(ma(U(), '幅無し')))}`)}
+  ${undo('fdw', `update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history' and scope = 'room';
+    update mahjong.mj_caps set cap = (select count(*) from mahjong.history where room_id = ra) where tbl = 'history_fold' and scope = 'room';
+    ${W('fdw', 2, 'ra', A(ma(U(), '幅がF')))}`)}
+
   /* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2・各節を undo で分ける） */
   ${undo('qr', `${H14('qr')}
     ${W('qr1', 2, 'ra', A(rl(0, 2)))}
@@ -1461,6 +1509,15 @@ function check(out, lib, say) {
   ok("⑧' op_results が上限を越えると古い物が消える（full にならない）", isOk('fo1') && isOk('fo2') && Number(out.fo2_c1?.op) === 1, J([R('fo2'), out.fo2_c1, out.fo_err]));
   ok("⑧' op_results は at の古い物から消す（op_id の順でない）・今の組は残る", ['fq1', 'fq2', 'fq3'].every(isOk) && J(out.fq_left) === J([OPQ1, OPQ3].sort()), J([out.fq_left, out.fq_err]));
   ok("⑧' history（F）が上限 → full history・何も書かない", isErr('fhi', 'full', { what: 'history' }) && has('fhi', busyD), J([R('fhi'), d('fhi'), out.fhi_err]));
+  { const z = out.fd || {};
+    ok("⑧'' H1 61組（最後は12行の組・幅10）→ 全部 ok・どの取引の後も history_count＝実の数 ≤ F", Array.isArray(z.bad) && z.bad.length === 0 && Number(z.big) >= 12, J([z.bad, z.big, out.fd_err]));
+    ok("⑧'' H1 要約は1行で一番古い id・中身（ops・from_at・押した人は空）", Number(z.folds) === 1 && z.fold_first === true && z.fold_ok === true, J(z));
+    ok("⑧'' H1 要約の rows＋残りの行＝前＋書いた行（数が消えない）", Number(z.sum) === 0, J(z.sum));
+    ok("⑧'' H1 残った組は途中で切れていない（今の組も）", Number(z.split) === 0, J(z.split)); }
+  { const c = out.fdc || {};
+    ok("⑧'' H1 今の組：F−幅が今の組（12行）より小さい → ok・今の組12行は残り・古い行は全部要約へ・history_count＝実の数 ≤ F", c.r && c.r.ok === true && Number(c.cur) === 12 && Number(c.old) === 0 && Number(c.hc) === Number(c.h) && Number(c.h) <= Number(c.F), J([c, out.fdc_err])); }
+  ok("⑧'' H1 幅の行が無い → たたまず full history・何も書かない", isErr('fdn', 'full', { what: 'history' }) && has('fdn', { h: 0, hc: 0 }), J([R('fdn'), d('fdn'), out.fdn_err]));
+  ok("⑧'' H1 幅が F 以上 → たたまず full history・何も書かない", isErr('fdw', 'full', { what: 'history' }) && has('fdw', { h: 0, hc: 0 }), J([R('fdw'), d('fdw'), out.fdw_err]));
   /* ⑨ */
   ok('⑨ 同じ人の同じ op_id 2回 → 同じ答え・extra は1回だけ足す', isOk('rs1') && J(R('rs2')) === J(R('rs1')) && Number(out.rs1_x) === 1 && Number(out.rs2_x) === 1 && has('rs2', { ...none, ur: 1, rn: 0 }),
     J([R('rs1'), R('rs2'), out.rs1_x, out.rs2_x, d('rs2')]));
@@ -1658,6 +1715,12 @@ const WAZA = [
   ['半荘の締めの判じを外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where false', null, "⑦' 前の組で締めた開催日：そろっていない半荘"],
   ['半荘の締めの made_at < now() を外す', 'mahjong_private.mj_w_changed', 'where t.id = x.table_id and z.made_at < pg_catalog.now()', 'where t.id = x.table_id', null, "⑦' 同じ取引の締めだけ：そろっていない半荘"],
   ['履歴の上限（F）を見ない', 'public.mj_write', 'if v_cap is null or r.history_count + v_n > v_cap then', 'if false then', null, "⑧' history（F）が上限"],
+  ['H1 たたみを呼ばない', 'public.mj_write', 'v_hc := mahjong_private.mj_w_fold(p_room_id, v_gid);', 'v_hc := null;', null, "⑧'' H1 61組"],
+  /* 11-22 直し：v_c0 の1か所だけ外すと s と delete の除きが残って同じ動きになる（どの試験も赤にならない同値の壊し）＝今の組の除き3か所を全部外す */
+  ['H1 今の組もたたむ', 'mahjong_private.mj_w_fold', ' and h.group_id <> p_gid', '', null, "⑧'' H1 今の組"],
+  ['H1 幅の確かめを外す', 'mahjong_private.mj_w_fold', 'or v_w <= 0 or v_w >= v_f then return null; end if;', 'then return null; end if;', null, "⑧'' H1 幅が F 以上"],
+  ['H1 たたんだ後も v_n を足す（二重）', 'public.mj_write', 'history_count = coalesce(v_hc, x.history_count + v_n)', 'history_count = coalesce(v_hc + v_n, x.history_count + v_n)', null, "⑧'' H1 61組"],
+  ['H1 組の切れ目まで取らない', 'mahjong_private.mj_w_fold', 'select pg_catalog.max(h.id) into v_cut from mahjong.history h', 'select v_c0 into v_cut from mahjong.history h', null, "⑧'' H1"],
   /* ── 2c-2a2（作り write_2c2a2_tsukuri.md の 4）── */
   ['rename の dup で自分を除かない', 'mahjong_private.mj_w_op', 'x.name_key = v_key and x.id <> v_m.id limit 1', 'x.name_key = v_key limit 1', null, '⑪ member_rename：Ab → aB'],
   ['active に戻す時の dup を見ない', 'mahjong_private.mj_w_op', 'if v_b then\n        select x.id, x.name into c', 'if false then\n        select x.id, x.name into c', null, '⑪ member_active：true に戻す時だけ'],
@@ -1763,7 +1826,13 @@ else {
     const b0 = base.err ? null : check(base.out, lib, (s) => bl.push(s));
     /* MJ_WAZA_ONLY＝名にこの字を含む壊しだけ回す（直した1本の回し直し用・数は「回した数」で出す） */
     const only = process.env.MJ_WAZA_ONLY;
-    const WZ = only ? WAZA.filter(([n]) => n.includes(only)) : WAZA;
+    const WZ0 = only ? WAZA.filter(([n]) => n.includes(only)) : WAZA;
+    /* MJ_WAZA_SLICE＝「始め:終わり」で WAZA の並びの一部だけ回す（khaw は 114 本を続けて回すと CPU が絞られて 544 になる・11-22 測った）
+     * MJ_WAZA_REST＝1本ごとに休む秒。続けて2本 塊が回らなかったら残りは回さず「未測定」で止める（落ちた倉庫を叩き続けない） */
+    const sl = /^(\d+):(\d+)$/.exec(process.env.MJ_WAZA_SLICE || '');
+    const WZ = sl ? WZ0.slice(Number(sl[1]), Number(sl[2])) : WZ0;
+    const rest = Number(process.env.MJ_WAZA_REST || 0) * 1000;
+    let down = 0, unmeasured = 0;
     if (!b0 || b0.f > 0) {
       console.log('★中止★ 壊す前の素の回りが緑でない＝--waza は数えない: ' + (base.err || bl.filter((s) => s.startsWith('  ✗')).slice(0, 5).join(' ／ ')));
       exit = 1;
@@ -1775,8 +1844,11 @@ else {
         t = t.split(from).join(to);
         if (extra) { if (!t.includes(extra[0])) { console.log(`  ✗ 壊す字が無い（${name}・2つ目）`); exit = 1; continue; } t = t.split(extra[0]).join(extra[1]); }
         if (!bl.some((s) => s.startsWith('  ✓ ' + want))) { console.log(`  ✗ ${name}：狙った試験「${want}」が素の回りに無い`); exit = 1; continue; }
+        if (down >= 2) { unmeasured++; exit = 1; continue; }
+        if (rest) await new Promise((ok) => setTimeout(ok, rest));
         const r = await runSql(mkSql(t));
-        if (r.err) { console.log(`  ✗ ${name}：塊が回らなかった ${r.err.slice(0, 300)}`); exit = 1; continue; }
+        if (r.err) { down++; console.log(`  ✗ ${name}：塊が回らなかった ${r.err.slice(0, 300)}`); exit = 1; continue; }
+        down = 0;
         const lines = [];
         const { f } = check(r.out, lib, (s) => lines.push(s));
         const hit = lines.filter((s) => s.startsWith('  ✗ ' + want));
@@ -1785,7 +1857,7 @@ else {
       }
     }
     console.log(`
-write --waza: ${red}/${WZ.length} 狙いが赤になった${only ? `（MJ_WAZA_ONLY で ${WAZA.length} 本から絞った）` : ''}`);
+write --waza: ${red}/${WZ.length} 狙いが赤になった${only ? `（MJ_WAZA_ONLY で ${WAZA.length} 本から絞った）` : ''}${sl ? `（MJ_WAZA_SLICE ${sl[1]}:${sl[2]}・全部で ${WZ0.length} 本）` : ''}${unmeasured ? `・★未測定 ${unmeasured}（倉庫が続けて落ちたので回していない）★` : ''}`);
     if (red !== WZ.length) exit = 1;
   } else {
     const r = await runSql(mkSql());

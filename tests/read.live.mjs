@@ -8,7 +8,7 @@
  *   ・卓の rate_mode 'session' の鍵を外す（倉庫は 'session' の時に鍵を出さない＝rateModeOf が 'session' に倒す）
  * §4-2 門：ログイン無し mj_session・入っていない人 gone・無い部屋 gone・出された人 gone・消した部屋 gone・閉じた部屋 closed:true で読める・solo の持ち主・
  *   入の役・what 違い bad・since の形・since 同じで same・書いた後 read_ver+1・弾かれた組と送り直しは +1 しない・開催の重なりの門（dup what session）
- * §4-3 room_close：history_count＝F の部屋で ok（F+1 になる）・他の op は full what history
+ * §4-3 room_close：history_count＝F の部屋で ok・H1 で数えは実の数に置き直す（F を超えない）＝本当の満ちは write.live ⑧'' H1
  * D1（d1_sadame v2.1 §4）：leagues は st の外の段・形・版・取り消し・l・他の部屋・same・取り消したリーグの L を外す道
  * --waza：壊して狙った試験が赤になるか（壊した関数は塊の初めに当てる＝塊ごと戻る）
  * 使い方: node tests/read.live.mjs [--waza]
@@ -378,8 +378,8 @@ function check(o) {
   ok('D1 取り消したリーグの L は外せない（bad user_id league）→持ち主が league_owner_set→外せる', isErr(o.lg_k1, 'bad', { at: 'user_id', reason: 'league' })
     && isOk(o.lg_o) && isOk(o.lg_k2), J([o.lg_k1, o.lg_o, o.lg_k2]));
   /* §4-3 */
-  ok('§4-3 F の部屋で member_add → full what history', isErr(o.fc_ma, 'full', { what: 'history' }), J(o.fc_ma));
-  ok('§4-3 F の部屋で room_close → ok（history_count は F+1）', isOk(o.fc_cl) && Number(o.fc_hc) === 1, J([o.fc_cl, o.fc_hc]));
+  ok('§4-3（H1）history_count だけ F の部屋で member_add → ok（実の数で置き直す）', isOk(o.fc_ma), J(o.fc_ma));
+  ok('§4-3（H1）room_close → ok・history_count ≤ F', isOk(o.fc_cl) && Number(o.fc_hc) <= 0, J([o.fc_cl, o.fc_hc]));
   return L;
 }
 
