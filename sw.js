@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'f20ee5af29f9';
+const VER = '13a681072120';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0d4295e649b8963f2aae104ada337e8e0562876477847b1bf96f3db1652fdaa3'],
@@ -22,11 +22,12 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-home.mjs', '23289b2e1c368a39d95127f80fc84430355348f3ff63d348d0fb46a5f146ae2c'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
   ['/js/gamen-room.mjs', '2c1305286372c286a9661dbb9bce8e18c47d27446352552914a10c8dd0cd4737'],
-  ['/js/gamen-rules.mjs', '166b7a235b10c0677aab9c3a86ad60de30c346a4a984e4f66fb0bbc028e74b34'],
-  ['/js/gamen-taikyoku.mjs', 'f17e5f54dadb8c677238a75edd3bc9570ed2fc78ca2f45ae33e719a20658ff97'],
+  ['/js/gamen-rules.mjs', 'f6e2462ba0ac9c2858e3d7eba8497a425ba112630036925af0c528f6efaf851c'],
+  ['/js/gamen-taikyoku.mjs', '5a64e8fca6419bf0b2de5fe0124670b823f03a63313b1d2f0c3251e05216a1fa'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/kenban.mjs', '926ee5cd4d86a47b865d0faae7e5916a47fc695d31411c2bf5d4848e4828076c'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
+  ['/js/rules-memory.mjs', '38dc35121e4c63683a3a2ff658803d73368436990a20f121540d9b25b4391495'],
   ['/js/sw-reg.js', '6cabdb55f344b5ec9f1087e98e13efb4d7d41491745d089ee1c9fede624cd6ba'],
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
@@ -48,7 +49,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/machi.html', 'e90ddcde5e14ffd8830168be90dd8e021a431dd7580c040fd6b2e3a46c9da54e'],
   ['/manifest.json', '5d695eeb2f751e68f43ffd19adfec9144eccf4466f69dd9f86a48c4e00508afa'],
   ['/senseki.html', 'd374c1503dddb32142cd5f31133c4e51b67009531db32950d655a165998557e5'],
-  ['/taikyoku.html', '26d768ead7bac001fdec69c3f73b0dd2d39160513ab9a240658a680731e57eee'],
+  ['/taikyoku.html', 'de6ef1cb7e33a17f18a58f3b070ebb2793211599259031d60765f89b6f6c4e3e'],
   ['/tensu.html', '9ecd17a292b5d4619c8cee2aca9039db40fe244189b60d3ce0ef9001c11a0f0c'],
   ['/vendor/qrcode-generator.js', '79ec86f82856005b1c887905cfccfcfbec3821ca61c7fd5a952faa5f778f791c'],
   ['/vendor/supabase-2.112.4.js', 'f8ce7fab799af1916019cbd0b485b39bb80dbdbc6dc062909a751c9e5198e04c'],

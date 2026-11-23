@@ -49,7 +49,9 @@ export function umaText(uma) {
   return uma.map((u) => (okInt(u) ? sgn(u) : '—')).join('／');
 }
 
-export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) {
+// memory＝A14g（tataki/a14g_sadame_v1_1.md）新しい対局だけ：{3,4}＝rules-memory.mjs の fromMemory の返し（覚えの形／null＝無し／'bad'＝崩れ）。
+//   人数を押した時、覚えが在ればそれを全部出す・'bad' は既定（rate 100）＋onBad(n)・null は今の動き（4鍵だけ既定）。途中の変え・リーグは渡さない
+export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad }) {
   const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
   const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi）
@@ -136,7 +138,13 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
       else if (b.dataset.players !== undefined) {
         const n = JSON.parse(b.dataset.players);
-        if (n !== r.players) { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); if (onPlayers) onPlayers(n); }
+        if (n !== r.players) {
+          const m = memory ? memory[n] : null;
+          if (m && typeof m === 'object') { for (const k of Object.keys(r)) delete r[k]; Object.assign(r, JSON.parse(JSON.stringify(m))); }
+          else if (m === 'bad') { for (const k of Object.keys(r)) delete r[k]; Object.assign(r, { ...defaultRules(n), rate: 100 }); if (onBad) onBad(n); }
+          else { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); }
+          if (onPlayers) onPlayers(n);
+        }
       } else if (b.dataset.rate !== undefined) r.rate = b.dataset.rate === '' ? null : Number(b.dataset.rate);
       else if (b.classList.contains('tg')) {
         const on = b.getAttribute('aria-checked') !== 'true';

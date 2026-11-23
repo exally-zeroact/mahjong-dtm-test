@@ -11,7 +11,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -321,9 +321,107 @@ async function rulesKp() {
   await ctx.close();
 }
 
+// A14g（tataki/a14g_sadame_v1_1.md §3）覚えたルール：本物の taikyoku.html を、supabase-js だけ偽物に替えて押す（ログイン済み・rpc の返しを決める）
+const FAKE_SB = `window.supabase = { createClient: () => ({
+  auth: { getSession: async () => ({ data: { session: { user: { id: 'u-e2e', email: 'e2e@example.invalid' } } } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), signOut: async () => ({}) },
+  channel: () => ({ on() { return this; }, subscribe() { return this; }, unsubscribe() {} }), removeChannel() {},
+  rpc: async (fn, args) => { (window.__calls = window.__calls || []).push([fn, JSON.parse(JSON.stringify(args || {}))]); const h = (window.__S || {})[fn];
+    if (h === 'hang') return new Promise(() => {}); if (h === 'fail') return { data: null, error: { message: 'x' }, status: 500 };
+    if (fn === 'mj_room_create') return { data: { ok: true, room_id: 'r-e2e', kind: 'shared', channel_key: 'ck' }, error: null };
+    return { data: h, error: null }; },
+}) };`;
+async function memoOpen(S) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  await ctx.route('**/vendor/supabase-*.js', (rt) => rt.fulfill({ status: 200, contentType: 'text/javascript', body: FAKE_SB }));
+  await ctx.addInitScript((s) => { window.__S = s; }, S);
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  await p.goto(BASE + 'taikyoku.html');
+  await p.waitForSelector('#vChoose:not([hidden])', { timeout: 5000 });
+  await p.fill('#cName', '金曜の会'); await p.fill('#cPass', '1234');
+  return { p, ctx, errs };
+}
+const toRules = async (p) => { await p.click('#goRules'); await p.waitForSelector('#cRules input.box', { timeout: 8000 }); };
+const sent = async (p) => { await p.click('#btnCreate'); await p.waitForSelector('#vMade:not([hidden])', { timeout: 5000 }); return p.evaluate(() => window.__calls.filter((c) => c[0] === 'mj_room_create').map((c) => c[1].p_rules)); };
+const memoShown = (p) => p.evaluate(() => !document.getElementById('cMemo').hidden);
+const rpcN = (p) => p.evaluate(() => window.__calls.filter((c) => c[0] === 'mj_my_rules').length);
+async function rulesMemo() {
+  const R = await import(pathToFileURL(path.join(ROOT, 'lib/rules.mjs')).href);
+  const M4 = { ...R.defaultRules(4), start_pts: 30000, return_pts: 30000, uma: [20, 10, -10, -20], rate: 50, round: 'gosha' };
+  const M3 = { ...R.defaultRules(3), start_pts: 40000, return_pts: 45000, uma: [15, 0, -15], rate: 200 };
+  let c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: M3, 4: M4 }, last: 4 } });
+  await toRules(c.p);
+  ok('覚え① 帯なし', !(await memoShown(c.p)));
+  ok('覚え① レートの箱 50', (await c.p.inputValue('#rRate')) === '50');
+  let s = (await sent(c.p))[0];
+  ok('覚え① 送る rules＝4人 30000/30000 ウマ 20/10/−10/−20 レート 50・古い gosha は none', s.players === 4 && s.start_pts === 30000 && s.return_pts === 30000 && JSON.stringify(s.uma) === '[20,10,-10,-20]' && s.rate === 50 && s.round === 'none');
+  // ⑦b 作った画面の ‹ でルールへ戻ってもう一度押す＝同じ部屋の画面（TypeError にならない・2つ目を作らない）
+  await c.p.click('#barBack'); await c.p.waitForSelector('#vRules:not([hidden])');
+  await c.p.click('#btnCreate'); await c.p.waitForTimeout(300);
+  ok('覚え⑦b 作った後 ‹ で戻って押す→部屋の画面・作りは1回・止まらない', !(await c.p.isHidden('#vMade')) && (await c.p.evaluate(() => window.__calls.filter((x) => x[0] === 'mj_room_create').length)) === 1 && c.errs.length === 0);
+  // ⑦ もう一度作る時は読み直す
+  await c.p.click('#barBack'); await c.p.waitForSelector('#vRules:not([hidden])'); await c.p.click('#barBack'); await c.p.waitForSelector('#vChoose:not([hidden])');
+  await c.p.evaluate(() => { window.__S.mj_my_rules = { ok: true, rules: { 3: null, 4: { ...window.__S.mj_my_rules.rules[4], rate: 1000 } }, last: 4 }; });
+  await toRules(c.p);
+  ok('覚え⑦ 作った後もう一度→読み直す（2回・レート 1000）', (await rpcN(c.p)) === 2 && (await c.p.inputValue('#rRate')) === '1000');
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: M3, 4: null }, last: 3 } });
+  await toRules(c.p);
+  s = (await sent(c.p))[0];
+  ok('覚え② last 3→3人 40000/45000 ウマ 15/0/−15 レート 200', s.players === 3 && s.start_pts === 40000 && s.return_pts === 45000 && JSON.stringify(s.uma) === '[15,0,-15]' && s.rate === 200);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: M3, 4: M4 }, last: 4 } });
+  await toRules(c.p);
+  await c.p.click('#cRules [data-players="3"]');
+  s = (await sent(c.p))[0];
+  ok('覚え③ 3人を押す→3人の覚え全部（レート 200）', s.players === 3 && s.start_pts === 40000 && s.rate === 200);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: null, 4: M4 }, last: 4 } });
+  await toRules(c.p);
+  await c.p.click('#cRules [data-players="3"]');
+  s = (await sent(c.p))[0];
+  ok('覚え③b 覚えの無い3人を押す→持ち点 35000 の既定・レートは今のまま 50', s.players === 3 && s.start_pts === 35000 && s.rate === 50);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: 'fail' });
+  await toRules(c.p);
+  ok('覚え④ 読めない→帯', await memoShown(c.p));
+  s = (await sent(c.p))[0];
+  ok('覚え④ 読めない→既定 4人 25000・レート 100', s.players === 4 && s.start_pts === 25000 && s.rate === 100);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: 'hang' });
+  const t0 = Date.now();
+  await toRules(c.p);
+  ok('覚え④b 返らない→8秒までに帯・ボタンが押せる', Date.now() - t0 < 8000 && (await memoShown(c.p)) && !(await c.p.isDisabled('#btnCreate')));
+  s = (await sent(c.p))[0];
+  ok('覚え④b 返らない→既定レート 100', s.rate === 100 && s.start_pts === 25000);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: M3, 4: { players: 4, start_pts: 'x' } }, last: 4 } });
+  await toRules(c.p);
+  ok('覚え⑤ 4人が崩れ→帯', await memoShown(c.p));
+  ok('覚え⑤ 4人が崩れ→既定レート 100', (await c.p.inputValue('#rRate')) === '100');
+  await c.p.click('#cRules [data-players="3"]');
+  s = (await sent(c.p))[0];
+  ok('覚え⑤ もう一方（3人）は使える', s.players === 3 && s.start_pts === 40000 && s.rate === 200);
+  await c.ctx.close();
+
+  c = await memoOpen({ mj_my_rules: { ok: true, rules: { 3: null, 4: null }, last: null } });
+  await toRules(c.p);
+  ok('覚え⑥ 覚え無し→帯なし', !(await memoShown(c.p)));
+  s = (await sent(c.p))[0];
+  ok('覚え⑥ 覚え無し→今と同じ 4人 25000・レート 100', s.players === 4 && s.start_pts === 25000 && s.rate === 100 && c.errs.length === 0);
+  await c.ctx.close();
+}
+
 async function run() {
   bad.length = 0; n = 0;
-  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi], ['点数計算', tensu], ['ルールの鍵盤', rulesKp]]) {
+  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi], ['点数計算', tensu], ['ルールの鍵盤', rulesKp], ['覚えたルール', rulesMemo]]) {
     try { await fn(); } catch (e) {
       if (e === STOP) break;
       bad.push(`${nm} の途中で止まった（${String(e.message).split(String.fromCharCode(10))[0]}）`);
@@ -374,12 +472,19 @@ const BREAKS = [
   ['js/kenban.mjs', "if (fresh) { neg = fresh === 'neg';", "if (fresh) { neg = false;", 'ルール 入ってすぐの − を数の符号にしない'],
   ['js/kenban.mjs', "const close = (keepSp) => { const x = inp; inp = null; kp.hidden = true; if (sp && !keepSp) sp.hidden = true;", "const close = (keepSp) => { const x = inp; inp = null; kp.hidden = true; if (sp) sp.hidden = true;", 'ルール 箱から外れて閉じる時に下の空きを消す（入切が押せない）'],
   ['js/kenban.mjs', "kp.addEventListener('click', (ev) => { ev.stopPropagation();", "kp.addEventListener('click', (ev) => {", 'ルール 鍵の click を外へ出す（↓ で描き直して focus が飛ぶ）'],
+  ['js/gamen-taikyoku.mjs', 'if (st.unread || st.bad.includes(n)) memo();', '', '覚え 読めない時に帯を出さない'],
+  ['js/rules-memory.mjs', 'for (const k of HIDDEN) r[k] = d[k];', '', '覚え 隠した鍵を新しいルールにしない（gosha を持ち越す）'],
+  ['js/gamen-taikyoku.mjs', 'rules: st.memory[n] || { ...defaultRules(n), rate: 100 }', 'rules: st.memory[n] || { ...defaultRules(n) }', '覚え 既定のレートを null（なし）にする'],
+  ['js/gamen-taikyoku.mjs', '  reread = true; //', '  rulesCtl = null; reread = true; //', '覚え 作った後に rulesCtl を捨てる'],
+  ['js/gamen-taikyoku.mjs', 'const MEMO_MS = 5000;', 'const MEMO_MS = 600000;', '覚え 読みを切らない'],
+  ['js/gamen-rules.mjs', "if (m && typeof m === 'object') {", 'if (false) {', '覚え 人数を押しても覚えを出さない'],
+  ['js/gamen-taikyoku.mjs', 'if (rulesCtl && !reread) {', 'if (rulesCtl) {', '覚え 作った後に読み直さない'],
 ];
 
 if (!SELF) {
   const b = await run();
   for (const x of b) console.log('  ✗ ' + x);
-  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・ルールの鍵盤・webkit 390×844）`);
+  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・ルールの鍵盤・覚えたルール・webkit 390×844）`);
   if (!b.length) console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));
   await shut();
   process.exit(b.length ? 1 : 0);

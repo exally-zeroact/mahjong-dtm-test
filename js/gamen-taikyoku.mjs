@@ -9,12 +9,17 @@
 import { needLogin, showLogin, rpc, errText, rememberRoom, patchRoom, myRooms, roomUrl, tokenFromPath, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
+import { pickStart } from './rules-memory.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
 import { mountRoom, readRoom, readLeague, saveLeagueInfo, hasLeagueInfo, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
 let rulesCtl = null; // ⑨ のルール設定（作るたびに同じ物を使う）
+// A14g（tataki/a14g_sadame_v1_1.md）＝前回のルールは倉庫 mj_my_rules から。作った後は rulesCtl を残し印だけ立てる（部屋ができた画面の ‹ で戻っても read() が使える）＝次に goRules へ入った時に読み直す
+let reread = false;
+let readSeq = 0; // 読みの番（後から来た古い返しを捨てる）
+const MEMO_MS = 5000; // 読みの切り（返らない時もボタンを押せるようにする）
 let lastMade = null; // 作った直後に ‹ ルール設定 で戻っても、同じ中身なら2つ目を作らない
 let makeKind = 'shared'; // 'solo'＝［対局を始める］（部屋なし）／'shared'＝［みんなで見る部屋を作る］
 
@@ -51,15 +56,36 @@ async function sha256Hex(s) {
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
-function goRules(kind) {
+async function goRules(kind) {
   makeKind = kind;
   $('cErr0').textContent = '';
   const np = nameAndPass();
   if (np.err) { $('cErr0').textContent = np.err; return; }
-  if (!rulesCtl) rulesCtl = mountRules($('cRules'), { rules: { ...defaultRules(4), rate: 100 }, readOnly: false });
   $('cErr').textContent = '';
-  $('btnCreate').textContent = kind === 'solo' ? 'この設定で対局を始める' : 'この設定で部屋を作る';
+  const btn = $('btnCreate');
+  btn.textContent = kind === 'solo' ? 'この設定で対局を始める' : 'この設定で部屋を作る';
+  if (rulesCtl && !reread) { show('vRules'); return; } // vChoose と行き来する間は読み直さない（打ちかけを消さない）
+  const seq = ++readSeq;
+  $('cMemo').hidden = true;
+  $('cRules').innerHTML = '<p class="r-hint">ルールを読んでいます…</p>';
+  busy(btn, true);
   show('vRules');
+  let timer;
+  const res = await Promise.race([
+    rpc('mj_my_rules', {}),
+    new Promise((ok) => { timer = setTimeout(() => ok({ ok: false, err: 'timeout' }), MEMO_MS); }),
+  ]);
+  clearTimeout(timer);
+  if (seq !== readSeq) return; // 後から来た古い返し
+  busy(btn, false);
+  if ($('vRules').hidden) { rulesCtl = null; return; } // 読み中に別の画面へ移った＝引き戻さない（次に入った時に読み直す）
+  const st = pickStart(res);
+  const n = st.players;
+  const memo = () => { $('cMemo').hidden = false; }; // 黙らない（読めない／崩れた覚え）
+  if (st.unread || st.bad.includes(n)) memo();
+  const memory = { 3: st.bad.includes(3) ? 'bad' : st.memory[3], 4: st.bad.includes(4) ? 'bad' : st.memory[4] };
+  rulesCtl = mountRules($('cRules'), { rules: st.memory[n] || { ...defaultRules(n), rate: 100 }, readOnly: false, memory, onBad: memo });
+  reread = false;
 }
 async function doCreate() {
   const btn = $('btnCreate');
@@ -97,6 +123,7 @@ async function doCreate() {
   rememberRoom(me.id, room);
   markSynced(me.id, room.room_id); // 作った時の写しは空＝倉庫と同じ（2d の印・2d より前の写しと分ける）・他の端末の rules は openRoom の mj_read で控えに入る
   lastMade = { body, room };
+  reread = true; // 次の作りで覚えを読み直す（rulesCtl は残す＝‹ で戻っても押せる）
   made(room, pass);
 }
 /* 部屋なし＝作った画面を出さずにそのまま対局へ／部屋＝部屋ができた画面 */

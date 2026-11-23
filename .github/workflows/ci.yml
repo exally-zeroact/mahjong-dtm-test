@@ -85,6 +85,8 @@ jobs:
         run: node tests/kamicha.test.mjs
       - name: アプリの数字鍵盤の字の作り（js/kenban.mjs・A8）＝正解表（− はウマだけ・入ってすぐの −・小数1桁・桁の上限）
         run: node tests/kenban.test.mjs
+      - name: 覚えたルールの取り込み（js/rules-memory.mjs・A14g）＝期待値（崩れは bad・隠した鍵は新しいルール・初めの人数）
+        run: node tests/rules-memory.test.mjs
       - name: 精算（lib/seisan.mjs）＝正解表（チップ・祝儀・飛び賞・レートの無い卓）＋乱数の卓で合計0と払う回数
         run: node tests/seisan.test.mjs
       - name: 部屋の中の状態（lib/room-state.mjs）＝op を当てる・版の conflict・組ごと当てる・半荘の表・人ごとの窓・チップ祝儀・精算
@@ -167,12 +169,12 @@ jobs:
       - name: 早見表・待ち読み・点数計算・ルールの鍵盤の画面（webkit 390×844・切り替え・3人折半・切り上げ・九蓮・中切り・見えている牌・3人・読み直し・壊れた端末の値）
         timeout-minutes: 10
         run: node tests/e2e/keisan.e2e.mjs
-      - name: 画面の試験の自己確認（配る中身を1か所ずつ壊して 38 回とも赤になるか・作業木は触らない）
+      - name: 画面の試験の自己確認（配る中身を1か所ずつ壊して 45 回とも赤になるか・作業木は触らない）
         timeout-minutes: 20
         shell: bash
         run: |
           node tests/e2e/keisan.e2e.mjs --self-test | tee e2e-self.out
-          sh scripts/ci-yuka.sh e2e-self.out 38
+          sh scripts/ci-yuka.sh e2e-self.out 45
       - name: 端末の控えを本物の SW で（webkit・初めての claim・ネット無しで開く・/r/・版上げの帯・押した1枚だけ読み直す・入れ替えた直後に進んでも1つの版・start_url は素の道）
         timeout-minutes: 10
         run: node tests/e2e/sw.e2e.mjs
