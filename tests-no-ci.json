@@ -54,5 +54,9 @@
   "tests/c4.live.mjs": {
     "why": "本物のテスト倉庫の public.mj_write と mj_read を C4（table_rules・鎖・follow）で叩く（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
     "back": "CI に倉庫の鍵を置いた日"
+  },
+  "tests/p8-chain.live.mjs": {
+    "why": "本物のテスト倉庫で P8 の鎖（1,005 段を mj_write の table_rules で積む・mj_w_chain・tfollow の follow と鍵違い・埋めの冪等）を塊で叩いて戻し、2本の接続で並ぶ事を確かめる（鍵 ~/.supabase-token が要る・並ぶ試しは試しの人と部屋を書いて finally で消す）＝手元で schema.sql を当てた後に走らせる（--waza も手元）",
+    "back": "CI に倉庫の鍵を置いた日"
   }
 }

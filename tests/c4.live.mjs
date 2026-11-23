@@ -229,9 +229,9 @@ const TF = 'mahjong_private.mj_w_tfollow', OP = 'mahjong_private.mj_w_op';
 const WZ = [
   ['Z1 follow の印を見ない', () => brk(TF, [["if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;", 'null;']]),
     ['S1 鍵同じ follow 無しの hanchan_start：倉庫']],
-  ['Z2 鎖の最後へ運ばない', () => brk(TF, [['t := mahjong_private.mj_w_t(p_room, t.next_table_id, p_i, p_op, p_me, p_role);\n  end loop;', 'exit;\n  end loop;']]),
+  ['Z2 鎖の最後へ運ばない', () => brk(TF, [['  return t;\nend $fn$;', '  return s;\nend $fn$;']]),   // P8 v4：最後でなく始めの卓を返す
     ['S1 鍵同じ 終わりの st', 'S1 h2 は T2']],
-  ['Z3 鍵違いの区切りの後の extra_add を通す', () => brk(TF, [["if p_op = 'extra_add' and t.split_same is not true then", 'if false then']]),
+  ['Z3 鍵違いの区切りの後の extra_add を通す', () => brk(TF, [["if p_op = 'extra_add' and exists (", 'if false and exists (']]),   // P8 v4 §1-3 c の鍵違い
     ['S3 鍵違い・合計0 遅れた extra_add（follow:true）：倉庫']],
   ['Z4 合計0の門を外す', () => brk(OP, [['group by e.kind having pg_catalog.sum(e.value) <> 0', 'group by e.kind having false']]),
     ['S2 鍵違い・合計≠0 区切り（チップ単価）：倉庫']],

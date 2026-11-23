@@ -1792,6 +1792,21 @@ alter table mahjong.tables add column if not exists changed_by_user uuid;
 alter table mahjong.tables add column if not exists next_table_id uuid references mahjong.tables(id) on delete set null;
 alter table mahjong.tables add column if not exists split_same boolean;
 create unique index if not exists tables_next_one on mahjong.tables(next_table_id) where next_table_id is not null;
+-- P8（p8_sadame v4 §1-1）卓に鎖の印＝chain_head（鎖の頭の卓・null＝自分が頭）・chain_no（頭から何段目・頭は0）。
+--   鎖は索引1本で引く（段ごとにたどらない＝段の数の切りも輪も無い）。書くのは table_rules の続きの卓の insert だけ。FK は付けない（insert の鍵と tfollow の押さえがぶつかる種）
+alter table mahjong.tables add column if not exists chain_head uuid;
+alter table mahjong.tables add column if not exists chain_no int not null default 0;
+create index if not exists tables_chain on mahjong.tables(chain_head, chain_no) where chain_head is not null;
+create index if not exists tables_chain_diff on mahjong.tables(chain_head, chain_no) where next_table_id is not null and split_same is not true;
+-- 当て直しで今の行を next の鎖から埋める（冪等＝同じなら書かない）
+with recursive c(id, head, no) as (
+  select t.id, t.id, 0 from mahjong.tables t where not exists (select 1 from mahjong.tables p where p.next_table_id = t.id)
+  union all
+  select x.next_table_id, c.head, c.no + 1 from c join mahjong.tables x on x.id = c.id where x.next_table_id is not null
+) cycle id set lp using pth
+update mahjong.tables t set chain_head = case when c.no = 0 then null else c.head end, chain_no = c.no
+  from c where t.id = c.id and not c.lp
+   and (t.chain_head is distinct from (case when c.no = 0 then null else c.head end) or t.chain_no <> c.no);
 -- 表 mahjong.tobi は使わない（書く関数が無い・飛び賞は hanchans.tobi_to）。2c-2 で行0を数えてから消す
 --   （その時 tests/db-checks.live.mjs:66-67・tests/sweep.live.mjs:79・mj_sweep の tobi の数えも一緒に直す）。
 
@@ -1894,17 +1909,28 @@ revoke all on function mahjong_private.mj_w_t(uuid, uuid, int, text, uuid, text)
 --   卓は mj_w_t が for update で押さえた後の行の next_table_id を読む＝同時の table_rules と取り違えない
 create or replace function mahjong_private.mj_w_tfollow(p_room uuid, p_tid uuid, p_i int, p_op text, p_me uuid, p_role text, p_o jsonb) returns mahjong.tables
 language plpgsql set search_path = '' as $fn$
-declare t mahjong.tables; v_n int := 0;
+declare t mahjong.tables; s mahjong.tables; v_h uuid; v_l uuid;
 begin
+  -- P8 v4 §1-3 a：今の頭をそのまま（役の確かめ→follow の型→next が無ければ返す→区切られた卓で follow:true でなければ bad）
   t := mahjong_private.mj_w_t(p_room, p_tid, p_i, p_op, p_me, p_role);
   if p_o ? 'follow' and pg_catalog.jsonb_typeof(p_o -> 'follow') <> 'boolean' then perform mahjong_private.mj_w_bad(p_i, 'follow'); end if;
+  if t.next_table_id is null then return t; end if;
+  if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
+  s := t;
+  v_h := coalesce(s.chain_head, s.id);
+  -- b：最後の卓（鎖の印で1行）を押さえる。押さえた後に next が在る間（同時の区切り）は続きへ進んで押さえ直す
+  select x.id into v_l from mahjong.tables x where (x.id = v_h or x.chain_head = v_h) order by x.chain_no desc limit 1;
+  t := mahjong_private.mj_w_t(p_room, v_l, p_i, p_op, p_me, p_role);
   while t.next_table_id is not null loop
-    if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
-    if p_op = 'extra_add' and t.split_same is not true then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
-    v_n := v_n + 1;
-    if v_n > 1000 then raise exception 'mj_write: 卓の鎖が長すぎる'; end if;
     t := mahjong_private.mj_w_t(p_room, t.next_table_id, p_i, p_op, p_me, p_role);
   end loop;
+  -- 埋め漏れの守り（通さない側）：S と違う最後なのに段が S より大きくない＝印が壊れている
+  if t.id <> s.id and t.chain_no <= s.chain_no then raise exception 'mj_write: 卓の鎖の印が壊れている'; end if;
+  -- c：鍵違いは鎖が止まった後に見る（L を押さえた＝S〜L の間の next・split_same はもう変わらない）
+  if p_op = 'extra_add' and exists (select 1 from mahjong.tables x where (x.id = v_h or x.chain_head = v_h)
+       and x.chain_no >= s.chain_no and x.chain_no < t.chain_no and x.next_table_id is not null and x.split_same is not true) then
+    perform mahjong_private.mj_w_bad(p_i, 'table_id');
+  end if;
   return t;
 end $fn$;
 revoke all on function mahjong_private.mj_w_tfollow(uuid, uuid, int, text, uuid, text, jsonb) from public, anon, authenticated;
@@ -1912,17 +1938,10 @@ revoke all on function mahjong_private.mj_w_tfollow(uuid, uuid, int, text, uuid,
 -- C4 §3a 卓の鎖（next_table_id でつながる卓の全部・頭から順）＝区切っていない卓は自分1つ
 create or replace function mahjong_private.mj_w_chain(p_tid uuid) returns uuid[]
 language sql stable set search_path = '' as $fn$
-  with recursive b(id, d) as (
-    select p_tid, 0
-    union all
-    select x.id, b.d + 1 from mahjong.tables x join b on x.next_table_id = b.id where b.d < 1000
-  ), hd as (select b.id from b order by b.d desc limit 1),
-  f(id, d) as (
-    select hd.id, 0 from hd
-    union all
-    select x.next_table_id, f.d + 1 from mahjong.tables x join f on x.id = f.id where x.next_table_id is not null and f.d < 1000
-  )
-  select pg_catalog.array_agg(f.id order by f.d) from f
+  -- P8 v4 §1-2：鎖の印で引く（頭は PK・残りは索引 tables_chain）＝たどらない。卓が無い時は今と同じ [p_tid]
+  select coalesce((select pg_catalog.array_agg(x.id order by x.chain_no) from mahjong.tables x
+                    where x.id = h.h or x.chain_head = h.h), array[p_tid])
+    from (select coalesce((select coalesce(y.chain_head, y.id) from mahjong.tables y where y.id = p_tid), p_tid) as h) h
 $fn$;
 revoke all on function mahjong_private.mj_w_chain(uuid) from public, anon, authenticated;
 
@@ -3147,9 +3166,9 @@ begin
     end if;
     select pg_catalog.max(r.version) + 1 into v_rv from mahjong.rule_sets r where r.id = t.rule_set_id;
     insert into mahjong.rule_sets (id, version, room_id, rules) values (t.rule_set_id, v_rv, p_room, v_rules);
-    insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version, rate_mode, rate, extra_state, chip_state, shugi_state, seats, created_at)
+    insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version, rate_mode, rate, extra_state, chip_state, shugi_state, seats, created_at, chain_head, chain_no)
       values (v_id, p_room, t.session_id, t.label, t.players, t.rule_set_id, v_rv, v_mode, case when v_mode = 'num' then v_rate end,
-              'ok', 'unused', 'unused', t.seats, pg_catalog.clock_timestamp());
+              'ok', 'unused', 'unused', t.seats, pg_catalog.clock_timestamp(), coalesce(t.chain_head, t.id), t.chain_no + 1);   -- P8：鎖の印
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'tables', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('session_id', t.session_id, 'label', t.label, 'from_table_id', t.id, 'rule_version', v_rv), 1);
     update mahjong.tables x set next_table_id = v_id, split_same = v_b, version = x.version + 1 where x.id = t.id;

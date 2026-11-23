@@ -4,12 +4,13 @@
  * 使い方: node tests/room-state.test.mjs
  */
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
-  kindOf, yakiUsed, tobiUsed, readArgs, sessionOfRef, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
+  kindOf, yakiUsed, tobiUsed, readArgs, sessionOfRef, tableChain, followT, chainView, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
 import { readOps } from './mj-ops.test.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
@@ -1198,5 +1199,50 @@ console.log('■ P5 分けた読み（p5_sadame v1.3 §3＝loaded・unloaded・r
   ok('P5 readArgs：uuid の字でない id は入れない・50 まで', J(readArgs(R, [], 's1', 7).sessions) === '[]' && readArgs(R, [{ op_id: 'w', ops: Array.from({ length: 60 }, (_, i) => ({ op: 'settle_snap', session_id: '00000000-0000-4000-8000-0000000001' + String(i).padStart(2, '0') })) }], null, 7).sessions.length === 50);
   ok('P5 sessionOfRef：table_rules の新しい卓は元の卓の開催・引けなければ null', sessionOfRef(R, [{ ops: [{ op: 'table_rules', table_id: 'ta', new_table_id: 'tn' }] }], 'table_id', 'tn') === I(2) && sessionOfRef(R, [], 'table_id', 'tq') === null);
 }
+console.log('■ P8 卓の鎖は段の数で切らない（p8_sadame v4 §1-5・§3）');
+{
+  const K = { direct: true, role: 'kan' };
+  const U = (n) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
+  const N = 1005;
+  // 台：h1 と チップ m1 +3 / m2 -3 → ウマだけ変える区切りを N 回（枚の鍵は同じ＝split_same true・枚は最後へ移る）
+  let st = applyOps(base({ ...rules, uma: [30, 10, -10, -30] }), [hs('h1', [40000, 30000, 20000, 10000]),
+    { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 3 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'chip', add: -3 }]).state;
+  let last = 't1';
+  for (let i = 1; i <= N; i++) {
+    const r = applyOps(st, [{ op: 'table_rules', table_id: last, new_table_id: U(i), rules: { ...rules, uma: i % 2 ? [40, 20, -20, -40] : [30, 10, -10, -30] } }], K);
+    if (!r.ok) throw new Error('P8 の台が当たらない：' + i + ' ' + J(r.res));
+    st = r.state; last = U(i);
+  }
+  const ch = tableChain(st, 't1');
+  ok('P8 tableChain 1,005 段＝長さ 1,006・頭 t1・最後 ' + N + ' 段目・順（真ん中から引いても同じ）', ch.length === N + 1 && ch[0] === 't1' && ch[N] === U(N) && ch.every((x, i) => x === (i ? U(i) : 't1')) && J(tableChain(st, U(500))) === J(ch) && ch.broken !== true, ch.length + ' ' + ch[N]);
+  const cv = chainView(st, U(N));
+  ok('P8 chainView の和に1段目（t1）の半荘が入る・broken false', cv && cv.rows.length === 1 && cv.rows[0].table_id === 't1' && cv.broken === false && cv.total10.m1 !== 0, cv && J({ n: cv.rows.length, b: cv.broken }));
+  const fa = followT(st, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1, follow: true });
+  ok('P8 followT は 1,005 段先の最後の卓へ（1000 で切らない）', fa.t && fa.t.table_id === U(N), J(fa.bad));
+  const w = applyOps(st, [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1, follow: true }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'chip', add: -1, follow: true }]);
+  ok('P8 頭から follow の extra_add が最後の卓に入る（正味の門も通る）', w.ok && w.state.extras.find((e) => e.table_id === U(N) && e.member_id === 'm1').value === 4, J(w.res));
+  // 輪（状態を手で壊す）＝子のプロセスで 5 秒で切る（守りを外すと止まらない＝時間切れを赤に数える）
+  const small = applyOps(base({ ...rules, uma: [30, 10, -10, -30] }), [hs('h1', [40000, 30000, 20000, 10000]),
+    { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 3 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'chip', add: -3 }]).state;
+  const sp = applyOps(small, [{ op: 'table_rules', table_id: 't1', new_table_id: U(1), rules: { ...rules, uma: [40, 20, -20, -40] } }], K).state;
+  const cyc = clone(sp); cyc.tables.find((t) => t.table_id === U(1)).next_table_id = 't1';
+  const xs = cyc.extras.find((e) => e.table_id === U(1) && e.member_id === 'm1');
+  const lib = new URL('../lib/room-state.mjs', import.meta.url).href;
+  const code = `import { tableChain, followT, chainView, applyOps } from ${J(lib)};
+let s = ''; process.stdin.on('data', (d) => (s += d)); process.stdin.on('end', () => { const st = JSON.parse(s);
+const ch = tableChain(st, 't1'); const cv = chainView(st, 't1');
+const ft = followT(st, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1, follow: true });
+const fh = followT(st, { op: 'hanchan_start', table_id: 't1', follow: true });
+const g = applyOps(st, [{ op: 'extra_set', table_id: ${J(U(1))}, member_id: 'm1', kind: 'chip', value: 2, base_version: ${xs.version} }]);
+console.log(JSON.stringify({ broken: ch.broken === true, len: ch.length, cvBroken: cv.broken, t10: cv.total10.m1, ft: ft.bad && ft.bad.at, fh: fh.bad && fh.bad.at, g: g.ok ? 'ok' : g.res.err + '@' + g.res.at })); });`;
+  const cp = spawnSync(process.execPath, ['--input-type=module', '-e', code], { input: J(cyc), timeout: 5000, encoding: 'utf8' });
+  let o = null; try { o = JSON.parse(cp.stdout); } catch { o = null; }
+  ok('P8 輪の試験は 5 秒の内に終わる（時間切れ＝赤）', cp.error == null && cp.signal == null && o !== null, (cp.error && cp.error.code) + ' ' + cp.signal + ' ' + (cp.stderr || '').slice(0, 300));
+  ok('P8 輪で tableChain は broken・長さは卓の数まで', o && o.broken === true && o.len <= 2, J(o));
+  ok('P8 輪で chainView は broken true・和はそのまま（null にしない）', o && o.cvBroken === true && typeof o.t10 === 'number' && o.t10 !== 0, J(o));
+  ok('P8 輪で followT は bad at table_id（extra_add・鍵を見ない hanchan_start も）', o && o.ft === 'table_id' && o.fh === 'table_id', J(o));
+  ok('P8 輪の鎖の行を書く組は正味の門で bad at table_id', o && o.g === 'bad@table_id', J(o));
+}
+
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

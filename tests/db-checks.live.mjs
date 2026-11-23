@@ -249,5 +249,62 @@ end $m$;`;
     ck('見張り：読めない時（空）も赤', mihariAka(null).length > 0 && mihariAka({ jobs: {} }).length > 0);
   }
 }
+/* ── P8 鎖の印の見張り（p8_sadame v4 §3・作る時の注「埋め漏れの守り」）──
+ * 全部の卓で：next の先は chain_no＝前＋1・chain_head＝前の頭（前が頭なら前の id）／頭（前が無い卓）は chain_head null・chain_no 0／続きの卓には前が在る。
+ * 今の khaw で 0＋塊の中で鎖を作って壊すと赤（塊は最後に戻す）。 */
+{
+  const BAD = `((select count(*)::int from mahjong.tables t join mahjong.tables n on n.id = t.next_table_id
+                 where n.chain_no <> t.chain_no + 1 or n.chain_head is distinct from coalesce(t.chain_head, t.id))
+             + (select count(*)::int from mahjong.tables t
+                 where (t.chain_head is null) <> (t.chain_no = 0)
+                    or (t.chain_head is not null and not exists (select 1 from mahjong.tables p where p.next_table_id = t.id))
+                    or (t.chain_head is null and exists (select 1 from mahjong.tables p where p.next_table_id = t.id))))`;
+  const BR = [
+    ['続きの卓の chain_no を飛ばす', `update mahjong.tables set chain_no = 5 where id = v_t2;`],
+    ['続きの卓の chain_head を消す', `update mahjong.tables set chain_head = null, chain_no = 0 where id = v_t2;`],
+    ['続きの卓の chain_head を別の卓に', `update mahjong.tables set chain_head = gen_random_uuid() where id = v_t2;`],
+    ['頭の卓に段を付ける', `update mahjong.tables set chain_no = 1 where id = v_t1;`],
+  ];
+  const sqlC = `do $c$ declare res jsonb := '{}'; v_u uuid := gen_random_uuid(); v_r uuid := gen_random_uuid(); v_s uuid := gen_random_uuid();
+    v_d uuid := gen_random_uuid(); v_t1 uuid := gen_random_uuid(); v_t2 uuid := gen_random_uuid(); v_t3 uuid := gen_random_uuid(); begin
+  res := res || jsonb_build_object('now', ${BAD});
+  begin
+    insert into auth.users(id,email,aud,role,is_anonymous) values (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false);
+    insert into mahjong.rooms(id,name,room_no,pass_hash,url_token_hash,owner_user_id,channel_key)
+      values (v_r,'試験の部屋',lpad((floor(random()*1e8))::bigint::text,8,'0'),'p',md5(random()::text),v_u,md5(random()::text));
+    insert into mahjong.rule_sets(id,version,room_id,rules) values (v_s,1,v_r,'{"players":4}');
+    update mahjong.rooms set rule_set_id=v_s, rule_version=1 where id=v_r;
+    insert into mahjong.sessions(id,room_id,date,rule_set_id,rule_version) values (v_d,v_r,current_date,v_s,1);
+    insert into mahjong.tables(id,room_id,session_id,label,players,rule_set_id,rule_version,chain_head,chain_no) values
+      (v_t3,v_r,v_d,'卓1',4,v_s,1,v_t1,2), (v_t2,v_r,v_d,'卓1',4,v_s,1,v_t1,1), (v_t1,v_r,v_d,'卓1',4,v_s,1,null,0);
+    update mahjong.tables set next_table_id = v_t2, split_same = true where id = v_t1;
+    update mahjong.tables set next_table_id = v_t3, split_same = true where id = v_t2;
+    res := res || jsonb_build_object('ok3', ${BAD});
+${BR.map(([, body], i) => `    begin
+      ${body}
+      res := res || jsonb_build_object('b${i}', ${BAD});
+      raise exception 'MJUNDO';
+    exception when others then
+      if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('b${i}_err', sqlerrm); end if;
+    end;`).join('\n')}
+    raise exception 'MJUNDO';
+  exception when others then
+    if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('set_err', sqlerrm); end if;
+  end;
+  raise exception 'MJRESULT%', res::text;
+end $c$;`;
+  let cr = null, why = '';
+  try { await q(sqlC); why = '結果の例外が来なかった'; } catch (e) {
+    const at = e.message.indexOf('MJRESULT');
+    if (at < 0) why = e.message.slice(0, 300); else cr = JSON.parse(e.message.slice(at + 8).split(String.fromCharCode(10))[0]);
+  }
+  const ck = (name, cond, w = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (w ? ' — ' + w : '')); } };
+  if (!cr) ck('P8 鎖の印の見張りが読めた', false, why);
+  else {
+    ck('P8 鎖の印の見張り＝今の khaw で壊れた卓 0', cr.now === 0, JSON.stringify(cr.now));
+    ck('P8 鎖の印の見張り＝正しく作った3段の鎖で 0（今の数から増えない）', !cr.set_err && cr.ok3 === cr.now, JSON.stringify([cr.ok3, cr.set_err]));
+    BR.forEach(([name], i) => ck(`P8 鎖の印の見張り：${name} → 赤`, !cr['b' + i + '_err'] && cr['b' + i] > cr.now, JSON.stringify([cr['b' + i], cr['b' + i + '_err']])));
+  }
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
