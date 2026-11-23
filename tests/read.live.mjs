@@ -72,6 +72,10 @@ const L1 = 'a0000000-0000-4000-8000-00000000d101';
 const LC1 = { op: 'league_create', league_id: L1, name: 'D1 リーグ', date_from: '2026-11-01', date_to: null, rank_by: 'avg_pt', min_games: 10,
   players_main: 4, rules: { players: 4, rate: 100 }, rules_alt: { players: 3 } };
 const LCF = { op: 'league_create', league_id: 'a0000000-0000-4000-8000-00000000d102', name: '別の部屋', players_main: 4, rules: { players: 4 } };
+/* D2（d2_sadame v1.1 §4）：'league' の読み＝L1 の日 DS1（主＋alt の卓）・別のリーグ L2 の日 DS2・部屋の日 DS0 */
+const L2 = 'a0000000-0000-4000-8000-00000000d103', LF = 'a0000000-0000-4000-8000-00000000d102';
+const [DS1, DS2, DT1, DT2, DT3] = ['e301', 'e302', 'e303', 'e304', 'e305'].map((x) => 'a0000000-0000-4000-8000-00000000' + x);
+const RDL = (lid, extra = {}) => RD('rg', { league_id: lid, ...extra }, `'league'`);
 const RM4 = `public.mj_write(rg, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', 'account_remove', 'user_id', us[4])))`;
 
 /* ── 写しと倉庫の st を同じ形に揃える（§ 頭の注の4つだけ） ── */
@@ -263,6 +267,25 @@ begin
     ${asWho(1)} ${RS} ${T('lg_k1', RM4)}
     ${RS} ${T('lg_o', WR('rg', [{ op: 'league_owner_set', league_id: L1 }]))}
     ${RS} ${T('lg_k2', RM4)}`)}
+  /* D2 リーグの日の読み（塊ごと戻す） */
+  ${undo('dl', `${asWho(1)} ${RS}
+    ${T('dl_c', WR('rg', [LC1]))}
+    ${RS} ${T('dl_c2', WR('rg', [{ ...LC1, league_id: L2, name: 'D2 別', rules_alt: null }]))}
+    ${RS} ${T('dl_cf', WR('rf', [LCF]))}
+    ${RS} ${T('dl_s1', WR('rg', [{ op: 'session_add', session_id: DS1, date: '2026-11-22', rate: null, league_id: L1 },
+      { op: 'table_add', table_id: DT1, session_id: DS1, label: '卓1' }, { op: 'table_add', table_id: DT2, session_id: DS1, label: '卓2', alt: true }]))}
+    ${RS} ${T('dl_s2', WR('rg', [{ op: 'session_add', session_id: DS2, date: '2026-11-22', rate: null, league_id: L2 },
+      { op: 'table_add', table_id: DT3, session_id: DS2, label: '卓1' }]))}
+    ${T('dl_r1', RDL(L1))}
+    ${T('dl_r0', RD('rg'))}
+    ${T('dl_same', `public.mj_read(rg, 'league', jsonb_build_object('league_id', ${lit(L1)}, 'since', (select read_ver from mahjong.rooms where id = rg)))`)}
+    ${RS} ${T('dl_sv', WR('rg', [{ op: 'league_save', league_id: L1, base_version: 1, rules: { players: 4, rate: 200 }, rules_alt: { players: 3, rate: 300 } }]))}
+    ${T('dl_r2', RDL(L1))}
+    update mahjong.leagues set voided = true where id = ${lit(L2)}::uuid;
+    ${T('dl_r3', RDL(L2))}
+    ${asWho(3)} ${T('dl_g', RDL(L1))}
+    ${asWho(1)} ${T('dl_b1', RDL(LF))} ${T('dl_b2', RDL('a0000000-0000-4000-8000-00000000d1ff'))}
+    ${T('dl_b3', RD('rg', {}, `'league'`))} ${T('dl_b4', RDL('L1'))}`)}
   /* solo */
   ${asWho(1)}
   ${T('made_rs', CR(null, { players: 4 }))} rs := (r->>'room_id')::uuid;
@@ -377,6 +400,27 @@ function check(o) {
     J([lg(o.lg_r7), lg(o.lg_r8)]));
   ok('D1 取り消したリーグの L は外せない（bad user_id league）→持ち主が league_owner_set→外せる', isErr(o.lg_k1, 'bad', { at: 'user_id', reason: 'league' })
     && isOk(o.lg_o) && isOk(o.lg_k2), J([o.lg_k1, o.lg_o, o.lg_k2]));
+  /* D2 §4 read */
+  const dl1 = o.dl_r1 || {}, dl2 = o.dl_r2 || {};
+  const ids = (x) => (x && x.st && Array.isArray(x.st.sessions) ? x.st.sessions.map((y) => y.session_id) : []);
+  const tids = (x) => (x && x.st && Array.isArray(x.st.tables) ? x.st.tables.map((y) => y.table_id) : []);
+  ok('D2 塊が回った（リーグ2つ・日2つ・alt の卓）', !o.dl_err && isOk(o.dl_c) && isOk(o.dl_c2) && isOk(o.dl_s1) && isOk(o.dl_s2), J([o.dl_err, o.dl_c, o.dl_c2, o.dl_s1, o.dl_s2]));
+  ok("D2 'league' の形＝ok・read_ver・room・league・days・st（leagues の段は無い）・st の鍵は room と同じ", isOk(dl1) && Object.keys(dl1).sort().join(',') === 'days,league,ok,read_ver,room,st'
+    && Object.keys(dl1.st).sort().join(',') === ST_KEYS && dl1.league && dl1.league.league_id === L1 && dl1.league.l === true && dl1.room && dl1.room.kind === 'shared', J(dl1 && Object.keys(dl1)));
+  ok('D2 st はそのリーグの日だけ（他のリーグ・部屋の日が出ない）・卓は主と alt の2つ', J(ids(dl1)) === J([DS1]) && J(tids(dl1)) === J([DT1, DT2]), J([ids(dl1), tids(dl1)]));
+  ok('D2 alt の卓は3人の alt のルール・主の卓は4人・日の rate は主の rules の rate 100', dl1.st && dl1.st.tables && dl1.st.tables[0].rules.players === 4 && dl1.st.tables[1].rules.players === 3
+    && dl1.st.sessions[0].rate === 100, J(dl1.st && [dl1.st.sessions, dl1.st.tables && dl1.st.tables.map((t) => t.rules.players)]));
+  ok('D2 days＝日ごとの版（主 rate 100・alt 3人）', Array.isArray(dl1.days) && dl1.days.length === 1 && dl1.days[0].session_id === DS1 && dl1.days[0].rules.rate === 100
+    && dl1.days[0].rules_alt && dl1.days[0].rules_alt.players === 3, J(dl1.days));
+  ok("D2 room の st にリーグの日が出ない", isOk(o.dl_r0) && !ids(o.dl_r0).includes(DS1) && !ids(o.dl_r0).includes(DS2) && !tids(o.dl_r0).includes(DT1), J(ids(o.dl_r0)));
+  ok('D2 since が今の版 → same', o.dl_same && o.dl_same.ok === true && o.dl_same.same === true, J(o.dl_same));
+  ok('D2 league_save の後も前の日の days は前の版（league は新しい版 rate 200）', isOk(o.dl_sv) && dl2.days && dl2.days[0].rules.rate === 100 && dl2.days[0].rules_alt.rate !== 300
+    && dl2.league && dl2.league.rules.rate === 200, J([o.dl_sv, dl2.days, dl2.league && dl2.league.rules]));
+  ok('D2 主だけのリーグの日は rules_alt null・取り消したリーグも読める', isOk(o.dl_r3) && o.dl_r3.days.length === 1 && o.dl_r3.days[0].rules_alt === null && o.dl_r3.league.voided === true
+    && J(ids(o.dl_r3)) === J([DS2]), J(o.dl_r3 && [o.dl_r3.days, o.dl_r3.league]));
+  ok('D2 入でない人 → gone', isErr(o.dl_g, 'gone'), J(o.dl_g));
+  ok('D2 他の部屋のリーグ・無いリーグ・league_id 無し・uuid でない → bad what league_id', isErr(o.dl_b1, 'bad', { what: 'league_id' }) && isErr(o.dl_b2, 'bad', { what: 'league_id' })
+    && isErr(o.dl_b3, 'bad', { what: 'league_id' }) && isErr(o.dl_b4, 'bad', { what: 'league_id' }), J([o.dl_b1, o.dl_b2, o.dl_b3, o.dl_b4]));
   /* §4-3 */
   ok('§4-3（H1′）history_count 20000 の部屋で member_add → ok', isOk(o.fc_ma), J(o.fc_ma));
   ok('§4-3（H1′）その部屋で room_close → ok・数えは書いた分だけ増える（たたまない）', isOk(o.fc_cl) && Number(o.fc_hc) >= 2, J([o.fc_cl, o.fc_hc]));
@@ -414,10 +458,16 @@ const WZ = [
     ['D1 リーグの段は st の外']],
   ['W9 l を常に true', () => brk('public.mj_read', [["'l', l.owner_user_id = v_me or", "'l', true or"]]),
     ['D1 l は L の人だけ']],
-  ['W10 他の部屋の where を外す', () => brk('public.mj_read', [['into v_lg from mahjong.leagues l where l.room_id = p_room_id;', 'into v_lg from mahjong.leagues l where true;']]),
+  ['W10 他の部屋の where を外す', () => brk('public.mj_read', [['into v_lg from mahjong.leagues l where l.room_id = p_room_id and (v_lid is null or l.id = v_lid);', 'into v_lg from mahjong.leagues l where (v_lid is null or l.id = v_lid);']]),
     ['D1 他の部屋のリーグが出ない']],
   ['W11 版の結びを外す（いつも1版）', () => brk('public.mj_read', [['q.id = l.rule_set_id and q.version = l.rule_version)', 'q.id = l.rule_set_id and q.version = 1)']]),
     ['D1 league_save の後']],
+  ['W12 league の where league_id を外す（部屋の全部の日）', () => brk('public.mj_read', [['x.league_id is not distinct from v_lid', '(v_lid is not null or x.league_id is null)']]),
+    ['D2 st はそのリーグの日だけ']],
+  ['W13 days を今のリーグの版にする', () => brk('public.mj_read', [["'rules', (select q.rules from mahjong.rule_sets q where q.id = x.rule_set_id and q.version = x.rule_version),", "'rules', (select q.rules from mahjong.rule_sets q join mahjong.leagues l2 on l2.id = x.league_id where q.id = l2.rule_set_id and q.version = l2.rule_version),"]]),
+    ['D2 league_save の後も前の日']],
+  ['W14 他の部屋のリーグを通す', () => brk('public.mj_read', [['where l.id = v_lid and l.room_id = p_room_id) then', 'where l.id = v_lid) then']]),
+    ['D2 他の部屋のリーグ']],
 ];
 
 let pass = 0, fail = 0;

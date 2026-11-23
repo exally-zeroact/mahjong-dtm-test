@@ -1110,5 +1110,45 @@ console.log('■ C4 途中でルールを変える（c4_sadame v3.3 §2・§3・
   const s2 = g.ok ? sessionSeisan(g.state, 's1') : {};
   ok('C4 精算 例2（チップ 1→2pt・0で締めて区切る）＝ m1 1200・m2 -1200・m3 -800・m4 800', s2.ok && J([s2.ten.m1, s2.ten.m2, s2.ten.m3, s2.ten.m4]) === J([1200, -1200, -800, 800]), J(g.res) + J(s2.ten));
 }
+console.log('■ D2 リーグの頁の写し scope（d2_sadame v1.1 §2）');
+{
+  const LG = '0b9d2f1e-5c4a-4e8b-9f3d-2a1c7e6b5d40', LG2 = '1c8e3a2f-6d5b-4f9c-8e4a-3b2d8f7c6e51';
+  const ER = (r) => (r.ok ? 'ok' : r.res.err + (r.res.at ? '@' + r.res.at : '') + (r.res.need ? ':' + r.res.need : ''));
+  const main = { ...rules, rate: 100 };
+  const R3 = { ...defaultRules(3), rate: 50, hakoshita: false };
+  const m4 = applyOps(withRules(rules), ['m1', 'm2', 'm3', 'm4'].map((m, i) => ({ op: 'member_add', member_id: m, name: ['山田', '鈴木', '佐藤', '高橋'][i] }))).state;
+  const sc = { league_id: LG, isL: true, rules: main, rules_alt: R3, days: [] };
+  const sa = (o = {}) => ({ op: 'session_add', session_id: 'd1', date: '2026-11-23', league_id: LG, ...o });
+  const a = applyOps(m4, [sa(), { op: 'table_add', table_id: 'u1', session_id: 'd1', label: '卓1' }, { op: 'table_add', table_id: 'u2', session_id: 'd1', label: '卓2', alt: true }], { scope: sc });
+  const T = (st, id) => st.tables.find((t) => t.table_id === id);
+  ok('D2 scope の session_add＋主の卓＋alt の卓 → ok・日の rate はリーグの主の rate（100）', a.ok && a.state.sessions.find((x) => x.session_id === 'd1').rate === 100, ER(a));
+  ok('D2 写しの日は room の st と同じ形（league_id・rules を持たない）', a.ok && J(Object.keys(a.state.sessions.find((x) => x.session_id === 'd1')).sort()) === J(['date', 'rate', 'session_id']));
+  ok('D2 主の卓は4人・alt の卓は3人で alt のルール（rate 50）', a.ok && T(a.state, 'u1').rules.players === 4 && T(a.state, 'u2').rules.players === 3 && T(a.state, 'u2').rules.rate === 50);
+  ok('D2 返しの days に新しい日の版（主・alt）を足す・渡した scope.days は変えない', a.ok && a.days.length === 1 && a.days[0].session_id === 'd1' && a.days[0].rules === main && a.days[0].rules_alt === R3 && sc.days.length === 0);
+  // 開催日の版：リーグの今の版（uma 違い）に変わっても、その日の卓は days の版
+  const main2 = { ...main, uma: [30, 10] };
+  const sc2 = { ...sc, rules: main2, rules_alt: null, days: a.days };
+  const b = applyOps(a.state, [{ op: 'table_add', table_id: 'u3', session_id: 'd1', label: '卓3' }, { op: 'table_add', table_id: 'u4', session_id: 'd1', label: '卓4', alt: true }], { scope: sc2 });
+  ok('D2 卓のルールは days のその日の版（リーグの今の版でない）・今の alt が無くても日の alt で作れる', b.ok && J(T(b.state, 'u3').rules) === J(T(a.state, 'u1').rules) && T(b.state, 'u4').rules.players === 3, ER(b));
+  ok('D2 op の rate が主と同じ 100 → ok／違う 200 → bad@rate', ER(applyOps(m4, [sa({ rate: 100 })], { scope: sc })) === 'ok' && ER(applyOps(m4, [sa({ rate: 200 })], { scope: sc })) === 'bad@rate');
+  ok('D2 他のリーグ・league_id 無し → bad@league_id', ER(applyOps(m4, [sa({ league_id: LG2 })], { scope: sc })) === 'bad@league_id' && ER(applyOps(m4, [sa({ league_id: undefined })], { scope: sc })) === 'bad@league_id');
+  const noAlt = { ...sc, rules_alt: null };
+  ok('D2 rules_alt の無い日の alt → bad@alt', ER(applyOps(m4, [sa(), { op: 'table_add', table_id: 'u1', session_id: 'd1', label: '卓1', alt: true }], { scope: noAlt })) === 'bad@alt');
+  ok('D2 alt が bool でない → bad@alt・scope でない写しの alt true → bad@alt・alt false は ok', ER(applyOps(a.state, [{ op: 'table_add', table_id: 'u5', session_id: 'd1', label: '卓5', alt: 1 }], { scope: { ...sc, days: a.days } })) === 'bad@alt'
+    && ER(applyOps(base(), [{ op: 'table_add', table_id: 't2', session_id: 's1', label: '卓2', alt: true }])) === 'bad@alt'
+    && ER(applyOps(base(), [{ op: 'table_add', table_id: 't2', session_id: 's1', label: '卓2', alt: false }])) === 'ok');
+  ok('D2 scope の days に無い日の table_add → bad@session_id', ER(applyOps(base(), [{ op: 'table_add', table_id: 't2', session_id: 's1', label: '卓2' }], { scope: sc })) === 'bad@session_id');
+  const bad = applyOps(m4, [sa(), { op: 'table_add', table_id: 'u1', session_id: 'd1', label: '' }], { scope: sc });
+  ok('D2 組が弾かれたら days も写しも増えない', !bad.ok && bad.days === undefined && bad.state === m4 && sc.days.length === 0);
+  // isL 偽＝L の op は並びに積まない（held を作らない）・nyu の op は通る
+  const nl = { ...sc, isL: false, days: a.days };
+  const c1 = applyOps(m4, [sa()], { scope: { ...nl, days: [] } });
+  ok('D2 isL 偽の session_add → mj_role:L・何も当てない', ER(c1) === 'mj_role:L' && c1.state === m4);
+  ok('D2 isL 偽の table_add・table_seats → mj_role:L', ER(applyOps(a.state, [{ op: 'table_add', table_id: 'u9', session_id: 'd1', label: '卓9' }], { scope: nl })) === 'mj_role:L'
+    && ER(applyOps(a.state, [{ op: 'table_seats', table_id: 'u1', seats: ['m1', 'm2', 'm3', 'm4'] }], { scope: nl })) === 'mj_role:L');
+  const c3 = applyOps(a.state, [hs('h1', [10000, 20000, 30000, 40000], { table_id: 'u1' }), { op: 'extra_add', table_id: 'u1', member_id: 'm1', kind: 'chip', add: 1 }, { op: 'extra_add', table_id: 'u1', member_id: 'm2', kind: 'chip', add: -1 }], { scope: nl });
+  ok('D2 isL 偽でも hanchan_start・extra_add（nyu）は ok＝1回目の点が入る', c3.ok && c3.state.hanchans.some((h) => h.hanchan_id === 'h1' && h.table_id === 'u1'), ER(c3));
+  ok('D2 scope でない写しのリーグの session_add は今のまま err direct', ER(applyOps(m4, [sa()])) === 'direct');
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
