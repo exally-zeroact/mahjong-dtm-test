@@ -33,6 +33,7 @@ import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, se
 import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, unholdBusy, heldAny } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
+import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid, sb, patchRoom, rpc, errText } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
@@ -1055,9 +1056,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       // C4 §5a：番号は鎖の通し番号・数えはその回の卓のルール（直す書きはその回の卓のまま＝運ばない）
       const xr = chainView(st, table.table_id).rows.find((y) => y.hanchan_id === hid);
       const xt = st.tables.find((y) => y.table_id === x.table_id);
-      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)), voided: x.voided, // A13：前の並びから同じ点の人の［上家］の印を戻す
+      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: orderCovered(xt ? xt.rules : R, x.cells, x.ton_order, Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null) ? marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)) : [], voided: x.voided, // A13：前の並びから同じ点の人の［上家］の印を戻す（§6＝覆っていない新しい同点なら印は空＝押し直し・行ごと）
         // 開いた時の値と版（2d §3「edit の entry の版は今のまま」＝読み直しで写しが替わっても、ぶつかれば conflict で止める）
-        orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version } };
+        orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version, order_cells: Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null } };
     } else {
       const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
@@ -1170,7 +1171,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     let ops;
     if (!e.hanchan_id) {
       const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: true }; // C4 §3 U1：新しい版はいつも follow:true（区切られた卓なら倉庫が鎖の最後へ）
-      if (e.order.length) op.ton_order = e.order.map((i) => e.seats[i]); // 順は member_id の配列（§6-6）
+      if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); } // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
       ops = [op];
     } else {
       const h = { hanchan_id: e.hanchan_id, ...e.orig };
@@ -1179,8 +1180,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.version });
       const was = h.ton_order ? h.ton_order.map((m) => e.seats.indexOf(m)) : null;
       // A13：同じ点の組の中の前後が前と同じなら並びは書かない（同じ点でない人の位置は答えを変えない＝要らない版上げをしない）
-      const ton = e.order.length && !(was && sameTie(eRules().R, e.num, was, e.order)) ? e.order.map((i) => e.seats[i]) : null;
-      if (ton && canon(ton) !== canon(h.ton_order)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, ton_order: ton, base_version: h.order_version });
+      // A13 §6：前と同じでも、保存した人が見た点（order_cells）が今の同点の組を覆っていなければ見た点を付けて書き直す
+      const cov = orderCovered(eRules().R, e.num, h.ton_order, h.order_cells);
+      const ton = e.order.length && !(was && sameTie(eRules().R, e.num, was, e.order) && cov) ? e.order.map((i) => e.seats[i]) : null;
+      if (ton && (canon(ton) !== canon(h.ton_order) || !cov)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, ton_order: ton, base_version: h.order_version, seen_cells: e.num.slice(), seen_seats: e.seats.slice() });
     }
     if (ops.length) {
       const r = commit(ops);
