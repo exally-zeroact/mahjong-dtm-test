@@ -8,8 +8,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { stripJsComments } from '../scripts/apply-schema.mjs';
-import { needsOrder } from '../lib/needs-order.mjs';
-import { CASES } from './needs-order.cases.mjs';
+import { needsOrder, orderCovered } from '../lib/needs-order.mjs';
+import { CASES, COVER_CASES } from './needs-order.cases.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = stripJsComments(fs.readFileSync(path.join(ROOT, 'js/supa-config.js'), 'utf8'));
@@ -23,11 +23,22 @@ let token = raw; try { token = JSON.parse(raw).token; } catch (_) { /* 素の字
 const D = '$';
 const q = (t) => D + t + D;
 const pairs = '[' + CASES.map((k) => `[${k.r},${k.c}]`).join(',') + ']';
+// A13 §6：覆いの表（lib だけの行＝倉庫の int[] に入らない形は外す）
+const COV_DB = COVER_CASES.filter((k) => !k.lib);
+const cpairs = '[' + COV_DB.map((k) => `[${k.r},${k.c},${k.t},${k.oc}]`).join(',') + ']';
 const sql = `do ${q('no')} declare res jsonb := '[]'; c jsonb;
 begin
   for c in select value from jsonb_array_elements(${q('in')}${pairs}${q('in')}::jsonb) loop
     begin
       res := res || jsonb_build_array(mahjong_private.mj_needs_order(c->0, c->1));
+    exception when others then
+      res := res || jsonb_build_array(jsonb_build_object('err', sqlerrm));
+    end;
+  end loop;
+  for c in select value from jsonb_array_elements(${q('in')}${cpairs}${q('in')}::jsonb) loop
+    begin
+      res := res || jsonb_build_array(mahjong_private.mj_order_covered(c->0, c->1, c->2,
+        case when c->3 = 'null'::jsonb then null else array(select e.x::int from jsonb_array_elements_text(c->3) with ordinality e(x, o) order by e.o) end));
     exception when others then
       res := res || jsonb_build_array(jsonb_build_object('err', sqlerrm));
     end;
@@ -53,7 +64,13 @@ else {
 let p = 0, f = 0;
 const ok = (name, cond, why = '') => { if (cond) p++; else { f++; console.log('  ✗ ' + name + (why ? ' — ' + why : '')); } };
 if (out) {
-  ok('答えの数が入力の数と同じ', out.length === CASES.length, `${out.length}／${CASES.length}`);
+  ok('答えの数が入力の数と同じ', out.length === CASES.length + COV_DB.length, `${out.length}／${CASES.length + COV_DB.length}`);
+  COV_DB.forEach((k, j) => {
+    const js = orderCovered(JSON.parse(k.r), JSON.parse(k.c), JSON.parse(k.t), JSON.parse(k.oc));
+    const db = out[CASES.length + j];
+    ok(`覆い ${k.c} oc ${k.oc}`, js === db && db === k.want, `lib ${js}／倉庫 ${JSON.stringify(db)}／答え ${k.want}`);
+  });
+  console.log(`  覆い ${COV_DB.length} 件を倉庫と lib と答えで比べた`);
   CASES.forEach((k, i) => {
     const js = JSON.stringify(needsOrder(JSON.parse(k.r), JSON.parse(k.c)));
     const db = JSON.stringify(out[i]);

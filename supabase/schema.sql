@@ -857,6 +857,30 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_needs_order(jsonb, jsonb) from public, anon, authenticated;
 
+-- A13 §6（a13g_sadame v3.2）：ton_order が今の同点の組を覆っているか＝lib/needs-order.mjs の orderCovered と同じ答え（tests/needs-order.live.mjs）
+--   ton_order null → false／order_cells null（この直しの前の行＝古い画面は本当の席順を書いた）→ true／order_cells の形が壊れている → false
+--   それ以外＝今の cells の同点の組（x が同じ2人以上）ごとに、order_cells での x が組で1つにそろっていれば覆っている（x＝箱下ありはそのまま・なしは 0 未満を 0）
+create or replace function mahjong_private.mj_order_covered(p_rules jsonb, p_cells jsonb, p_ton jsonb, p_oc int[]) returns boolean
+language plpgsql immutable set search_path = '' as $fn$
+declare hako boolean;
+begin
+  if p_ton is null or p_ton = 'null'::jsonb then return false; end if;
+  if p_oc is null then return true; end if;
+  if p_rules is null or pg_catalog.jsonb_typeof(p_rules) <> 'object' or pg_catalog.jsonb_typeof(p_cells) is distinct from 'array' then return false; end if;
+  if pg_catalog.array_ndims(p_oc) is distinct from 1 or pg_catalog.cardinality(p_oc) <> pg_catalog.jsonb_array_length(p_cells)
+     or exists (select 1 from pg_catalog.unnest(p_oc) u(x) where u.x is null) then
+    return false;
+  end if;
+  if exists (select 1 from pg_catalog.jsonb_array_elements(p_cells) t(v) where pg_catalog.jsonb_typeof(t.v) <> 'number') then return false; end if;
+  hako := coalesce(p_rules -> 'hakoshita' = 'true'::jsonb, false);
+  return not exists (
+    select 1 from pg_catalog.jsonb_array_elements(p_cells) with ordinality t(v, o)
+     group by case when hako then t.v::numeric else greatest(t.v::numeric, 0) end
+    having pg_catalog.count(*) >= 2
+       and pg_catalog.count(distinct case when hako then p_oc[t.o] else greatest(p_oc[t.o], 0) end) > 1);
+end $fn$;
+revoke all on function mahjong_private.mj_order_covered(jsonb, jsonb, jsonb, int[]) from public, anon, authenticated;
+
 -- ── パスのそろえた字（版1）─────────────────────
 --   ① NFKC（全角の数字・英字を半角に＝日本語の打ち方で「１２３４」と打っても同じパス）② 英字 A〜Z だけ小文字
 --   （lower() は場所の設定で変わるので使わない・カナや空白は変えない＝mj_name_key は借りない）
@@ -1808,6 +1832,11 @@ end $yk$;
 alter table mahjong.hanchans add column if not exists seats_version int not null default 1;
 alter table mahjong.hanchans drop constraint if exists hanchans_seats_version_ok;
 alter table mahjong.hanchans add constraint hanchans_seats_version_ok check (seats_version >= 1);
+-- A13 §6（a13g_sadame v3.2）：order_cells＝ton_order を書いた人が見た点（席の番号順）。null＝この直しの前の行か ton_order が null（古い画面は本当の席順＝覆う）
+alter table mahjong.hanchans add column if not exists order_cells int[];
+alter table mahjong.hanchans drop constraint if exists hanchans_order_cells_ok;
+alter table mahjong.hanchans add constraint hanchans_order_cells_ok check (order_cells is null
+  or (ton_order is not null and pg_catalog.array_ndims(order_cells) = 1 and pg_catalog.cardinality(order_cells) = players and pg_catalog.array_position(order_cells, null) is null));
 -- 卓の席（B1・b1_sadame_v2.md v2.1）＝0回目から ± を打てる人の門と画面の名前の列だけに効く（お金の判じは変えない）
 --   seats＝member_id（小文字の字）の配列・長さ 0 か players／seats_version は倉庫の中だけ（客は base_version を送らない）
 alter table mahjong.tables add column if not exists seats jsonb not null default '[]'::jsonb;
@@ -2032,6 +2061,24 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_people(uuid, jsonb, int, int, text, jsonb) from public, anon, authenticated;
 
+-- A13 §6：op の seen_cells（保存した人が見た点）の形＝長さ p_n・どれも正しい点（整数・±200000・100の倍数）＝壊れていれば bad（at seen_cells）
+create or replace function mahjong_private.mj_w_seen_cells(a jsonb, p_n int, p_i int) returns int[]
+language plpgsql set search_path = '' as $fn$
+declare k int; v numeric; r int[] := '{}';
+begin
+  if pg_catalog.jsonb_typeof(a) is distinct from 'array' or pg_catalog.jsonb_array_length(a) <> p_n then
+    perform mahjong_private.mj_w_bad(p_i, 'seen_cells');
+  end if;
+  for k in 0 .. p_n - 1 loop
+    if pg_catalog.jsonb_typeof(a -> k) <> 'number' then perform mahjong_private.mj_w_bad(p_i, 'seen_cells'); end if;
+    v := (a -> k)::numeric;
+    if v % 1 <> 0 or v not between -200000 and 200000 or v % 100 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'seen_cells'); end if;
+    r := r || v::int;
+  end loop;
+  return r;
+end $fn$;
+revoke all on function mahjong_private.mj_w_seen_cells(jsonb, int, int) from public, anon, authenticated;
+
 -- 飛んだ席（ルールの tobi が true で tobi_from が 'all' でない時だけ・0未満、tobi_zero なら0以下）＝lib の tobiPt と同じ判じ
 create or replace function mahjong_private.mj_w_busted(p_hid uuid) returns jsonb
 language plpgsql set search_path = '' as $fn$
@@ -2082,7 +2129,8 @@ begin
   elsif pg_catalog.jsonb_typeof(rs -> 'start_pts') is distinct from 'number'
         or v_sum <> (rs -> 'start_pts')::numeric * h.players - h.lost_kyotaku then
     v_st := 'ng'; v_why := 'sum';
-  elsif mahjong_private.mj_needs_order(rs, v_cells) ? 'tie' and h.ton_order is null then
+  -- A13 §6：保存した人が見ていない同点（2台が別の点を直して出来た組）は覆わない＝順がまだ（lib hanchanView と同じ orderCovered）
+  elsif mahjong_private.mj_needs_order(rs, v_cells) ? 'tie' and not mahjong_private.mj_order_covered(rs, v_cells, h.ton_order, h.order_cells) then
     v_st := 'input'; v_why := 'order';
   -- B2 段1（tobi_chip_v3.md）：④ 飛び賞の受け取りを待つ（why 'tobi'）は外した＝飛び賞は extras の種 'tobi'（チップと同じ ±）
   --   mj_w_busted・mj_w_tobi_fix・op tobi_set・列 tobi_to は写しの鍵消しと対なので今のまま（段3 で決める）
@@ -2480,7 +2528,7 @@ declare
   c_trim constant text := ' ' || chr(9) || chr(10) || chr(13) || chr(12288);
   v_op text := p_o ->> 'op';
   v_id uuid; v_id2 uuid; v_r uuid; v_s text; v_key text; v_n int; v_x int; v_bv int; v_rc int; k int; v_kd text;
-  v_j jsonb; v_j2 jsonb; v_j3 jsonb; v_rules jsonb; v_d date; v_rate int;
+  v_j jsonb; v_j2 jsonb; v_j3 jsonb; v_rules jsonb; v_d date; v_rate int; v_oc int[];
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
   v_u uuid; v_own uuid; v_m2 mahjong.members; v_cap2 int; v_us uuid[]; v_ids uuid[];
@@ -2647,6 +2695,15 @@ begin
     if p_o -> 'ton_order' is not null and p_o -> 'ton_order' <> 'null'::jsonb then
       v_j3 := mahjong_private.mj_w_people(p_room, p_o -> 'ton_order', v_n, p_i, 'ton_order', v_j2);
     end if;
+    -- A13 §6：seen_cells は付けるなら cells と同じ（違えば・形が壊れていれば bad）・付けなければ order_cells は null（古い PWA）
+    v_oc := null;
+    if p_o -> 'seen_cells' is not null and p_o -> 'seen_cells' <> 'null'::jsonb then
+      v_oc := mahjong_private.mj_w_seen_cells(p_o -> 'seen_cells', v_n, p_i);
+      if v_oc is distinct from (select pg_catalog.array_agg(((e.v)::numeric)::int order by e.o) from pg_catalog.jsonb_array_elements(p_o -> 'cells') with ordinality e(v, o)) then
+        perform mahjong_private.mj_w_bad(p_i, 'seen_cells');
+      end if;
+    end if;
+    if v_j3 is null then v_oc := null; end if;
     v_x := 0;
     if p_o -> 'lost' is not null and p_o -> 'lost' <> 'null'::jsonb then
       v_x := mahjong_private.mj_w_int(p_o, 'lost', p_i);
@@ -2659,13 +2716,14 @@ begin
        and not mahjong_private.mj_tobi_ok(p_o -> 'tobi_to', v_n::smallint) then
       perform mahjong_private.mj_w_bad(p_i, 'tobi_to');
     end if;
-    insert into mahjong.hanchans (id, room_id, table_id, players, seats, ton_order, rule_set_id, rule_version, rules_snapshot,
+    insert into mahjong.hanchans (id, room_id, table_id, players, seats, ton_order, order_cells, rule_set_id, rule_version, rules_snapshot,
                                   lost_kyotaku, tobi_to, created_by_user, created_at)
-      values (v_id, p_room, t.id, v_n, v_j2, v_j3, t.rule_set_id, t.rule_version, v_rules, v_x,
+      values (v_id, p_room, t.id, v_n, v_j2, v_j3, v_oc, t.rule_set_id, t.rule_version, v_rules, v_x,
               case when p_o -> 'tobi_to' is null or p_o -> 'tobi_to' = 'null'::jsonb then '{}'::jsonb else p_o -> 'tobi_to' end, p_me, pg_catalog.clock_timestamp());
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('table_id', t.id, 'seats', v_j2, 'ton_order', v_j3, 'lost', v_x,
-        'tobi_to', (select x.tobi_to from mahjong.hanchans x where x.id = v_id)), 1);
+        'tobi_to', (select x.tobi_to from mahjong.hanchans x where x.id = v_id))
+        || case when v_oc is not null then pg_catalog.jsonb_build_object('order_cells', pg_catalog.to_jsonb(v_oc)) else '{}'::jsonb end, 1);
     for k in 0 .. v_n - 1 loop
       insert into mahjong.cells (hanchan_id, seat, value, updated_by_user) values (v_id, k, ((p_o -> 'cells' -> k)::numeric)::int, p_me);
       perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'cells', pg_catalog.jsonb_build_object('hanchan_id', v_id, 'seat', k),
@@ -2705,7 +2763,24 @@ begin
     h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     v_j := mahjong_private.mj_w_people(p_room, p_o -> 'ton_order', h.players, p_i, 'ton_order', h.seats);
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
-    if h.ton_order is not distinct from v_j then
+    -- A13 §6：seen_cells（保存した人が見た点）・[s3] seen_seats（見た席＝今と違えば conflict・何も書かない）
+    v_oc := null;
+    if p_o -> 'seen_cells' is not null and p_o -> 'seen_cells' <> 'null'::jsonb then
+      v_oc := mahjong_private.mj_w_seen_cells(p_o -> 'seen_cells', h.players, p_i);
+    end if;
+    if p_o -> 'seen_seats' is not null and p_o -> 'seen_seats' <> 'null'::jsonb then
+      if pg_catalog.jsonb_typeof(p_o -> 'seen_seats') <> 'array' or pg_catalog.jsonb_array_length(p_o -> 'seen_seats') <> h.players
+         or exists (select 1 from pg_catalog.jsonb_array_elements(p_o -> 'seen_seats') q(v) where pg_catalog.jsonb_typeof(q.v) <> 'string' or (q.v #>> '{}') = '') then
+        perform mahjong_private.mj_w_bad(p_i, 'seen_seats');
+      end if;
+      if exists (select 1 from pg_catalog.jsonb_array_elements_text(p_o -> 'seen_seats') with ordinality q(v, o)
+                  where pg_catalog.lower(q.v) is distinct from (h.seats ->> (q.o - 1)::text)) then
+        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'conflict', 'i', p_i,
+          'at', pg_catalog.jsonb_build_object('hanchan_id', h.id, 'what', 'order'),
+          'cur', pg_catalog.jsonb_build_object('value', h.ton_order, 'version', h.order_version)));
+      end if;
+    end if;
+    if h.ton_order is not distinct from v_j and h.order_cells is not distinct from v_oc then
       return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.order_version), 'made', 0, 'hist', 0, 'h', h.id);
     end if;
     if v_bv <> h.order_version then
@@ -2713,13 +2788,22 @@ begin
         'at', pg_catalog.jsonb_build_object('hanchan_id', h.id, 'what', 'order'),
         'cur', pg_catalog.jsonb_build_object('value', h.ton_order, 'version', h.order_version)));
     end if;
-    update mahjong.hanchans x set ton_order = v_j, order_version = x.order_version + 1 where x.id = h.id;
+    update mahjong.hanchans x set ton_order = v_j, order_cells = v_oc, order_version = x.order_version + 1 where x.id = h.id;
     get diagnostics v_rc = row_count;
     if v_rc <> 1 then raise exception 'mj_write: hanchan_order の更新が % 行', v_rc; end if;
-    perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
-      'ton_order', h.ton_order, v_j, h.order_version + 1);
+    v_n := 0;
+    if h.ton_order is distinct from v_j then
+      perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
+        'ton_order', h.ton_order, v_j, h.order_version + 1);
+      v_n := v_n + 1;
+    end if;
+    if h.order_cells is distinct from v_oc then
+      perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
+        'order_cells', pg_catalog.to_jsonb(h.order_cells), pg_catalog.to_jsonb(v_oc), h.order_version + 1);
+      v_n := v_n + 1;
+    end if;
     perform mahjong_private.mj_w_changed(h.id, p_me);
-    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.order_version + 1), 'made', 0, 'hist', 1, 'h', h.id);
+    return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', h.order_version + 1), 'made', 0, 'hist', v_n, 'h', h.id);
 
   elsif v_op = 'kyotaku_set' then
     h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
@@ -3062,10 +3146,20 @@ begin
     if h.ton_order is not null
        and (select pg_catalog.array_agg(w.value order by w.value) from pg_catalog.jsonb_each_text(h.seats) w)
            is distinct from (select pg_catalog.array_agg(w.value order by w.value) from pg_catalog.jsonb_each_text(v_j2) w) then
-      update mahjong.hanchans x set ton_order = null, order_version = x.order_version + 1 where x.id = h.id;
+      update mahjong.hanchans x set ton_order = null, order_cells = null, order_version = x.order_version + 1 where x.id = h.id;
       perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
         'ton_order', h.ton_order, null, h.order_version + 1);
       v_n := 2;
+    -- A13 §6 [s2]：人が同じ並べ替えだけなら order_cells を人に付けて動かす（新[新しい席(m)] = 前[前の席(m)]・古い null は null のまま）
+    elsif h.order_cells is not null then
+      v_oc := (select pg_catalog.array_agg(h.order_cells[(o.key)::int + 1] order by (n.key)::int)
+                 from pg_catalog.jsonb_each_text(v_j2) n join pg_catalog.jsonb_each_text(h.seats) o on o.value = n.value);
+      if v_oc is distinct from h.order_cells then
+        update mahjong.hanchans x set order_cells = v_oc where x.id = h.id;
+        perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'hanchans', pg_catalog.jsonb_build_object('id', h.id),
+          'order_cells', pg_catalog.to_jsonb(h.order_cells), pg_catalog.to_jsonb(v_oc), h.order_version);
+        v_n := 2;
+      end if;
     end if;
     update mahjong.hanchans x set seats = v_j2, seats_version = x.seats_version + 1 where x.id = h.id;
     get diagnostics v_rc = row_count;
@@ -3695,8 +3789,8 @@ declare
     "member_add": ["member_id", "name"],
     "session_add": ["session_id", "date", "rate", "place", "league_id"],
     "table_add": ["table_id", "session_id", "label", "alt"],
-    "hanchan_start": ["hanchan_id", "table_id", "seats", "cells", "ton_order", "lost", "tobi_to", "follow"],
-    "hanchan_order": ["hanchan_id", "ton_order", "base_version"],
+    "hanchan_start": ["hanchan_id", "table_id", "seats", "cells", "ton_order", "lost", "tobi_to", "follow", "seen_cells"],
+    "hanchan_order": ["hanchan_id", "ton_order", "base_version", "seen_cells", "seen_seats"],
     "cell_set": ["hanchan_id", "seat", "value", "base_version"],
     "tobi_set": ["hanchan_id", "tobi_to", "base_version"],
     "kyotaku_set": ["hanchan_id", "value", "base_version"],
@@ -4129,6 +4223,7 @@ begin
                'cell_ver', (select pg_catalog.jsonb_agg(c.version order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
                'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
                'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+               || case when hh.order_cells is not null then pg_catalog.jsonb_build_object('order_cells', pg_catalog.to_jsonb(hh.order_cells)) else '{}'::jsonb end   -- A13 §6：null でない時だけ
                order by hh.created_at, hh.id), '[]'::jsonb)
         into v_hh
         from (select z.*, pg_catalog.row_number() over (order by z.created_at, z.id) as no from mahjong.hanchans z where z.table_id = t.id) hh;
@@ -4363,6 +4458,7 @@ begin
                              'cell_ver', (select pg_catalog.jsonb_agg(c.version order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
                              'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
                              'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+                             || case when hh.order_cells is not null then pg_catalog.jsonb_build_object('order_cells', pg_catalog.to_jsonb(hh.order_cells)) else '{}'::jsonb end   -- A13 §6：null でない時だけ
                              order by hh.created_at, hh.id) from hh), '[]'::jsonb),
       'extras', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', e.table_id, 'member_id', e.member_id, 'kind', e.kind, 'value', e.value, 'version', e.version)
                              order by e.table_id::text collate "C", e.kind collate "C", e.member_id::text collate "C") from mahjong.extras e join tt on tt.id = e.table_id), '[]'::jsonb),
