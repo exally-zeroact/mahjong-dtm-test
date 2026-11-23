@@ -49,8 +49,11 @@ function rewrite(d) {
 let bumps = 0;
 function bump(d) { fs.appendFileSync(path.join(d, 'css/app.css'), `\n/* e2e の版上げ ${++bumps} */\n`); return rewrite(d); }
 
+/* ネット無し＝繋がせない（listen を閉じ、開いている接続も切る）。受けてから切る（socket.destroy）形だと、CI の webkit は
+   SW の取りの接続が切られた所で通信の処理ごと落ち、SW の登録と控えが丸ごと消える（11-24 調べ 40回中5回・赤の回は caches.keys()=[]）＝客の端末の圏外とも違う */
 function serve(d) {
   const st = { offline: false, log: [] };
+  const socks = new Set();
   const srv = http.createServer((q, r) => {
     const u = decodeURIComponent(q.url.split('?')[0]);
     st.log.push(u);
@@ -62,8 +65,13 @@ function serve(d) {
     // 配る字は sha を測るのと同じ served()（CRLF→LF＝repo と Vercel と CI の中身）。手元の作業木は autocrlf で CRLF の事がある
     r.writeHead(200, { 'content-type': MT[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-store' });
     r.end(served(d, '/' + rel.split(path.sep).join('/'), BIN));
-  }).listen(0, '127.0.0.1');
-  return new Promise((ok) => srv.once('listening', () => ok({ srv, st, base: `http://127.0.0.1:${srv.address().port}/` })));
+  });
+  srv.on('connection', (s) => { socks.add(s); s.once('close', () => socks.delete(s)); });
+  let port = 0;
+  const listen = () => new Promise((ok, ng) => { srv.once('error', ng); srv.listen(port, '127.0.0.1', () => { srv.off('error', ng); port = srv.address().port; ok(); }); });
+  st.goOffline = () => { st.offline = true; srv.close(); for (const s of socks) s.destroy(); };
+  st.goOnline = async () => { await listen(); st.offline = false; };
+  return listen().then(() => ({ srv, st, base: `http://127.0.0.1:${port}/` }));
 }
 
 const browser = await pw.webkit.launch();
@@ -134,7 +142,7 @@ async function run(d) {
     ok('a 2回目の素材は全部 /v/<VER>/', L.vers.length === 1 && L.vers[0] === V0 && L.plain.length === 0, JSON.stringify([L.vers, L.plain]));
 
     // b ネットが落ちても開く
-    st.offline = true;
+    st.goOffline();
     const pOff = await ctx.newPage();
     const eOff = errsOf(pOff);
     const g1 = await pOff.goto(base + 'hayami.html').then(() => true, (e) => e.message);
@@ -146,7 +154,7 @@ async function run(d) {
     L = await look(pOff);
     ok('b ネット無しで /r/<token> は控えの対局', g2 === true && L.ver === V0 && L.path === '/r/' + TOKEN, JSON.stringify([g2, L.ver, L.path]));
     await pOff.close();
-    st.offline = false;
+    await st.goOnline();
     ok('b 画面の err 0', eOff.length === 0, eOff.join(' / '));
 
     // c 版を上げる・2枚
