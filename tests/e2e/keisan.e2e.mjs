@@ -287,9 +287,43 @@ async function tensu() {
   await s3.ctx.close();
 }
 
+// ルールの画面の数字鍵盤（A8・tataki/a8_sadame_v1.md）＝端末の鍵盤を出さない・ウマの［±］無し・− はウマだけ・チップは小数1桁
+async function rulesKp() {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  const p = await ctx.newPage();
+  await p.goto(BASE + 'taikyoku.html');
+  await p.evaluate(async () => {
+    const m = await import('/js/gamen-rules.mjs'); const R = await import('/lib/rules.mjs');
+    document.body.innerHTML = '<main><div id="x"></div></main>';
+    window.__c = m.mountRules(document.getElementById('x'), { rules: { ...R.defaultRules(4), rate: 100 } });
+  });
+  await p.click('[data-open="uma"]');
+  ok('ルール ウマの［±］が 0個', (await p.locator('.uma-pm').count()) === 0);
+  const bx = await p.locator('#x input.box').evaluateAll((xs) => xs.map((x) => x.readOnly && x.inputMode === 'none'));
+  ok('ルール 箱は全部 readonly・inputmode none（8箱以上）', bx.length >= 8 && bx.every(Boolean));
+  await p.click('[data-uma="1"]');
+  for (const k of ['neg', '1', '0']) await p.click(`#x .kp [data-kp="${k}"]`);
+  ok('ルール ウマ2位に 入ってすぐ − 1 0 → −10', (await p.inputValue('[data-uma="1"]')) === '−10');
+  await p.click('#x .kp [data-kp="next"]');
+  ok('ルール ↓ で次の箱（3位）', await p.evaluate(() => document.activeElement && document.activeElement.dataset.uma === '2'));
+  await p.click('[data-uma="3"]');
+  await p.click('#x .kp [data-kp="next"]');
+  ok('ルール ↓ で鍵の並びが替わる箱（ウマ4位→チップ）へ移っても描き直さず focus が残る', await p.evaluate(() => document.activeElement && document.activeElement.id === 'rChip'));
+  await p.click('#x .kp [data-kp="ok"]');
+  await p.click('#rRate');
+  ok('ルール レートで − は押せない', await p.locator('#x .kp [data-kp="neg"]').isDisabled());
+  await p.click('#rChipOn');
+  await p.click('#rChip');
+  for (const k of ['2', 'dot', '5']) await p.click(`#x .kp [data-kp="${k}"]`);
+  await p.click('#x .kp [data-kp="ok"]');
+  const r = await p.evaluate(() => window.__c.read());
+  ok('ルール read() の uma[1] −10・chip_pt10 25（鍵盤を開いたまま入切を押せる）', r.uma[1] === -10 && r.chip_pt10 === 25);
+  await ctx.close();
+}
+
 async function run() {
   bad.length = 0; n = 0;
-  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi], ['点数計算', tensu]]) {
+  for (const [nm, fn] of [['早見表', hayami], ['待ち読み', machi], ['点数計算', tensu], ['ルールの鍵盤', rulesKp]]) {
     try { await fn(); } catch (e) {
       if (e === STOP) break;
       bad.push(`${nm} の途中で止まった（${String(e.message).split(String.fromCharCode(10))[0]}）`);
@@ -337,12 +371,15 @@ const BREAKS = [
   ["js/tensu.js"," && !(P === 3 && m.kind === 'chi')","","3人で覚えたチーを落とさない"],
   ["css/app.css","body.tensu .chips { display: flex;",".chips { display: flex;","点数の CSS を全部の画面に効かせる"],
   ['lib/shanten.mjs', null, null, '待ちの残り枚数を1枚ずらす'],
+  ['js/kenban.mjs', "if (fresh) { neg = fresh === 'neg';", "if (fresh) { neg = false;", 'ルール 入ってすぐの − を数の符号にしない'],
+  ['js/kenban.mjs', "const close = (keepSp) => { const x = inp; inp = null; kp.hidden = true; if (sp && !keepSp) sp.hidden = true;", "const close = (keepSp) => { const x = inp; inp = null; kp.hidden = true; if (sp) sp.hidden = true;", 'ルール 箱から外れて閉じる時に下の空きを消す（入切が押せない）'],
+  ['js/kenban.mjs', "kp.addEventListener('click', (ev) => { ev.stopPropagation();", "kp.addEventListener('click', (ev) => {", 'ルール 鍵の click を外へ出す（↓ で描き直して focus が飛ぶ）'],
 ];
 
 if (!SELF) {
   const b = await run();
   for (const x of b) console.log('  ✗ ' + x);
-  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・webkit 390×844）`);
+  console.log(b.length ? `✗ 画面の試験 ${b.length}/${n} 件が違う` : `✓ 画面の試験 ${n} 件（早見表・待ち読み・点数計算・ルールの鍵盤・webkit 390×844）`);
   if (!b.length) console.log('KEKKA ' + JSON.stringify({ passed: n, failed: 0, mimiso: 0 }));
   await shut();
   process.exit(b.length ? 1 : 0);

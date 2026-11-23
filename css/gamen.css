@@ -145,6 +145,7 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .kp[hidden], .kp-sp[hidden] { display: none; }
 .kp button { height: 60px; padding: 0; font: inherit; font-size: 24px; font-weight: 600; color: var(--c-ji); background: var(--c-men); border: 1px solid var(--c-sen); border-radius: 10px; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
 .kp button:active { background: var(--c-man); }
+.kp button:disabled { opacity: .35; }
 .kp .kp-do { color: var(--c-kon-ji); background: var(--c-kon); border-color: var(--c-kon); }
 .kp .kp-ok { grid-column: span 2; }
 .kp-sp { height: calc(284px + env(safe-area-inset-bottom)); }

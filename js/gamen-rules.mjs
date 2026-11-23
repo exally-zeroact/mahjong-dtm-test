@@ -9,6 +9,7 @@
  *   対局にリーグ戦の入切は置かない（司さん 11-20「ごちゃごちゃになる」）。
  */
 import { defaultRules } from '../lib/rules.mjs';
+import { keypadHtml, wireKeypad } from './kenban.mjs';
 import { esc } from './gamen-core.mjs';
 
 const RATES = [null, 50, 100, 200, 500];
@@ -64,7 +65,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
   }
   function box(id, val, mode) {
     if (readOnly) return '<b>' + esc(val) + '</b>';
-    return '<input class="box" id="' + id + '" inputmode="' + (mode || 'numeric') + '" value="' + esc(val) + '" autocomplete="off">';
+    return '<input class="box" id="' + id + '" readonly inputmode="none"' + (mode === 'decimal' ? ' data-kpdec' : '') + ' value="' + esc(val) + '" autocomplete="off">';
   }
   function sw(id, on) {
     if (readOnly) return '';
@@ -81,7 +82,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
     h += li('持ち点／返し', n0(r.start_pts) + ' ／ ' + n0(r.return_pts), { key: 'ps' });
     if (open.has('ps')) h += '<div class="li li-sub"><span>持ち点</span>' + box('rStart', bv(r.start_pts)) + '</div><div class="li li-sub"><span>返し</span>' + box('rReturn', bv(r.return_pts)) + '</div>';
     h += li('ウマ', esc(umaText(r.uma)), { key: 'uma' });
-    if (open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + r.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-uma="' + i + '" inputmode="numeric" value="' + bv(u) + '" autocomplete="off"><button type="button" class="uma-pm" data-umaneg="' + i + '" aria-label="' + (i + 1) + '位のウマの＋−を替える">±</button></label>').join('') + '</span></div>';
+    if (open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + r.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-uma="' + i + '" readonly inputmode="none" value="' + bv(u) + '" autocomplete="off"></label>').join('') + '</span></div>';
     h += li('オカ', 'トップ取り');
     h += li('飛び賞', !okInt(r.tobi_pt) ? '—' : r.tobi_pt ? r.tobi_pt + 'pt' : 'なし', { key: 'tobi' });
     if (open.has('tobi')) h += '<div class="li li-sub"><span>飛び賞</span><span class="li-v">' + box('rTobi', bv(r.tobi_pt)) + ' pt</span></div>';
@@ -100,6 +101,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       else h += '<div class="li"><span>やきとり</span><span class="li-v">1枚 ＝ ' + box('rYaki', on || okP ? String(p) : '5', 'numeric') + ' pt ' + sw('rYakiOn', on) + '</span></div>';
     }
     h += '</div>';
+    if (!readOnly) h += keypadHtml();
     el.innerHTML = h;
     if (!readOnly) wire();
   }
@@ -123,12 +125,15 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       r.yakitori_pt = r.yakitori ? p : (Number.isInteger(p) && p >= 1 && p <= 999 ? p : 0);
     }
   }
+  // A8（a8_sadame_v1）＝箱は全部アプリの数字鍵盤。− を打てるのはウマだけ・チップ／祝儀は小数1桁（「.」）
+  const KP_MAX = { rRate: 6, rStart: 6, rReturn: 6, rTobi: 3, rChip: 3, rShugi: 3, rYaki: 3 };
+  const kpSpec = (x) => (x.dataset.uma !== undefined ? { neg: true, dec: false, max: 3 } : { neg: false, dec: x.dataset.kpdec !== undefined, max: KP_MAX[x.id] || 6 });
   function wire() {
+    wireKeypad(el, { boxes: () => [...el.querySelectorAll('input.box')], spec: kpSpec });
     el.onclick = (e) => {
-      const b = e.target.closest('button'); if (!b) return;
+      const b = e.target.closest('button'); if (!b || b.closest('.kp')) return; // 鍵盤の鍵は render しない（箱の focus と字を落とさない）
       readBoxes();
-      if (b.dataset.umaneg !== undefined) { const i = Number(b.dataset.umaneg); if (okInt(r.uma[i])) r.uma[i] = -r.uma[i]; }
-      else if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
+      if (b.dataset.open) { open.has(b.dataset.open) ? open.delete(b.dataset.open) : open.add(b.dataset.open); }
       else if (b.dataset.players !== undefined) {
         const n = JSON.parse(b.dataset.players);
         if (n !== r.players) { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); if (onPlayers) onPlayers(n); }
