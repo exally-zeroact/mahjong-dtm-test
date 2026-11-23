@@ -2094,7 +2094,9 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_tvoid(uuid, uuid) from public, anon, authenticated;
 
--- 書き込みの数え（§5）：分の窓＝全員 ur1m・u1m・all1m＋入だけ rn1m（max(1,n)）／24時間（時の窓24本）＝入 rn1d・管と持ち主 uk1d・rk1d・全員 all1d（n だけ）
+-- 書き込みの数え（§5・P6 p6_sadame v3.1）：分の窓＝人ごとの ur1m・u1m は max(1,n)（弾いた呼びの罰）・分け合う all1m・入だけ rn1m は n だけ（弾いた呼びで他の人を止めない）
+--   24時間（時の窓24本）＝入 un1d（部屋×人 1,500）・管と持ち主 uk1d（部屋×人 1,500）・rk1d（部屋 7,500）・人ごと u1d（部屋をまたぐ 3,000）・全員 all1d（n だけ）
+--   P6 で入の部屋の1日 rn1d（3,000）はやめた＝垢を足して部屋の入の全員を24時間止められたため。古い rn1d の行は mj_sweep の '%1d' で消える
 --   p_room が null＝段①②の弾き＝u1m だけに1。古い窓は同じ取引で消す。(kind, key) の字の順に upsert
 -- 2c-2f 合図（2c2f_sadame v1.2 §1）＝倉庫からの送りは控え（本道は書いた端末の websocket）。中身は版の数だけ。
 -- ★送りの失敗で書きを落とさない★＝自分の begin…exception で包む（realtime の無い倉庫・名の変わり）。呼ぶ側の権限（mj_write の持ち主）で realtime.messages へ入る＝塊が戻れば行も戻る。
@@ -2122,12 +2124,13 @@ begin
   for r in
     select k.kind, k.key, k.day, k.add from (values
       ('write:all1d', 'all',      true,  case when p_room is null then 0 else v_d end),
-      ('write:all1m', 'all',      false, case when p_room is null then 0 else v_m end),
+      ('write:all1m', 'all',      false, case when p_room is null then 0 else v_d end),
       ('write:rk1d',  v_rk,       true,  case when p_room is null or not v_kan then 0 else v_d end),
-      ('write:rn1d',  v_rk,       true,  case when p_room is null or not v_nyu then 0 else v_d end),
-      ('write:rn1m',  v_rk,       false, case when p_room is null or not v_nyu then 0 else v_m end),
+      ('write:rn1m',  v_rk,       false, case when p_room is null or not v_nyu then 0 else v_d end),
+      ('write:u1d',   p_me::text, true,  case when p_room is null then 0 else v_d end),
       ('write:u1m',   p_me::text, false, 1 * case when p_room is null then 1 else v_m end),
       ('write:uk1d',  v_ru,       true,  case when p_room is null or not v_kan then 0 else v_d end),
+      ('write:un1d',  v_ru,       true,  case when p_room is null or not v_nyu then 0 else v_d end),
       ('write:ur1m',  v_ru,       false, case when p_room is null then 0 else v_m end)
     ) k(kind, key, day, add)
     where k.add > 0 and k.key is not null
@@ -2155,11 +2158,12 @@ begin
   select k.kind into v from (values
       ('write:all1d', 'all',      true,  p_d, 300000),
       ('write:all1m', 'all',      false, p_m, 3000),
-      ('write:rk1d',  v_rk,       true,  case when v_kan then p_d else 0 end, 3000),
-      ('write:rn1d',  v_rk,       true,  case when v_nyu then p_d else 0 end, 3000),
+      ('write:rk1d',  v_rk,       true,  case when v_kan then p_d else 0 end, 7500),
       ('write:rn1m',  v_rk,       false, case when v_nyu then p_m else 0 end, 600),
+      ('write:u1d',   p_me::text, true,  p_d, 3000),
       ('write:u1m',   p_me::text, false, p_m, 300),
-      ('write:uk1d',  v_ru,       true,  case when v_kan then p_d else 0 end, 600),
+      ('write:uk1d',  v_ru,       true,  case when v_kan then p_d else 0 end, 1500),
+      ('write:un1d',  v_ru,       true,  case when v_nyu then p_d else 0 end, 1500),
       ('write:ur1m',  v_ru,       false, p_m, 120)
     ) k(kind, key, day, add, cap)
    where k.add > 0
