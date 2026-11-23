@@ -1,7 +1,8 @@
 /* outbox.test.mjs — ★lib/outbox.mjs（未送信の並びの受け方）が取り決め §6-11・12・14・14' の通りに振り分けるか★（CI）
  * 使い方: node tests/outbox.test.mjs  /  node tests/outbox.test.mjs --self-test（振り分けをわざと壊して赤になるか）
  */
-import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS } from '../lib/outbox.mjs';
+import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, BUSY_RETRY, BUSY_STOP, unholdBusy, heldAny } from '../lib/outbox.mjs';
+import { readFileSync } from 'node:fs';
 
 const CASES = [
   // [名前, res, kind, err?]
@@ -16,7 +17,10 @@ const CASES = [
   ['網の失敗 は retry', { error: { message: 'Failed to fetch' } }, 'retry'],
   ['55P03 は retry', { error: { code: '55P03', message: 'lock not available' } }, 'retry', '55P03'],
   ['40P01 は retry', { error: { code: '40P01', message: 'deadlock detected' } }, 'retry', '40P01'],
-  ['busy は retry', { data: { ok: false, err: 'busy' } }, 'retry', 'busy'],
+  ['busy（what 無し）は retry', { data: { ok: false, err: 'busy' } }, 'retry', 'busy'],
+  // P6g §1（p6g_sadame v1.1）：分の窓と lock だけ retry・1日の窓と知らない名は stop
+  ...['write:all1m', 'write:rn1m', 'write:u1m', 'write:ur1m', 'lock'].map((w) => ['P6g busy ' + w + ' は retry', { data: { ok: false, err: 'busy', what: w } }, 'retry', 'busy']),
+  ...['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d', 'write:all1d', 'write:zz1m', 'secret', 'name'].map((w) => ['P6g busy ' + w + ' は stop', { data: { ok: false, err: 'busy', what: w } }, 'stop', 'busy']),
   ['conflict は conflict', { data: { ok: false, err: 'conflict', i: 0 } }, 'conflict'],
   ['gone は reload', { data: { ok: false, err: 'gone' } }, 'reload'],
   ['mj_reauth は login（err は mj_reauth のまま＝mj_session と分ける）', { data: { ok: false, err: 'mj_reauth', within_min: 10, i: 0 } }, 'login', 'mj_reauth'],
@@ -61,6 +65,13 @@ function run(step, drop = dropHead) {
   const hd = drop(hc);
   ok('2d 先頭が held closed なら［捨てる］でも外さない', hd.length === 2 && hd[0].op_id === 'a' && hd[0].held.err === 'closed' && !hd[1].held_after_drop, JSON.stringify(hd));
   ok('2d heldClosed は held closed の先頭だけ真', heldClosed(hc) && !heldClosed([{ op_id: 'a', held: { err: 'range' } }]) && !heldClosed([]) && !heldClosed([{ op_id: 'a' }]));
+  // P6g §3（v1.1 止め1）：busy の［捨てる］は次の組へ held を移す（後ろを黙って送らない）
+  const bw = step({ data: { ok: false, err: 'busy', what: 'write:un1d' } });
+  ok('P6g busy の stop は what を返す', bw.what === 'write:un1d', JSON.stringify(bw));
+  const hb = drop([{ op_id: 'a', sent_at: 'x', held: { err: 'busy', what: 'write:un1d' } }, { op_id: 'b' }, { op_id: 'c' }]);
+  ok('P6g held busy の［捨てる］は次の組に held busy を移す', hb.length === 2 && hb[0].op_id === 'b' && hb[0].held && hb[0].held.err === 'busy' && hb[0].held.what === 'write:un1d' && !hb[1].held && !canSend(hb) && heldInfo(hb).why === 'busy', JSON.stringify(hb));
+  const hb1 = drop([{ op_id: 'a', held: { err: 'busy', what: 'write:u1d' } }]);
+  ok('P6g held busy が1組なら［捨てる］で空', hb1.length === 0, JSON.stringify(hb1));
   const hr = drop([{ op_id: 'a', held: { err: 'stale' } }, { op_id: 'b' }]);
   ok('2d held stale は［捨てる］で外せる', hr.length === 1 && hr[0].op_id === 'b' && hr[0].held_after_drop === true, JSON.stringify(hr));
   return { p, f };
@@ -89,6 +100,21 @@ if (!self) {
   ok('捨てる＝先頭の1件だけ外す', dr.length === 2 && dr[0].op_id === 'b');
   ok('捨てた後も読み直しまで送らない（held_after_drop）', !canSend(dr) && dr.every((x) => x.held_after_drop) && heldInfo(dr).why === 'after_drop');
   ok('空の並びは送らない', !canSend([]) && heldInfo([]) === null);
+  console.log('■ P6g ［もう一度送る］・書きの門（p6g_sadame v1.1 §3・§4）');
+  const ub = unholdBusy([{ op_id: 'a', sent_at: 't', held: { err: 'busy', what: 'write:un1d' } }, { op_id: 'b' }]);
+  ok('［もう一度送る］は先頭の held busy だけ外す（op_id・sent_at はそのまま）', ub[0].op_id === 'a' && ub[0].sent_at === 't' && !ub[0].held && canSend(ub));
+  const uc = [{ op_id: 'a', held: { err: 'conflict' } }];
+  ok('busy でない held は［もう一度送る］で外さない', unholdBusy(uc) === uc);
+  ok('heldAny は並びのどこかの held で真・held_after_drop では偽', heldAny([{ op_id: 'a' }, { op_id: 'b', held: { err: 'range' } }]) && !heldAny([{ op_id: 'a', held_after_drop: true }]) && !heldAny([]));
+  console.log('■ P6g 照合（schema の busy の名が retry か stop のどちらか1つだけ）');
+  const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const body = (name) => { const i = sql.lastIndexOf('create or replace function ' + name + '('); if (i < 0) return ''; const j = sql.indexOf('$fn$;', sql.indexOf('$fn$', i) + 4); return sql.slice(i, j); };
+  const over = body('mahjong_private.mj_w_over');
+  const names = new Set([...over.matchAll(/\('(write:[a-z0-9]+)'/g)].map((m) => m[1]));
+  for (const f of ['public.mj_write', 'mahjong_private.mj_w_op']) for (const m of body(f).matchAll(/'err', 'busy'[^)]*?'what', '([^']+)'/g)) names.add(m[1]);
+  ok('照合で拾った名がある（mj_w_over・mj_write・mj_w_op）', names.size >= 8 && names.has('lock'), [...names].join(','));
+  for (const n of names) ok('照合 ' + n + ' は1つだけに在る', BUSY_RETRY.has(n) !== BUSY_STOP.has(n), n);
+  ok('照合 BUSY_RETRY と BUSY_STOP は重ならない', [...BUSY_RETRY].every((n) => !BUSY_STOP.has(n)));
   console.log('■ 2c-2f 合図（2c2f_sadame v1.2 §2）');
   ok('ok と read_ver（数）なら送る v', aizuSendV({ ok: true, read_ver: 7 }) === 7 && aizuSendV({ ok: true, read_ver: 0 }) === 0);
   ok('ok でない返しは送らない', aizuSendV({ ok: false, err: 'conflict', read_ver: 7 }) === null && aizuSendV(null) === null && aizuSendV(undefined) === null && aizuSendV('x') === null);
@@ -106,6 +132,9 @@ if (!self) {
     ['login を見ずに retry にする（JWT 切れで回り続ける）', wrap((res, r) => (r.kind === 'login' ? { kind: 'retry', err: 'net' } : r))],
     ['mj_session を stop にする', wrap((res, r) => (r.err === 'mj_session' ? { kind: 'stop', err: 'mj_session' } : r))],
     ['busy を stop にする（捨てる帯に倒す）', wrap((res, r) => (r.err === 'busy' ? { kind: 'stop', err: 'busy' } : r))],
+    ['P6g 1日の busy を retry にする（黙って送り直す）', wrap((res, r) => (r.err === 'busy' ? { kind: 'retry', err: 'busy' } : r))],
+    ['P6g busy の what を落とす', wrap((res, r) => (r.err === 'busy' ? { ...r, what: undefined } : r))],
+    ['P6g held busy の［捨てる］で後ろを held_after_drop にする（前の作り）', outboxStep, (ob) => (ob.length && ob[0].held && ob[0].held.err === 'closed' ? ob : ob.slice(1).map((it) => ({ ...it, held_after_drop: true })))],
     ['ok が無い返りを done にする', wrap((res, r) => (r.err === 'no_ok' ? { kind: 'done', err: null } : r))],
     ['gone を conflict にする', wrap((res, r) => (r.kind === 'reload' ? { kind: 'conflict', err: 'gone' } : r))],
     ['知らない err を done にする', wrap((res, r) => (r.err === 'zzz' ? { kind: 'done', err: null } : r))],
