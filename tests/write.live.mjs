@@ -212,6 +212,17 @@ const LGR = (id) => `select jsonb_build_object('own', owner_user_id::text, 'by',
 const SSR = (sid, lid) => `select jsonb_build_object('lg', rule_set_id = (select rule_set_id from mahjong.leagues where id = '${lid}'), 'room', rule_set_id = (select rule_set_id from mahjong.rooms where id = room_id), 'rv', rule_version) from mahjong.sessions where id = '${sid}'`;
 /* ⑭ 2c-2b 人の op 5つ（write4_sekkei.md v1〜v1.2）：人 8〜11＝足す人 xu1〜4（各節の頭で ra の room_accounts へ nyu で直に入れる）・L0〜L9＝各節の頭で足す名簿の人
  *  入り直しの jwt＝asWhoA（asWho に amr を足す）。FRESH は古い otp と新しい password（max を見るか）・OLD＝601秒前・空・字の timestamp・字の amr */
+/* ⑯' D2 §4（d2_sadame v1.1）：DL1＝主4人(rate 100)＋alt 3人・DL2＝主だけ・DS*＝開催日・DT*＝卓 */
+const [DL1, DL2, DS1, DS2, DS3, DT1, DT2, DT3, DT4] = Array.from({ length: 9 }, U);
+const DT7 = Array.from({ length: 7 }, U), DT11 = U();
+const R4r = { players: 4, rate: 100 }, R3b = { players: 3, kyotaku_end: 'kieru', chip_pt10: 10 };
+const sadD = (sid, lid, f = {}) => O('session_add', { session_id: sid, date: '2026-11-21', rate: null, league_id: lid, ...f });
+const tadA = (tid, sid, alt) => O('table_add', { table_id: tid, session_id: sid, label: 'リ卓', alt });
+/* 卓のルール＝開催日の主（sm）か alt（sa）の版か・人数 */
+const TRD = (t, sid) => `select jsonb_build_object('p', t.players, 'sm', t.rule_set_id = s.rule_set_id and t.rule_version = s.rule_version,
+  'sa', t.rule_set_id = s.rule_set_id_alt and t.rule_version = s.rule_version_alt) from mahjong.tables t, mahjong.sessions s where t.id = '${t}' and s.id = '${sid}'`;
+const SLD = (sid, lid) => `select jsonb_build_object('rate', s.rate, 'alt', s.rule_set_id_alt is not null, 'same', (s.rule_set_id_alt, s.rule_version_alt) = (l.rule_set_id_alt, l.rule_version_alt),
+  'main', (s.rule_set_id, s.rule_version) = (l.rule_set_id, l.rule_version)) from mahjong.sessions s, mahjong.leagues l where s.id = '${sid}' and l.id = '${lid}'`;
 const L = Array.from({ length: 10 }, () => U());
 const UJ = (i) => S(`to_jsonb(us[${i}]::text)`);
 const asWhoA = (i, amr) => `perform set_config('request.jwt.claims', jsonb_build_object('sub', us[${i}], 'session_id', ss[${i}], 'role', 'authenticated', 'amr', ${amr})::text, true);`;
@@ -1033,11 +1044,13 @@ const body = `
     ${W('g1s1', 1, 'ra', A(sad(GS1, GA)))}
     ${W('g1e', 1, 'ra', A(lsv(GA, { rules: R4b })))}
     ${ROW('g1e_r', LGR(GA))}
+    insert into mahjong.settle_snaps (room_id, session_id, rev, content, used, missing) values (ra, '${GS1}', 1, '{}', '{}', '[]');   /* D2 §1：リーグの日は前の日を締めてから次の日 */
     ${W('g1s2', 1, 'ra', A(sad(GS2, GA), tad(GT2, GS2)))}
     ${ROW('g1v1', SSR(GS1, GA))} ${ROW('g1v2', SSR(GS2, GA))}
     ${ROW('g1vt', `select rule_version from mahjong.tables where id = '${GT2}'`)}
     ${W('g1f', 3, 'ra', A(sad(GS3, GA), tad(GT3, GS3)))}
     update mahjong.leagues set owner_user_id = us[2] where id = '${GA}';
+    insert into mahjong.settle_snaps (room_id, session_id, rev, content, used, missing) values (ra, '${GS2}', 1, '{}', '{}', '[]');
     ${W('g1g', 2, 'ra', A(sad(GS4, GA), tad(GT4, GS4)))}
     ${W('g1g2', 5, 'ra', A(sad(GS5, GA), tad(GT5, GS5)))}
     update mahjong.leagues set owner_user_id = us[1] where id = '${GA}';
@@ -1095,6 +1108,35 @@ const body = `
       select '${GT2}', ra, '${GS1}', 'g7', 4, rule_set_id, rule_version from mahjong.rooms where id = ra;
     update mahjong.hanchans set table_id = '${GT2}' where id = (select h.id from mahjong.hanchans h where h.room_id = ra and h.seats::text like '%' || '${MA[0]}' || '%' order by h.id limit 1);
     ${W('g7b', 2, 'ra', A(O('member_rename', { member_id: MA[0], name: '2人の L' })))}`)}
+
+  ${RS}
+  /* ⑯' D2 §4：alt の卓・開催日の版・重なり・期間・rate・卓 11 本目・締めた後の2日目 */
+  ${undo('g8', `${W('g8a', 1, 'ra', A(O('league_create', { league_id: DL1, name: 'D2', date_from: '2026-11-01', date_to: '2026-11-30', players_main: 4, rules: R4r, rules_alt: R3 })))}
+    ${W('g8b', 1, 'ra', A(sadD(DS1, DL1), tadA(DT1, DS1, true), tadA(DT2, DS1, false)))}
+    ${ROW('g8b_s', SLD(DS1, DL1))} ${ROW('g8b_t1', TRD(DT1, DS1))} ${ROW('g8b_t2', TRD(DT2, DS1))}
+    ${W('g8c', 1, 'ra', A(lsv(DL1, { rules_alt: R3b })))}
+    ${ROW('g8c_s', SLD(DS1, DL1))}
+    ${W('g8d', 1, 'ra', A(tadA(DT3, DS1, true)))}
+    ${ROW('g8d_t', TRD(DT3, DS1))}
+    ${W('g8e', 1, 'ra', A(sadD(DS2, DL1)))}
+    ${W('g8f', 1, 'ra', A(tadA(DT4, DS1, 1)))}
+    ${W('g8g', 1, 'ra', A(tadA(DT4, SA, true)))}
+    ${RS}
+    ${W('g8h0', 1, 'ra', A(O('league_create', { league_id: DL2, name: 'D2b', date_from: '2026-11-01', date_to: '2026-11-30', players_main: 4, rules: R4r })))}
+    ${W('g8h', 1, 'ra', A(sadD(DS3, DL2, { date: '2026-12-01' })))}
+    ${W('g8h2', 1, 'ra', A(sadD(DS3, DL2, { date: '2026-10-31' })))}
+    ${W('g8i', 1, 'ra', A(sadD(DS3, DL2, { rate: 50 })))}
+    ${W('g8j', 1, 'ra', A(sadD(DS3, DL2, { rate: 100 })))}
+    ${ROW('g8j_s', SLD(DS3, DL2))}
+    ${W('g8k', 1, 'ra', A(tadA(DT4, DS3, true)))}
+    ${RS}
+    insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version)
+      select x.id, ra, '${DS1}', 'd2', 4, s.rule_set_id, s.rule_version from mahjong.sessions s, unnest(array[${DT7.map((id) => `'${id}'::uuid`).join(', ')}]) x(id) where s.id = '${DS1}';
+    ${W('g8l', 1, 'ra', A(tadA(DT11, DS1, false)))}
+    ${ROW('g8l_n', `select count(*) from mahjong.tables where session_id = '${DS1}'`)}
+    insert into mahjong.settle_snaps (room_id, session_id, rev, content, used, missing) values (ra, '${DS1}', 1, '{}', '{}', '[]');
+    ${W('g8m', 1, 'ra', A(sadD(DS2, DL1), tadA(DT4, DS2, true)))}
+    ${ROW('g8m_s', SLD(DS2, DL1))} ${ROW('g8m_t', TRD(DT4, DS2))}`)}
 
   /* ⑩ 表（人7 が持ち主の部屋を rules ごとに作る） */
   ${WT_RK.map((k) => `${asWho(7)}
@@ -1597,6 +1639,22 @@ function check(out, lib, say) {
     && isOk('g5b') && has('g5b', { hc: 1 }), J([R('g5a'), d('g5a'), g('g5a_e'), g('g5a_f'), g('g5a_h'), g('g5a_h2'), d('g5b'), out.g5_err]));
   ok('⑯ 消えた L：継いだ同じ呼びの league_save（前の版）→ conflict cur 2', isErr('g6a', 'conflict', { cur: { version: 2 } }), J([R('g6a'), out.g6_err]));
   ok('⑯ owner_or_sole_L：出たリーグの L が自分1人の入は rename が通る・L が2人なら mj_role need owner_or_sole_L', isOk('g7a') && isErr('g7b', 'mj_role', { need: 'owner_or_sole_L' }), J([R('g7a'), R('g7b'), out.g7_err]));
+  /* ⑯' D2 §4 */
+  ok('⑯ D2 alt の卓：ルールは開催日の alt の版・3人／alt 偽は主の版・4人・rate は主の rules の 100', isOk('g8a') && isOk('g8b')
+    && g('g8b_s').rate === 100 && g('g8b_s').alt === true && g('g8b_s').same === true && g('g8b_s').main === true
+    && J(g('g8b_t1')) === J({ p: 3, sa: true, sm: false }) && J(g('g8b_t2')) === J({ p: 4, sa: false, sm: true }), J([R('g8a'), R('g8b'), g('g8b_s'), g('g8b_t1'), g('g8b_t2'), out.g8_err]));
+  ok('⑯ D2 日の途中の league_save で alt を替えても開催日の alt の版は変わらない・後の alt の卓も開催日の版', isOk('g8c') && g('g8c_s').same === false && g('g8c_s').alt === true
+    && isOk('g8d') && J(g('g8d_t')) === J({ p: 3, sa: true, sm: false }), J([R('g8c'), g('g8c_s'), R('g8d'), g('g8d_t')]));
+  ok('⑯ D2 締めの無い日が在るリーグの2日目 → dup what session（前の日の id）・何も書かない', isErr('g8e', 'dup', { what: 'session', session_id: DS1 }) && has('g8e', none), J([R('g8e'), d('g8e')]));
+  ok('⑯ D2 alt 1（bool でない）→ bad at alt', isErr('g8f', 'bad', { at: 'alt' }) && has('g8f', none), J([R('g8f'), d('g8f')]));
+  ok('⑯ D2 ふつうの日で alt → bad at alt', isErr('g8g', 'bad', { at: 'alt' }) && has('g8g', none), J([R('g8g'), d('g8g')]));
+  ok('⑯ D2 期間の外（後・前）→ bad at date', isOk('g8h0') && isErr('g8h', 'bad', { at: 'date' }) && isErr('g8h2', 'bad', { at: 'date' }) && has('g8h', none), J([R('g8h0'), R('g8h'), R('g8h2')]));
+  ok('⑯ D2 主の rules と違う rate → bad at rate・同じ rate は ok', isErr('g8i', 'bad', { at: 'rate' }) && has('g8i', none) && isOk('g8j') && g('g8j_s').rate === 100 && g('g8j_s').alt === false,
+    J([R('g8i'), R('g8j'), g('g8j_s')]));
+  ok('⑯ D2 主だけのリーグで alt → bad at alt', isErr('g8k', 'bad', { at: 'alt' }) && has('g8k', none), J([R('g8k'), d('g8k')]));
+  ok('⑯ D2 卓 11 本目も ok', isOk('g8l') && Number(g('g8l_n')) === 11, J([R('g8l'), out.g8l_n]));
+  ok('⑯ D2 1日目を締めた後の2日目は ok・alt の版は今のリーグの版', isOk('g8m') && g('g8m_s').same === true && g('g8m_s').alt === true && J(g('g8m_t')) === J({ p: 3, sa: true, sm: false }),
+    J([R('g8m'), g('g8m_s'), g('g8m_t')]));
   /* ⑩ 範囲の端の表（write-cases.json） */
   ok('⑩ 表の版1・case 84以上・rules は表の名だけ', WT.v === 1 && WT_CASES.length >= 84 && WT_CASES.every((c) => c.rules in WT.rules), J(WT_CASES.filter((c) => !(c.rules in WT.rules)).map((c) => c.id + ':' + c.rules)));
   ok('⑩ 表の部屋を作れて base_ops が当たった', WT_RK.every((k) => out['made_' + WT_ROOM[k]]?.ok === true && isOk('tb_' + WT_ROOM[k])), J(WT_RK.map((k) => [out['made_' + WT_ROOM[k]], R('tb_' + WT_ROOM[k])])));
@@ -1758,10 +1816,17 @@ const WAZA = [
   /* ⑯ 2c-2d1（write7_league_sadame_v11.md の waza・人の鍵は tests/league-lock.live.mjs --waza） */
   ["③' で who_league を見ずに全部の op を見る", 'public.mj_write', "v_need := case when v_wl = 'same' or v_wl = v_who then mahjong_private.mj_w_need(v_who, v_role) end;", "v_need := mahjong_private.mj_w_need(v_who, v_role);", null, '⑯ league_save：L は通る'],
   ["league_save の役の門を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_role(p_room, v_op, v_id, null, p_me, p_role, p_i);   -- L・取り消したリーグ＝bad at league", "null;", null, '⑯ league_save：L でない管'],
-  ["session_add が rooms の版を写す", 'mahjong_private.mj_w_op', "select g.rule_set_id, g.rule_version into s;", "select x.rule_set_id, x.rule_version into s from mahjong.rooms x where x.id = p_room;", null, '⑯ league_save でルールを替えた後'],
+  ["session_add が rooms の版を写す", 'mahjong_private.mj_w_op', "select g.rule_set_id, g.rule_version, g.rule_set_id_alt, g.rule_version_alt into s;", "select x.rule_set_id, x.rule_version, null::uuid as rule_set_id_alt, null::int as rule_version_alt into s from mahjong.rooms x where x.id = p_room;", null, '⑯ league_save でルールを替えた後'],
   ["24時間5本を6本にする", 'mahjong_private.mj_w_op', "x.created_at > pg_catalog.now() - interval '24 hours') >= 5 then", "x.created_at > pg_catalog.now() - interval '24 hours') >= 6 then", null, '⑯ 人ごと24時間5本'],
   ["消えた L を継がない", 'public.mj_write', "if v_role is not null then\n    for v_lg in", "if false then\n    for v_lg in", null, '⑯ 消えた L：部屋に居る人'],
   ["owner_or_sole_L で他の L を見ない", 'mahjong_private.mj_w_role', "elsif not exists (select 1 from mahjong.leagues l where l.id = any(v_ls) and l.owner_user_id is distinct from p_me) then v_need := null;", "elsif true then v_need := null;", null, '⑯ owner_or_sole_L'],
+  /* ⑯' D2（d2_sadame v1.1 §4） */
+  ["D2 リーグの日の重なりの門を外す", 'mahjong_private.mj_w_op', "select x.id into v_ida from mahjong.sessions x where x.league_id = v_id2 and not x.voided", "select x.id into v_ida from mahjong.sessions x where false and x.league_id = v_id2 and not x.voided", null, '⑯ D2 締めの無い日が在るリーグの2日目'],
+  ["D2 alt の卓を今のリーグの版にする", 'mahjong_private.mj_w_op', "v_ida := s.rule_set_id_alt; v_rv := s.rule_version_alt;", "select l.rule_set_id_alt, l.rule_version_alt into v_ida, v_rv from mahjong.leagues l where l.id = s.league_id;", null, '⑯ D2 日の途中の league_save'],
+  ["D2 期間の門を外す", 'mahjong_private.mj_w_op', "if (g.date_from is not null and v_d < g.date_from)", "if false and (g.date_from is not null and v_d < g.date_from)", null, '⑯ D2 期間の外'],
+  ["D2 違う rate の門を外す", 'mahjong_private.mj_w_op', "if v_rate is not null and v_rate is distinct from v_x then perform mahjong_private.mj_w_bad(p_i, 'rate'); end if;", "null;", null, '⑯ D2 主の rules と違う rate'],
+  ["D2 rate を主の rules から写さない", 'mahjong_private.mj_w_op', "      v_rate := v_x;", "      null;", null, '⑯ D2 alt の卓'],
+  ["D2 alt の門を外す", 'mahjong_private.mj_w_op', "if v_alt and (s.league_id is null or s.rule_set_id_alt is null) then", "if false then", null, '⑯ D2 ふつうの日で alt'],
 ];
 
 let exit = 0;
