@@ -691,7 +691,7 @@ declare seed jsonb := $rk$[
   {"key":"rate","kind":"int","min":10,"max":100000,"step":10,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
   {"key":"renpu_fu","kind":"enum","min":null,"max":null,"step":null,"vals":[2,4],"nullable":false,"def4":4,"def3":4,"need":false},
   {"key":"return_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":30000,"def3":40000,"need":false},
-  {"key":"round","kind":"enum","min":null,"max":null,"step":null,"vals":["gosha","shisha","kirisute","none"],"nullable":false,"def4":"gosha","def3":"gosha","need":false},
+  {"key":"round","kind":"enum","min":null,"max":null,"step":null,"vals":["gosha","shisha","kirisute","none"],"nullable":false,"def4":"none","def3":"none","need":false},
   {"key":"shugi_pt10","kind":"int","min":1,"max":9999,"step":1,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
   {"key":"start_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":25000,"def3":35000,"need":false},
   {"key":"tane_custom","kind":"list","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":[],"def3":[],"need":false},
