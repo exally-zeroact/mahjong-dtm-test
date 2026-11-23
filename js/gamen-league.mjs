@@ -77,7 +77,7 @@ function dropRoom(rid) { rooms.delete(rid); order = order.filter((x) => x !== ri
 async function readOne(rid) {
   const x = rooms.get(rid);
   if (!x) return 'gone';
-  const d = await rpc('mj_read', { p_room_id: rid, p_what: 'room', p_args: {} });
+  const d = await rpc('mj_read', { p_room_id: rid, p_what: 'room', p_args: { v: 3 } }); // P5：使うのは room・members・leagues だけ＝分けた読み（最後の数開催だけ）で足りる
   if (!rooms.has(rid)) return 'gone';
   if (d && d.ok === true && d.room && typeof d.room === 'object') {
     x.read = { room: d.room, st: d.st && typeof d.st === 'object' ? d.st : {}, leagues: Array.isArray(d.leagues) ? d.leagues : [] };

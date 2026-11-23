@@ -29,7 +29,7 @@
  *   入力・人を選ぶは開いた時の table_id に結ぶ（保存はその卓へ）・± のまとめの鍵は 卓|人|種（流す時もその卓へ）。
  * L でない入の1回目（§3 止め1）：リーグの日で L でない人は、半荘0本の卓でも table_seats を送らない（席は hanchan_start の seats だけ）。
  */
-import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, readArgs, sessionOfRef, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { nameKey } from '../lib/name-key.mjs';
@@ -48,9 +48,11 @@ const STALE_MS = 30000;              // 最後に倉庫の物を入れてから�
 const SENT_MAX_MS = 6 * 24 * 3600e3; // op_results は7日で掃除（schema.sql:1162）＝送った印から6日を越えた未決の先頭は送らずに held stale
 const offline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
 /* mj_read を直に呼ぶ（gamen-core の rpc() は data だけで error・status を落とす＝約束⑤と同じ形）。返し＝{data,error,status} か {error} */
-export async function readRoom(rid, since) {
+/* P5（p5_sadame v1.3 §4）：a＝readArgs の {v:3, sessions, since?}（mountRoom の読み）か since（数・null）＝その時は {v:3} と since だけ（★v を付ける＝最後の3開催＋取り消していない最後だけが来る★） */
+export async function readRoom(rid, a) {
+  const args = a && typeof a === 'object' ? a : a === null || a === undefined ? { v: 3 } : { v: 3, since: a };
   try {
-    return await sb().rpc('mj_read', { p_room_id: rid, p_what: 'room', p_args: since === null || since === undefined ? {} : { since } });
+    return await sb().rpc('mj_read', { p_room_id: rid, p_what: 'room', p_args: args });
   } catch (e) { return { error: { message: String((e && e.message) || e) } }; }
 }
 /* D2：mj_read 'league'（返し＝{data,error,status} か {error}・readRoom と同じ形） */
@@ -166,6 +168,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let since = null;        // 写しを置き換えた時の read_ver（置き換えた時だけ進める）
   let lastIn = Date.now(); // 最後に倉庫の物を写しに入れた時（置き換えた時か same の時だけ）
   let gateNote = null;     // 読んだ st が newer・rules_bad の時の帯（置き換えない）
+  // P5 §3・§4：並びの当て直しで unloaded が出た開催（次の読みで sessions に足す）・その置き換えで読み直した回数（1回まで）・読めない間の帯
+  const want = new Set();
+  let unTry = 0;
+  let loadNote = false;
   let startMsg = null;     // 開催を始められなかった時の字
   let startOp = null;      // 開催の直送の op_id（返りが切れた時に同じ op_id で送り直す）
   let pendingStart = null; // 並びを送り切ってから始める続き
@@ -217,7 +223,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (writeBlocked()) return blockRes(); // ★flushMerge より前で判じる★（終えた部屋・終える送りの最中は写し・merge・並びのどれも変えない）
     flushMerge(true); // 1秒まとめを先に並べる（並びの順＝押した順）
     const r = applyOps(st, ops, aopts());
-    if (!r.ok) return r.res;
+    if (!r.ok) {
+      if (r.res.err === 'unloaded') { const sid = sessionOfRef(st, outbox, r.res.at, r.res.id); if (sid) want.add(sid); loadNote = true; sync(); } // P5：その開催を読んでから
+      return r.res;
+    }
     st = r.state; takeDays(r);
     // needs_upload の部屋（古い写しを直した部屋）は写しが唯一の元＝並びに積まない（2d が写しから作る）
     if (!st.needs_upload) { outbox.push({ op_id: uuid(), ops }); save(OUTR, outbox); }
@@ -329,7 +338,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     delete base.needs_upload;
     // 並びを先頭から当て直す。当たらない組はその組を held（err＝その返し）にして後ろは当てずに残す。止めてある組（held）から後ろも当てない
     let cur = base, stop = false;
-    const nb = [];
+    const nb = [], unSid = [];
+    let unNo = false;
     for (const it0 of outbox) {
       const it = { ...it0 };
       delete it.held_after_drop; // 当て直しを通った＝外す（止めた組が在れば先頭まで来た時にそこで止まる）
@@ -337,19 +347,41 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (!stop) {
         const r = applyOps(cur, it.ops, aopts());
         if (r.ok) cur = r.state;
-        else { it.held = { err: r.res.err, ...(r.res.at !== undefined ? { at: r.res.at } : {}) }; stop = true; }
+        else if (r.res.err === 'unloaded') { // P5 §3：読んでいない開催への op＝held にしない・開催は置き換える前の写しと並びから引く
+          const sid = sessionOfRef(st, outbox, r.res.at, r.res.id);
+          if (sid) unSid.push(sid); else unNo = true;
+          stop = true;
+        } else { it.held = { err: r.res.err, ...(r.res.at !== undefined ? { at: r.res.at } : {}) }; stop = true; }
       }
       nb.push(it);
     }
+    // ★unloaded が1つでも出た読みは skip★＝写し（st・KEY）も並びも置き換えない・保存しない・since も進めない
+    if (unSid.length || unNo) {
+      for (const x of unSid) want.add(x);
+      if (unSid.length && !unNo && unTry < 1) { unTry++; syncAgain = true; return 'skip'; } // since 無しで1回だけ読み直す（kick の頭で sync）
+      loadNote = true; return 'skip'; // 2回目も（か開催を引けない）＝並びはそのまま「読み込み中」の帯（何も捨てない）
+    }
+    unTry = 0; loadNote = false;
     outbox = nb; st = cur;
     save(OUTR, outbox); save(KEYR, st); // ★並びを先・写しを後★
     since = typeof d.read_ver === 'number' ? d.read_ver : null;
     lastIn = Date.now();
+    if (Array.isArray(st.loaded)) for (const x of [...want]) if (st.loaded.includes(x) || (Array.isArray(st.absent) && st.absent.includes(x))) want.delete(x); // P5：読めた開催は頼み終わり（並びが触る間は readArgs が頼み続ける）
     if (!LG) markSynced(uid, rid);
     repick();
     return 'ok';
   }
-  const readSt = (sn) => (LG ? readLeague(rid, LG, sn) : readRoom(rid, sn)); // D2：リーグの対局は 'league' を読む
+  // P5 §4：room の読みの p_args＝lib の readArgs（並びが触る開催＋今の卓の開催）に want（unloaded が出た開催）を足す。sn が null＝since を付けない
+  function roomArgs(sn) {
+    const a = readArgs(st, outbox, table ? table.session_id : null, sn === null || sn === undefined ? null : sn);
+    for (const x of want) {
+      if (a.sessions.length >= 50) break;
+      if (!a.sessions.includes(x)) a.sessions.push(x);
+    }
+    if (want.size) delete a.since; // P5 §3：unloaded の後の読み直し・まだ読んでいない開催を頼む読みは since を付けない（same で中身が来ない）
+    return a;
+  }
+  const readSt = (sn) => (LG ? readLeague(rid, LG, sn) : readRoom(rid, roomArgs(sn))); // D2：リーグの対局は 'league' を読む
   // 読み直しを頼む。返し＝今読み始めたか（false＝止まっている・1本の最中＝syncAgain・網が無い・間が足りず遅らせた）
   function sync() {
     if (!WRITE_READY || dead || stopped) return false;
@@ -365,8 +397,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const res = await readSt(since);
     lane = false;
     if (dead) return;
+    const ln = loadNote;
     const k = takeRead(res);
-    if (k === 'ok') rerender(); else refreshTag();
+    if (k === 'ok' || ln !== loadNote) rerender(); else refreshTag(); // P5：「読み込み中」の帯が立った・消えた時も描き直す
     kick();
   }
 
@@ -525,6 +558,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   /* 帯（頁の上）＝足し①・消えた部屋・ログイン・止まった並び・読んだ st の門・始められなかった字 */
   function bandsHtml() {
     let h = '';
+    if (loadNote) h += '<div class="r-red" id="rLoading"><b>この日の記録を読み込んでいます</b></div>'; // P5 §4：読めない間（並びは捨てない）
     if (closedHold()) h += '<div class="r-red" id="rClosed"><b>この部屋は終わりました。この端末で入れた点のうち、まだ送れていない分が部屋に入っていません。この端末では見られます。</b></div>';
     if (stopped === 'gone') h += '<div class="r-red" id="rGone"><b>この部屋は消されているか、入れなくなりました。</b></div>';
     if (stopped === 'login') h += '<div class="r-red" id="rLogin"><b>' + (loginErr === 'mj_reauth' ? 'ログインし直してから送ります。' : 'ログインが切れました。ログインし直してください。') + '</b>' + (relogin ? '<button class="btn btn-main" id="rRelogin">ログインし直す</button>' : '') + '</div>';
@@ -901,6 +935,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
 
   function memberStats(mid) {
+    // P5 §4：分けた読み（st.loaded が在る）では倉庫が全開催で数えた members の n・last を使う（写しには最後の数開催しか無い）
+    const mm = Array.isArray(st.loaded) ? st.members.find((m) => m.member_id === mid) : null;
+    if (mm && Number.isInteger(mm.n)) return { count: mm.n, last: typeof mm.last === 'string' ? mm.last : null };
     const hs = st.hanchans.filter((h) => !h.voided && h.seats.includes(mid));
     let last = null;
     for (const h of hs) { const t = st.tables.find((x) => x.table_id === h.table_id); const s = t && st.sessions.find((x) => x.session_id === t.session_id); if (s && (!last || s.date > last)) last = s.date; }
@@ -1149,6 +1186,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const d = seisanData(), s = d.s;
     shownTag = tagKey();
     const top = '<div class="r-top"><span>' + (d.date ? esc(md(d.date)) + '・' : '') + ratesText(d.rates) + '・半荘' + d.count + '回</span>' + liveTag() + '</div>' + bandsHtml() + staleHtml(); // 精算の頁の上（2d §3 読めない時）
+    if (!s.ok && s.err === 'unloaded') { // P5 §4：開いた開催が loaded に無い＝sessions に入れて読み直してから出す（額は出さない）
+      if (!want.has(d.sid)) { want.add(d.sid); sync(); }
+      el.innerHTML = '<div class="r-top"><span>' + (d.date ? esc(md(d.date)) : '') + '</span>' + liveTag() + '</div>' + bandsHtml() + staleHtml() + '<div class="r-red" id="sLoading"><b>この日の記録を読み込んでいます</b></div>'; wireBands(); return; // 半荘の数・レートも読めるまで出さない
+    }
     if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; wireBands(); return; }
     // 足し①＝この端末の写しの点が部屋に入っていない＝partial と同じく誰が誰に・1人ずつの額を1つも出さない（v3 止め2・s.missing が空でも出す）
     if (closedHold()) { el.innerHTML = top + '<div class="r-red" id="sClosedNo"><b>この端末の点の一部が部屋に入っていないので、精算の額は出しません。</b></div>'; wireBands(); return; }
