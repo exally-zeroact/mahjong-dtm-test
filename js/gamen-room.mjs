@@ -385,7 +385,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const dayHeads = (sid) => st.tables.filter((t) => t.session_id === sid && !t.voided && !st.tables.some((x) => x.next_table_id === t.table_id));
   // その日の1つ目の卓（取り消していない卓を先に）
   const firstTable = (sid) => dayHeads(sid)[0] || st.tables.find((t) => t.session_id === sid) || null;
-  const lgDay = (t) => { const s = t && st.sessions.find((x) => x.session_id === t.session_id); return !!(s && typeof s.league_id === 'string' && s.league_id); };
+  // D2：mj_read 'league' はそのリーグの日だけを返し、日に league_id を付けない（schema.sql の st.sessions）＝リーグの対局の頁では在る日は全部リーグの日
+  const lgSess = (s) => !!s && (!!LG || (typeof s.league_id === 'string' && !!s.league_id));
+  const lgDay = (t) => lgSess(t && st.sessions.find((x) => x.session_id === t.session_id));
   const nonL = (t) => !!LG && lgDay(t) && !isL(); // §3 止め1：リーグの日で L でない
   const dayOf = (sid) => (lgInfo && Array.isArray(lgInfo.days) ? lgInfo.days.find((d) => d && d.session_id === sid) : null) || null;
   const mainN = (sid) => { const d = dayOf(sid); const r = (d && d.rules) || (lgInfo && lgInfo.league && lgInfo.league.rules); return r && Number.isInteger(r.players) ? r.players : null; };
@@ -749,7 +751,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function canRule() {
     if (room.closed || !table || table.voided || stopped) return false;
     const s = st.sessions.find((x) => x.session_id === table.session_id);
-    if (!s || s.voided || (typeof s.league_id === 'string' && s.league_id)) return false;
+    if (!s || s.voided || lgSess(s)) return false;
     return needOf(WHO.table_rules, room.role) === null;
   }
   function renderRules() {
