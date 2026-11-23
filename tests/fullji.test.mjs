@@ -65,9 +65,11 @@ if (process.argv.includes('--self-test')) {
     else { console.log('✗ 赤にならない: ' + name); bad++; }
   }
   console.log(bad === 0 ? 'self-test OK ' + BREAKS.length + '/' + BREAKS.length : 'self-test NG ' + bad);
+  console.log('KEKKA ' + JSON.stringify({ passed: BREAKS.length - bad, failed: bad, mimiso: 0 }));
   process.exit(bad === 0 ? 0 : 1);
 } else {
   const r = await check(SRC);
   console.log((r.fail === 0 ? 'OK ' : 'NG ') + r.pass + '/' + (r.pass + r.fail));
+  console.log('KEKKA ' + JSON.stringify({ passed: r.pass, failed: r.fail, mimiso: 0 }));
   process.exit(r.fail === 0 ? 0 : 1);
 }
