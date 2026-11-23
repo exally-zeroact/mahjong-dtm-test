@@ -7,23 +7,23 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'a0fc002ac518';
+const VER = '4a7e22fe888b';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
-  ['/css/gamen.css', '0d58530e789f31f302cf0515a40f7d9214e462c583a23e97fe476c626e1c9b4b'],
+  ['/css/gamen.css', '80c5cb4dbe450d44c3071ff2f42186786f79c0364727024c92375b57aa29dee9'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
   ['/icons/icon-512.png', 'ff686a73f1bc0a7fb0c475cee7f023fa12b92b1f5d3796b5b66c8f9231f794f3'],
-  ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
+  ['/index.html', 'b539695cf57e03ff56411f16e7b41010d06bd5e87f96029ef2e2b0b0a1440249'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', '6b7de943726d8249d806b9428e78d98b4f0c29879b175384b7520fe8ebce3735'],
-  ['/js/gamen-home.mjs', '5e75738a9d456331aa315c9b2662aaf8545380f9a3f76b3557cbe88a3ac749b3'],
+  ['/js/gamen-core.mjs', 'bc767af815bda845916eeef4b761017114a4de2bca7a29fb62d17371807aa4da'],
+  ['/js/gamen-home.mjs', 'd492ba0354e21879c4f446e29bd1b0255b06f200f07607132667a1fb5bb621a3'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
-  ['/js/gamen-room.mjs', '9c8196bc8d0b208dca4ee543696765b7a545bba943bcc7fcd79de129af7bdfd2'],
+  ['/js/gamen-room.mjs', 'a7c871101f8c1879beef2155fb8870446c8616792abb0f7216007a9ad581e4d6'],
   ['/js/gamen-rules.mjs', '9e01c7fa536c017943393f3b0762f0f959f73286bc029341d390f1dc581e5b04'],
-  ['/js/gamen-taikyoku.mjs', '840cca8f2029a50e67d0dc7be942a310b6e3101073d03871c004adf09a1026f5'],
+  ['/js/gamen-taikyoku.mjs', 'f17e5f54dadb8c677238a75edd3bc9570ed2fc78ca2f45ae33e719a20658ff97'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/sw-reg.js', '6cabdb55f344b5ec9f1087e98e13efb4d7d41491745d089ee1c9fede624cd6ba'],

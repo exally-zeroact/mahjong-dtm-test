@@ -230,6 +230,7 @@ function readRules(roomId, share0, seq, lid, room0) {
       clearInterval(timer);
       const patch = { rules: d.room.rules };
       if (d.room.closed === true) patch.closed = true;
+      if (room0 && room0.gone === true) patch.gone = false; // A6 §1：読めた＝部屋は在る（戻された）
       let room = patchRoom(me.id, roomId, patch);
       if (!room && lid && room0) { // 控えに無い部屋（リーグの一覧から）＝控えに足さずに今だけの形
         room = Object.assign(room0, patch, { name: d.room.name || '', role: d.room.role ?? null, owner: d.room.owner === true, ...(typeof d.room.channel_key === 'string' ? { channel_key: d.room.channel_key } : {}) });
@@ -249,6 +250,10 @@ function readRules(roomId, share0, seq, lid, room0) {
     const e = res && res.error;
     const err = d && d.ok === false ? d.err : e && (e.status === 401 || res.status === 401 || /jwt/i.test(e.message || '')) ? 'mj_session' : 'net';
     if (err === 'mj_session') { clearInterval(timer); relogin(() => openRoom(roomId)); return; }
+    if (err === 'gone') { // A6 §1：この端末で消した部屋（deleted_at）でなければ gone:true（ホームのカードに出さない）
+      const row = myRooms(me.id).find((x) => x.room_id === roomId);
+      if (row && !row.deleted_at && row.gone !== true) patchRoom(me.id, roomId, { gone: true });
+    }
     if (err === 'gone') { clearInterval(timer); $('rReadErr').textContent = 'この部屋は消されているか、入れなくなりました。'; $('rReadAgain').hidden = true; return; }
     $('rReadErr').textContent = errText({ err });
   };

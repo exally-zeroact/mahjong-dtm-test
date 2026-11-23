@@ -6,8 +6,9 @@
  * A15g（a15g_sadame v1.1・司さん 11-23「なんのためのアドレスとパスワードで管理しとんど」）：続きの部屋は倉庫の mj_my_rooms(p_open:true) を全部（上限なし）・新しく動いた順に縦に並べる。
  *   頭にはこの端末で送っていない部屋（倉庫の行に無い物）を足す。読めない・8秒で返らない時だけ端末の控え（A11 の判じ）＋帯。
  *   消した部屋（A6＝控えの行に deleted_at か gone:true）は頭足しと控えでは出さない。倉庫が返した行は出して印を外す（印が古い）。
+ * A6（a6_sadame v1.3 §2）：deleted_at が7日の内の行は #hDel に［元に戻す］の帯。
  */
-import { currentUser, showLogin, logout, myRooms, patchRoom, rpc, esc, $, sb } from './gamen-core.mjs';
+import { currentUser, showLogin, logout, myRooms, patchRoom, rpc, errText, uuid, esc, $, sb } from './gamen-core.mjs';
 import { cardCounts, migrateState, gateText, roomEnded } from '../lib/room-state.mjs';
 
 const md = (d) => (d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
@@ -88,6 +89,31 @@ function paint(list, band) {
   b.hidden = !band;
 }
 
+/* A6 §2：この端末で消した部屋（deleted_at が7日の内）を新しい順に1行ずつ「「名前」を消しました」＋［元に戻す］ */
+const DEL_DAYS_MS = 7 * 24 * 3600e3;
+const bandMsg = new Map(); // room_id → 戻せなかった時の字（描き直しても残す）
+function drawDel(u) {
+  const el = $('hDel');
+  if (!el) return;
+  const now = Date.now();
+  const rows = u ? myRooms(u.id).filter((x) => typeof x.deleted_at === 'string' && now - Date.parse(x.deleted_at) < DEL_DAYS_MS)
+    .sort((a, b) => Date.parse(b.deleted_at) - Date.parse(a.deleted_at)) : [];
+  el.hidden = !rows.length;
+  el.innerHTML = rows.map((x) => '<div class="h-del" data-rid="' + esc(x.room_id) + '"><span class="h-del-t">「' + esc(x.name || (x.kind === 'solo' ? '対局' : '部屋')) + '」を消しました</span>' +
+    '<button class="btn btn-line h-del-b" type="button" data-undo="' + esc(x.room_id) + '">元に戻す</button>' +
+    (bandMsg.has(x.room_id) ? '<p class="err h-del-e">' + esc(bandMsg.get(x.room_id)) + '</p>' : '') + '</div>').join('');
+  for (const b of el.querySelectorAll('[data-undo]')) b.onclick = () => undo(u, b.dataset.undo, b);
+}
+async function undo(u, rid, b) {
+  if (b.disabled) return;
+  b.disabled = true; b.setAttribute('aria-busy', 'true');
+  const res = await rpc('mj_write', { p_room_id: rid, p_op_id: uuid(), p_ops: [{ op: 'room_undelete' }] });
+  if (res && res.ok === true) { bandMsg.delete(rid); patchRoom(u.id, rid, { deleted_at: null, gone: false }); draw(); return; }
+  if (res && res.err === 'mj_session') { b.disabled = false; b.removeAttribute('aria-busy'); showLogin(() => draw()); return; }
+  bandMsg.set(rid, '戻せませんでした（' + errText(res || {}) + '）');
+  draw();
+}
+
 let drawSeq = 0;
 async function draw() {
   const seq = ++drawSeq;
@@ -95,6 +121,7 @@ async function draw() {
   if (seq !== drawSeq) return;
   const acct = $('acct');
   if (!u) {
+    drawDel(null);
     acct.innerHTML = '<button class="btn-s" type="button" id="btnIn">ログイン</button>';
     $('btnIn').onclick = () => showLogin(() => draw());
     paint([], false);
@@ -102,6 +129,7 @@ async function draw() {
   }
   acct.innerHTML = '<button class="btn-s" type="button" id="btnOut" title="' + esc(u.email) + '">ログアウト</button>';
   $('btnOut').onclick = async () => { await logout(); draw(); };
+  drawDel(u);
   $('hBandAgain').onclick = () => draw();
   // 読み直しの間は今のカードを残す（初めは空＝控えを出して後で入れ替えない）
   let timer = null, fell = false;

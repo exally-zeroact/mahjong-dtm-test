@@ -12,6 +12,8 @@
  *   送りと読みは1つの部屋で1本ずつ（lane）。置き換えは倉庫の st→migrateState→roomGate→並びを先頭から当て直す。
  *   置き換えない時＝st.needs_upload（端末だけの写し・2e まで）／控えが closed で並びが在る（約束③）／先頭に sent_at（送った印）が在り決まっていない。
  *   開催は倉庫で決める（shared は開いた時に作らない・最初の点で mj_read→無ければ [session_add, table_add] を直に送る）。
+ * A6（a6_sadame v1.3・司さん 11-23「部屋を消せない」）：部屋の頁の下に［部屋を消す］（owner だけ・リーグの対局は外す）。印 mj-pending-delete:<uid>:<rid>＝同じ op_id で送り直す。
+ *   通った（か印が在る時の gone）＝この端末の並び・終える印を消し、控えの行に deleted_at→ホーム（7日の間はホームの帯から戻せる）。印の無い gone＝控えに gone:true（ホームのカードに出さない・次の ok の読みで外す）。
  * B3b-1（gamen_b3b_sadame.md v4.1）：［ルール］の頁に［部屋を終える］（kan か owner・shared で終えていない部屋だけ）。
  *   送る前に必ず flushMerge(true)→未送信0 の門（頁を出す時・窓を開く時・窓の［部屋を終える］の3回）。印 mj-pending-close:<uid>:<rid>＝同じ op_id で送り直す。
  *   書く口は writeBlocked()＝控えの closed か、印がある間（closing）＝commit・plusMinus・flushMerge の3口で止める。
@@ -35,7 +37,7 @@ import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
 import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
-import { esc, uuid, sb, patchRoom, rpc, errText } from './gamen-core.mjs';
+import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { rulesOk } from '../lib/rules.mjs';
 
@@ -218,10 +220,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   // ── B3b-1 部屋を終える：印が在る間はずっと closing（網切れ・［もう一度］・ログインし直し・読み込み直しの後も・v4 止め2） ──
   const PCLOSE = 'mj-pending-close:' + uid + ':' + rid;
   const closingOn = () => { try { return !!localStorage.getItem(PCLOSE); } catch { return false; } };
-  const writeBlocked = () => !!room.closed || closingOn();
+  const writeBlocked = () => !!room.closed || closingOn() || stopped === 'deleted'; // A6：消した後（ホームへ移るまで）は何も積まない
   const blockRes = () => ({ ok: false, err: room.closed ? 'closed' : 'closing' });
   let closeUi = { open: closingOn(), msg: null, retry: false }; // 印が在れば確かめの窓を開いたまま（同じ op_id で送り直せる）
   let closeBusy = false;
+  // A6：消す印（同じ op_id で送り直す・読み込み直しの後も2段目を開いたまま）
+  const PDEL = 'mj-pending-delete:' + uid + ':' + rid;
+  const delOn = () => { try { return !!localStorage.getItem(PDEL); } catch { return false; } };
+  const dropDel = () => { try { localStorage.removeItem(PDEL); } catch { /* 消せなくても次の ok か gone で消す */ } };
+  let delUi = { open: delOn(), msg: null, retry: delOn() }; // 印が在れば［もう一度］（自動では送らない）
+  let delBusy = false;
   const staleRead = () => WRITE_READY && !stopped && !st.needs_upload && !closedHold() && Date.now() - lastIn > STALE_MS;
 
   function commit(ops) {
@@ -247,6 +255,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const patch = {};
     if (r.rules && typeof r.rules === 'object' && cn(r.rules) !== cn(room.rules)) patch.rules = r.rules;
     if (r.closed === true && !room.closed) patch.closed = true;
+    if (typeof r.owner === 'boolean' && r.owner !== (room.owner === true)) patch.owner = r.owner; // A6 §1：mj_read の room だけが boolean の owner を持つ（2台目の持ち主の端末にも［部屋を消す］）
     if (typeof r.channel_key === 'string' && r.channel_key && r.channel_key !== room.channel_key) patch.channel_key = r.channel_key; // 2c-2f：名が変わった（room_secret など）＝控えを書き換えて付け直す
     if (!Object.keys(patch).length) return;
     Object.assign(room, patch);
@@ -262,10 +271,17 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     goHome = false; location.assign('/'); return true;
   }
   function loginStop(err) { homeOff(); stopped = 'login'; loginErr = err || 'mj_session'; clearTimeout(retryTimer); rerender(); }
-  function goneStop() { homeOff(); stopped = 'gone'; clearTimeout(retryTimer); leaveChan(); rerender(); }
+  function goneStop() {
+    if (delOn()) { delDone(); return; } // A6：消す印が在る＝消した（前の返りが切れた）＝片付けてホームへ
+    homeOff(); stopped = 'gone'; clearTimeout(retryTimer); leaveChan();
+    // A6 §1：この端末で消した部屋（deleted_at）は gone を足さない（戻す帯が残る）。他の人・持ち主の別の端末＝gone:true（ホームのカードに出さない）
+    const row = myRooms(uid).find((x) => x.room_id === rid);
+    if (!(row && row.deleted_at) && room.gone !== true) { room.gone = true; patchRoom(uid, rid, { gone: true }); }
+    rerender();
+  }
   // 置き換えた後に描くのは room・seisan・rules の頁だけ（edit・pick は入れ物・focus・打ちかけを壊さない＝出る時に描く・v2 止め2）
   function rerender() { if (!dead && ['room', 'seisan', 'rules'].includes(page)) render(); }
-  function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy].join('|'); }
+  function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy, canDel()].join('|'); }
   function refreshTag() { if (!dead && tagKey() !== shownTag) rerender(); }
 
   /* 送り（約束⑤＝sb().rpc を直に呼び {data,error,status} を outboxStep へ） */
@@ -334,6 +350,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (d.err === 'gone') { goneStop(); return 'gone'; }
       return 'fail';
     }
+    if (room.gone === true) { room.gone = false; patchRoom(uid, rid, { gone: false }); } // A6 §1：読めた＝部屋は在る（戻された）＝gone を外す（same の読みでも）
     if (d.same) { lastIn = Date.now(); return 'same'; }
     roomInfo(d.room); // ★closed は写しを置き換える前に控えへ（約束⑦）・rules も控えへ（約束④）
     if (LG) { const li = saveLeagueInfo(uid, LG, d); if (li) lgInfo = li; } // D2：L か・リーグの版・その日の版（置き換えない時も新しくする）
@@ -637,7 +654,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // 卓がまだ無い（shared で開催を倉庫で決める前）＝部屋のルールで空の表だけ出す（最初の点で startShared）
     const noteHtml = note ? '<p class="r-check bad" id="rCloseNote">' + esc(note) + '</p>' : '';
     // 終えた部屋に開催が1つも無い＝中身の字だけ（卓を触らない・B3b-1 §3 止め1）
-    if (room.closed && !table) { shownTag = tagKey(); el.innerHTML = bandsHtml() + noteHtml + '<p class="setsumei" id="rEmpty">この部屋は終わりました。中身はありません。</p>'; wireBands(); return; }
+    if (room.closed && !table) { shownTag = tagKey(); el.innerHTML = bandsHtml() + noteHtml + '<p class="setsumei" id="rEmpty">この部屋は終わりました。中身はありません。</p>' + delHtml(); wireBands(); wireDel(); return; }
     const v = table ? chainView(st, table.table_id) : { date: today(), rate: baseRules().rate ?? null, rows: [], nextNo: 1, windows: [], seatPeople: [], parts: [] }; // C4 §5a：鎖で1つ
     shownTag = tagKey();
     const tkLeft = el.querySelector('#rTaku') ? el.querySelector('#rTaku').scrollLeft : 0; // 描き直しても横の位置を残す
@@ -651,11 +668,12 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (v.windows.length || v.seatPeople.length) h += renderWindows(v);
     if (v.windows.length) h += renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
     else if (pmErr) h += '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>';
+    h += delHtml(); // A6：頁の一番下
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
     takuScroll(tkLeft);
-    wireRoom(); wireBands();
+    wireRoom(); wireBands(); wireDel();
   }
   /* ── D2：［卓1］［卓2］…（何卓でも横に流す）・L にだけ［＋卓］ ── */
   function takuHtml() {
@@ -966,6 +984,66 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (e === 'internal') { closeUi.msg = errText(res, 'close'); closeUi.retry = false; rerender(); return; } // 印は残す
     // gone・mj_op_other_user・full（op_results の mj_caps 行の欠け）・bad kind・知らない err＝同じ op_id で送り直しても同じ＝印を消す（黙らない）
     dropClose(); closeUi = { open: false, msg: errText(res, 'close'), retry: false }; rerender();
+  }
+
+  // ── A6 ［部屋を消す］（a6_sadame v1.3 §1）──
+  // 出すのは持ち主（room.owner＝作った時か mj_read）・mj_role を受けた端末には出さない・リーグの対局は外す・印の無い gone（もう消えている）も出さない
+  function canDel() { return !LG && room.owner === true && !room.not_owner && stopped !== 'deleted' && (stopped !== 'gone' || delOn()); }
+  const unsentN = () => outbox.length + (merge.size ? Math.ceil(merge.size / OPS_MAX) : 0);
+  function delHtml() {
+    const retry = delUi.retry && canDel() ? '<button class="btn btn-line" id="rDelRetry"' + (delBusy ? ' disabled' : '') + '>もう一度</button>' : '';
+    const msg = delUi.msg ? '<p class="err" id="rDelMsg">' + esc(delUi.msg) + '</p>' : '';
+    if (!canDel()) return msg ? '<div class="r-close" id="rDelBox">' + msg + '</div>' : '';
+    let h = '<div class="r-close" id="rDelBox">';
+    if (!delUi.open) h += '<button class="btn btn-aka-line" id="rDelRoom">部屋を消す</button>';
+    else {
+      const n = unsentN();
+      h += '<p class="setsumei" id="rDelQ">部屋を消すと、入っていた人も誰も開けなくなります。7日の間はこの端末のホームから戻せます。</p>' +
+        (n ? '<p class="setsumei" id="rDelUnsent">この端末のまだ送れていない点 ' + n + '組も消えます。</p>' : '') +
+        '<button class="btn btn-aka" id="rDelGo"' + (delBusy ? ' disabled' : '') + ' aria-busy="' + (delBusy ? 'true' : 'false') + '">部屋を消す</button>';
+      if (!delOn()) h += '<button class="btn btn-line" id="rDelNo">やめる</button>'; // 送った後（印が在る間）はやめられない＝倉庫で通ったか分からない
+    }
+    return h + msg + retry + '</div>';
+  }
+  function wireDel() {
+    const q = (s) => el.querySelector(s);
+    if (q('#rDelRoom')) q('#rDelRoom').onclick = () => { if (delBusy) return; delUi = { open: true, msg: null, retry: false }; rerender(); };
+    if (q('#rDelGo')) q('#rDelGo').onclick = () => sendDel();
+    if (q('#rDelRetry')) q('#rDelRetry').onclick = () => sendDel();
+    if (q('#rDelNo')) q('#rDelNo').onclick = () => { if (delOn()) return; delUi = { open: false, msg: null, retry: false }; rerender(); };
+  }
+  async function sendDel() {
+    if (delBusy || dead || !canDel()) return;
+    let op = null;
+    try { op = localStorage.getItem(PDEL); } catch { op = null; }
+    if (!op) { op = uuid(); localStorage.setItem(PDEL, op); } // 送り直しは同じ op_id
+    delBusy = true; delUi = { open: true, msg: null, retry: false }; rerender();
+    const res = await rpc('mj_write', { p_room_id: rid, p_op_id: op, p_ops: [{ op: 'room_delete' }] });
+    delBusy = false;
+    if (dead) return;
+    delReply(res && typeof res === 'object' ? res : {});
+  }
+  function delReply(res) {
+    const e = res.err;
+    if (res.ok === true || e === 'gone') { delDone(); return; } // gone＝もう消えている（前の返りが切れた）＝印が在るので通ったと見る
+    if (e === 'mj_reauth' || e === 'mj_session') { // 印は残す＝入り直したら同じ op_id
+      delUi = { open: true, msg: errText(res, 'delete'), retry: false }; rerender();
+      if (relogin) relogin(() => { if (!dead) sendDel(); });
+      return;
+    }
+    if (e === 'mj_role') { dropDel(); room.not_owner = true; patchRoom(uid, rid, { not_owner: true }); delUi = { open: false, msg: errText(res, 'delete'), retry: false }; rerender(); return; }
+    if (e === 'net' || e === 'offline' || e === 'busy' || e === 'server' || e === undefined || e === null) { delUi = { open: true, msg: errText(res, 'delete'), retry: true }; rerender(); return; } // 印は残す
+    dropDel(); delUi = { open: false, msg: errText(res, 'delete'), retry: false }; rerender(); // full・mj_op_other_user・bad ほか＝同じ op_id でも同じ
+  }
+  /* 消した＝★先に stopped と並びを空に★（遅れて返る送りの done は空を保存するだけ）→ 印・並び・終える印を消す → 控えに deleted_at → ホーム */
+  function delDone() {
+    homeOff(); stopped = 'deleted';
+    outbox = []; clearTimeout(mergeTimer); merge.clear(); clearTimeout(retryTimer);
+    dropDel();
+    try { localStorage.removeItem(OUTR); localStorage.removeItem(PCLOSE); } catch { /* 消せなくてもホームは deleted_at で出さない */ }
+    patchRoom(uid, rid, { deleted_at: new Date().toISOString(), gone: false });
+    leaveChan();
+    location.assign('/');
   }
 
   function memberStats(mid) {

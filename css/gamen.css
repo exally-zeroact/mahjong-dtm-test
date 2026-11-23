@@ -205,6 +205,11 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .h-r { margin-top: 2px; font-size: 18px; font-weight: 700; }
 .h-m { margin-top: 4px; }
 .h-owari { margin-left: 8px; font-size: 13px; font-weight: 600; opacity: .85; }
+/* A6 §2：消した部屋の帯（［元に戻す］は16px の字→高さ44） */
+.h-dels { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.h-del { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--c-sen); background: var(--c-men); }
+.h-del-t { font-size: 14px; font-weight: 600; color: var(--c-ji); }
+.h-del-e { flex-basis: 100%; margin: 0; }
 .h-go { align-self: flex-start; display: inline-flex; align-items: center; min-height: 36px; margin-top: 10px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 700; background: var(--c-men); color: var(--c-kon); }
 .h-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .h-tile { display: flex; flex-direction: column; gap: 8px; min-height: 120px; padding: 14px; border-radius: 16px; border: 1px solid var(--c-sen); background: var(--c-men); color: var(--c-ji); text-decoration: none; }
