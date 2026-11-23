@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 25, ops: 38, caps: 8, rule_keys: 44, common_pass: 0, public_funcs: 5 };   // 段C：ops 35→37（room_share・room_close）・public_funcs 3→4（mj_my_rooms）・2d：4→5（mj_read）・C4：ops 37→38（table_rules）
+export const EXPECT = { tables: 26, ops: 38, caps: 8, rule_keys: 44, common_pass: 0, public_funcs: 5 };   // 段C：ops 35→37（room_share・room_close）・public_funcs 3→4（mj_my_rooms）・2d：4→5（mj_read）・C4：ops 37→38（table_rules）・P2：tables 25→26（room_ns）
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {

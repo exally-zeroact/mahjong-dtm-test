@@ -75,6 +75,8 @@ create index if not exists rooms_name_key_open on mahjong.rooms(name_key) where 
 alter table mahjong.rooms add column if not exists read_ver bigint not null default 0;
 alter table mahjong.rooms drop constraint if exists rooms_read_ver_ok;
 alter table mahjong.rooms add constraint rooms_read_ver_ok check (read_ver >= 0);
+-- P2 §1.6（p2_sadame v5.1）：部屋 v3 の members の n・last の版＝組に tbl が hanchans・sessions・tables の履歴の行が在る時だけ mj_write が新しい read_ver にする
+alter table mahjong.rooms add column if not exists ns_ver bigint not null default 0;
 
 -- ── ルールの1組（版ごとの行・変えると版を足す・卓が指す行は消さない） ──────
 create table if not exists mahjong.rule_sets (
@@ -192,6 +194,14 @@ alter table mahjong.sessions drop constraint if exists sessions_alt_ok;
 alter table mahjong.sessions add constraint sessions_alt_ok check ((rule_set_id_alt is null) = (rule_version_alt is null)
   and (rule_set_id_alt is null or league_id is not null));
 create index if not exists sessions_league on mahjong.sessions(league_id, created_at) where league_id is not null;
+-- P2 §1.1（p2_sadame v5.1）：その日の版＝その日の行（開催・卓・半荘・点・extras・締め）を触った mj_write の組の read_ver（0＝P2 より前から触っていない）
+alter table mahjong.sessions add column if not exists day_ver bigint not null default 0;
+-- P2 §1.6：部屋 v3 の members の n・last の控え（rooms の行とは別＝rooms の行の鍵を取らない）。ver＝数えた時の読み始めの rooms.ns_ver
+create table if not exists mahjong.room_ns (
+  room_id uuid primary key references mahjong.rooms(id) on delete cascade,
+  ver     bigint not null,
+  cache   jsonb not null
+);
 
 -- ── 卓（players・ルールは table_add で決まる・半荘のある卓は変えない＝op の確かめ） ──
 create table if not exists mahjong.tables (
@@ -867,13 +877,13 @@ begin
   delete from mahjong.mj_common_pass;
 end $cpdo$;
 
--- ── 呼んだ人（v18 C・K-10）＝全部の入口の頭で呼ぶ・null＝弾く（{ok:false, err:'mj_session'}） ─────────────
+-- ── 呼んだ人の門＝mj_who（v18 C・K-10・P2 §2.5 で分けた）＝全部の入口の頭で mj_me／mj_me_read から呼ぶ・null＝弾く（{ok:false, err:'mj_session'}） ─────────────
 --   auth.uid() の人が auth.users に在り（匿名でない・止められていない・消されていない）、かつ jwt の session_id が
 --   auth.sessions に在る（signOut 済みの古い access token を最大1時間生かさない・not_after 切れも弾く）時だけ uid を返す。
---   uuid に直せない字・claim が無い時も null（閉じる側）。初めての人は accounts を作る・last_seen は1分に1回だけ書く。
+--   uuid に直せない字・claim が無い時も null（閉じる側）。accounts を作る・last_seen を1分に1回書くのは mj_me（押さえる）と mj_me_read（押さえない）。
 --   ★関数の持ち主（postgres）は auth.users・auth.sessions を読める＝I-7①（khaw 11-20 測り）★
-create or replace function mahjong_private.mj_me() returns uuid
-language plpgsql volatile set search_path = '' as $fn$
+create or replace function mahjong_private.mj_who() returns uuid
+language plpgsql stable set search_path = '' as $fn$
 declare
   v_uid uuid; v_sid uuid;
 begin
@@ -893,12 +903,44 @@ begin
                   where s.id = v_sid and s.user_id = v_uid and (s.not_after is null or s.not_after > pg_catalog.now())) then
     return null;
   end if;
+  return v_uid;
+end $fn$;
+revoke all on function mahjong_private.mj_who() from public, anon, authenticated;
+-- 書き・入室・一覧の人＝mj_me。★accounts の行を取引の終わりまで押さえる（on conflict do update は where が偽でも押さえる）★
+--   ＝同じ人の join／write が1本ずつに並ぶ＝人ごとの上限（join:ufail1m・write:u1m/u1d）の読みと足しはこの押さえで守られている。外すな。
+create or replace function mahjong_private.mj_me() returns uuid
+language plpgsql volatile set search_path = '' as $fn$
+declare
+  v_uid uuid;
+begin
+  v_uid := mahjong_private.mj_who();
+  if v_uid is null then return null; end if;
   insert into mahjong.accounts as a (user_id) values (v_uid)
     on conflict (user_id) do update set last_seen = pg_catalog.now()
     where a.last_seen < pg_catalog.now() - interval '1 minute';
   return v_uid;
 end $fn$;
 revoke all on function mahjong_private.mj_me() from public, anon, authenticated;
+-- P2 §2.3（11-23 測った）：読みの人＝mj_me_read。押さえない（mj_me の押さえで同じ人の読み4席が1本ずつに並び、5本目が busy でなく 12秒待った）。
+--   在れば skip locked で古い時だけ last_seen を足す（他が押さえていれば足さずに通る）・無い時だけ入れる（初めての同時は後の1本が先の commit を待つ）
+create or replace function mahjong_private.mj_me_read() returns uuid
+language plpgsql volatile set search_path = '' as $fn$
+declare
+  v_uid uuid;
+begin
+  v_uid := mahjong_private.mj_who();
+  if v_uid is null then return null; end if;
+  if exists (select 1 from mahjong.accounts a where a.user_id = v_uid) then
+    update mahjong.accounts a set last_seen = pg_catalog.now()
+     where a.ctid = any(array(select y.ctid from mahjong.accounts y
+                               where y.user_id = v_uid and y.last_seen < pg_catalog.now() - interval '1 minute'
+                               for update skip locked));
+  else
+    insert into mahjong.accounts (user_id) values (v_uid) on conflict (user_id) do nothing;
+  end if;
+  return v_uid;
+end $fn$;
+revoke all on function mahjong_private.mj_me_read() from public, anon, authenticated;
 
 -- ── 段C §3 名前ごとの止め（kind 'join:nfail1h'・key＝name_key・15分の窓＝date_bin）──
 --   足す＝名前の道の外れ・create shared と room_share の dup（当たっても戻さない）。5 に着いたらその窓の終わりまで止め（読みは押さえない＝§6）
@@ -3955,7 +3997,25 @@ begin
 
     v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);
     -- 2d §1：読む口の版＝ok で返る組は全部 +1（書かなかった組も＝余分な読みは害が無い・塊の中＝弾かれた組は戻る）
-    update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;
+    -- P2 §1.6：組に tbl が hanchans・sessions・tables の履歴の行が在る時だけ ns_ver＝新しい read_ver（同じ文＝x.read_ver は前の値）
+    update mahjong.rooms x set read_ver = x.read_ver + 1,
+           ns_ver = case when exists (select 1 from mahjong.history h where h.group_id = v_gid and h.room_id = p_room_id and h.tbl in ('hanchans', 'sessions', 'tables'))
+                         then x.read_ver + 1 else x.ns_ver end
+     where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;
+    -- P2 §1.1：この組の履歴の行が触った日（開催）の day_ver＝新しい read_ver（同じ塊＝弾かれた組は戻る）
+    --   開催の引き方＝sessions・settle_snaps は鍵そのもの／tables・extras は卓から／hanchans・cells は半荘の卓から（他の tbl は日を持たない）
+    update mahjong.sessions s set day_ver = v_rv
+     where s.room_id = p_room_id and s.id in (
+       select case h.tbl
+                when 'sessions'     then (h.row_key ->> 'id')::uuid
+                when 'settle_snaps' then (h.row_key ->> 'session_id')::uuid
+                when 'tables'       then (select t.session_id from mahjong.tables t where t.id = (h.row_key ->> 'id')::uuid)
+                when 'extras'       then (select t.session_id from mahjong.tables t where t.id = (h.row_key ->> 'table_id')::uuid)
+                when 'hanchans'     then (select t.session_id from mahjong.hanchans z join mahjong.tables t on t.id = z.table_id where z.id = (h.row_key ->> 'id')::uuid)
+                when 'cells'        then (select t.session_id from mahjong.hanchans z join mahjong.tables t on t.id = z.table_id where z.id = (h.row_key ->> 'hanchan_id')::uuid)
+              end
+         from mahjong.history h
+        where h.group_id = v_gid and h.room_id = p_room_id and h.tbl in ('sessions', 'settle_snaps', 'tables', 'extras', 'hanchans', 'cells'));
     v_ret := v_ret || pg_catalog.jsonb_build_object('read_ver', v_rv);   -- 2c-2f v1.2：書いた端末が合図に載せる版
     perform mahjong_private.mj_w_signal(v_ch0, v_rv);   -- 2c-2f §1 控えの送り（塊の中＝組が戻れば合図も出ない）
     if v_ch1 is distinct from v_ch0 then perform mahjong_private.mj_w_signal(v_ch1, v_rv); end if;   -- room_secret・room_share＝古い名と新しい名の両方
@@ -3997,19 +4057,133 @@ end $fn$;
 revoke all on function public.mj_write(uuid, uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.mj_write(uuid, uuid, jsonb) to authenticated;
 
+-- P2 §1.2〜1.5（p2_sadame v5.1）：リーグの v3 の1頁＝★stable＝中の文は全部、呼んだ文の写真を見る★（read_ver・days・中身が同じ写真＝v5.1 §1.3「同じ1つの select 文」）
+--   返す日＝p_since が在れば day_ver > p_since の日・無ければ全部、を (created_at, id) の順に p_after_s・p_after_t より後から。
+--   1頁は 512KB の天井：卓を単位に足す（1つの卓が越える時はその卓だけ）。届いたら more true と next_after（返した最後の開催 id・卓 id＝卓の無い日は null）。
+--   開催の行と締めはその日の最初の頁に・extras はその卓と一緒に。締めは全部の rev の行（settles.length が rev）・中身はその日の最後の rev だけ（他は content {}・used と missing null）。
+--   st の形は今のまま（v 2・卓の rules を埋める＝roomGate がそのまま通る）。返し＝{read_ver, days, more, st, next_after?}｜{bad:'after'}
+create or replace function mahjong_private.mj_r_league3(p_room uuid, p_lid uuid, p_since bigint, p_after_s uuid, p_after_t uuid) returns jsonb
+language plpgsql stable set search_path = '' as $fn$
+declare
+  c_cap constant int := 524288;
+  v_rv bigint; v_days jsonb; v_mem jsonb; v_ac timestamptz; v_tc timestamptz;
+  d record; t record; v_cont boolean; v_head boolean; v_hj jsonb; v_hs jsonb; v_hsz int := 0;
+  v_tj jsonb; v_hh jsonb; v_ex jsonb; v_usz int;
+  v_size int := 0; v_units int := 0; v_more boolean := false; v_ls uuid; v_lt uuid;
+  a_s jsonb[] := '{}'; a_t jsonb[] := '{}'; a_h jsonb[] := '{}'; a_e jsonb[] := '{}'; a_z jsonb[] := '{}';
+begin
+  select x.read_ver into v_rv from mahjong.rooms x where x.id = p_room;
+  -- 毎回返す段：days（全部の日）・members
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', x.id, 'day_ver', x.day_ver,
+           'date', pg_catalog.to_char(x.date, 'YYYY-MM-DD'), 'voided', x.voided,
+           'rules', (select q.rules from mahjong.rule_sets q where q.id = x.rule_set_id and q.version = x.rule_version),
+           'rules_alt', (select q.rules from mahjong.rule_sets q where x.rule_set_id_alt is not null and q.id = x.rule_set_id_alt and q.version = x.rule_version_alt))
+           order by x.created_at, x.id), '[]'::jsonb)
+    into v_days from mahjong.sessions x where x.room_id = p_room and x.league_id = p_lid;
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
+           order by m.created_at, m.id), '[]'::jsonb)
+    into v_mem from mahjong.members m where m.room_id = p_room;
+  -- 続きの頁の始め（無い開催・その開催に無い卓＝bad after）
+  if p_after_s is not null then
+    select x.created_at into v_ac from mahjong.sessions x where x.id = p_after_s and x.room_id = p_room and x.league_id = p_lid;
+    if not found then return '{"bad": "after"}'::jsonb; end if;
+    if p_after_t is not null then
+      select y.created_at into v_tc from mahjong.tables y where y.id = p_after_t and y.session_id = p_after_s;
+      if not found then return '{"bad": "after"}'::jsonb; end if;
+    end if;
+  end if;
+  <<days>>
+  for d in select x.* from mahjong.sessions x
+            where x.room_id = p_room and x.league_id = p_lid and (p_since is null or x.day_ver > p_since)
+              and (p_after_s is null or (x.created_at, x.id) >= (v_ac, p_after_s))
+            order by x.created_at, x.id loop
+    v_cont := coalesce(d.id = p_after_s, false);   -- 前の頁の続きの日（開催の行と締めはもう返した）
+    if v_cont and p_after_t is null then continue; end if;   -- 卓の無い日まで返した
+    v_head := not v_cont;
+    if v_head then
+      v_hj := pg_catalog.jsonb_build_object('session_id', d.id, 'date', pg_catalog.to_char(d.date, 'YYYY-MM-DD'), 'rate', d.rate)
+              || case when d.place is not null and d.place <> '' then pg_catalog.jsonb_build_object('place', d.place) else '{}'::jsonb end
+              || case when d.voided then '{"voided": true}'::jsonb else '{}'::jsonb end;
+      select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', z.session_id, 'rev', z.rev,
+               'at', pg_catalog.to_char(z.made_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+               'content', case when z.rev = m.mx then z.content else '{}'::jsonb end,
+               'used', case when z.rev = m.mx then z.used end, 'missing', case when z.rev = m.mx then z.missing end)
+               order by z.made_at, z.session_id, z.rev), '[]'::jsonb)
+        into v_hs
+        from mahjong.settle_snaps z cross join (select pg_catalog.max(y.rev) as mx from mahjong.settle_snaps y where y.session_id = d.id) m
+       where z.session_id = d.id;
+      v_hsz := pg_catalog.octet_length(v_hj::text) + pg_catalog.octet_length(v_hs::text);
+    end if;
+    for t in select y.* from mahjong.tables y
+              where y.session_id = d.id and (not v_cont or (y.created_at, y.id) > (v_tc, p_after_t))
+              order by y.created_at, y.id loop
+      v_tj := pg_catalog.jsonb_build_object('table_id', t.id, 'session_id', t.session_id, 'label', t.label,
+                'rules', (select q.rules from mahjong.rule_sets q where q.id = t.rule_set_id and q.version = t.rule_version), 'seats', t.seats)
+              || case when t.rate_mode <> 'session' then pg_catalog.jsonb_build_object('rate_mode', t.rate_mode) else '{}'::jsonb end
+              || case when t.rate_mode = 'num' then pg_catalog.jsonb_build_object('rate', t.rate) else '{}'::jsonb end
+              || case when t.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
+              || case when t.next_table_id is not null then pg_catalog.jsonb_build_object('next_table_id', t.next_table_id, 'split_same', t.split_same) else '{}'::jsonb end;
+      select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('hanchan_id', hh.id, 'table_id', hh.table_id, 'no', hh.no,
+               'seats', (select pg_catalog.jsonb_agg(e.value order by e.key::int) from pg_catalog.jsonb_each(hh.seats) e),
+               'cells', (select pg_catalog.jsonb_agg(c.value order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
+               'cell_ver', (select pg_catalog.jsonb_agg(c.version order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
+               'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
+               'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+               order by hh.created_at, hh.id), '[]'::jsonb)
+        into v_hh
+        from (select z.*, pg_catalog.row_number() over (order by z.created_at, z.id) as no from mahjong.hanchans z where z.table_id = t.id) hh;
+      select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', e.table_id, 'member_id', e.member_id, 'kind', e.kind, 'value', e.value, 'version', e.version)
+               order by e.kind collate "C", e.member_id::text collate "C"), '[]'::jsonb)
+        into v_ex from mahjong.extras e where e.table_id = t.id;
+      v_usz := pg_catalog.octet_length(v_tj::text) + pg_catalog.octet_length(v_hh::text) + pg_catalog.octet_length(v_ex::text)
+               + case when v_head then v_hsz else 0 end;
+      if v_units > 0 and v_size + v_usz > c_cap then v_more := true; exit days; end if;
+      if v_head then a_s := a_s || v_hj; a_z := a_z || v_hs; v_head := false; end if;
+      a_t := a_t || v_tj; a_h := a_h || v_hh; a_e := a_e || v_ex;
+      v_size := v_size + v_usz; v_units := v_units + 1; v_ls := d.id; v_lt := t.id;
+    end loop;
+    if v_head then   -- 卓の無い日＝開催の行と締めだけで1つ
+      if v_units > 0 and v_size + v_hsz > c_cap then v_more := true; exit days; end if;
+      a_s := a_s || v_hj; a_z := a_z || v_hs;
+      v_size := v_size + v_hsz; v_units := v_units + 1; v_ls := d.id; v_lt := null;
+    end if;
+  end loop;
+  return pg_catalog.jsonb_build_object('read_ver', v_rv, 'days', v_days, 'more', v_more,
+    'st', pg_catalog.jsonb_build_object('v', 2, 'members', v_mem,
+      'sessions', pg_catalog.to_jsonb(a_s),
+      'tables', pg_catalog.to_jsonb(a_t),
+      -- 卓ごとの配列（a_h・a_e・a_z の1つ＝配列）を順のまま1本に
+      'hanchans', (select coalesce(pg_catalog.jsonb_agg(e.value order by u.o, e.o), '[]'::jsonb)
+                     from pg_catalog.unnest(a_h) with ordinality u(j, o), pg_catalog.jsonb_array_elements(u.j) with ordinality e(value, o)),
+      'extras', (select coalesce(pg_catalog.jsonb_agg(e.value order by u.o, e.o), '[]'::jsonb)
+                   from pg_catalog.unnest(a_e) with ordinality u(j, o), pg_catalog.jsonb_array_elements(u.j) with ordinality e(value, o)),
+      'settles', (select coalesce(pg_catalog.jsonb_agg(e.value order by u.o, e.o), '[]'::jsonb)
+                    from pg_catalog.unnest(a_z) with ordinality u(j, o), pg_catalog.jsonb_array_elements(u.j) with ordinality e(value, o))))
+    || case when v_more then pg_catalog.jsonb_build_object('next_after', pg_catalog.jsonb_build_object('session_id', v_ls, 'table_id', v_lt)) else '{}'::jsonb end;
+end $fn$;
+revoke all on function mahjong_private.mj_r_league3(uuid, uuid, bigint, uuid, uuid) from public, anon, authenticated;
+
 -- ── 2d 読む口 public.mj_read（2d_sadame.md v2.1 §1・設計図 §G）──────────────────────────────
 --   通す人＝mj_write 段1 と同じ（持ち主か room_accounts の行・出された人は通さない）。無い・入っていない・消した印（deleted_at）＝gone（在るかを見せない）
 --   閉じた部屋も読める（closed true）・部屋なし（solo）も持ち主は読める。p_what は 'room' と 'league'（D2 §1＝そのリーグの日だけの st・league・days）。p_args＝{since?:int}＝今の read_ver なら same（中身を返さない）
 --   st は端末の写し（lib/room-state.mjs）と★同じ形・同じ鍵だけ★（写しに無い欄を出すと端末の門が newer で止まる）。D1：leagues は st の外の段（same の時は返さない）。リーグの日とその卓・半荘・extras・締めは出さない
 --   並び＝members・sessions・tables・hanchans は (created_at, id)（写しの配列の順＝pickSession が最後を見る）・hanchans.no は卓の中の (created_at, id) の順の番号
---   数えない（上限の数えに入れない・後にした守り＝回数の上限）。last_seen は mj_write 段1 と同じ（1時間以上前の時だけ）
+--   last_seen は mj_write 段1 と同じ（1時間以上前の時だけ）
+-- P2 §2（p2_sadame v5.1）：読みを時間で量る＝窓 read:u1m（key＝人・1分・数＝ms）。★v 無しも v3 も同じ門★＝今の分と前の分の和が 80,000 を越えていたら busy what read。
+--   門の後で人ごとに4本の席（pg_try_advisory_xact_lock(人の鍵, 0〜3)）＝4本とも埋まっていれば busy what read_one（数えない）。
+--   中身を組む所は begin…exception when query_canceled（時間切れ＝busy what read_slow）で包み、終わりと時間切れの両方で経った ms（切り上げ・same は 1）を同じ取引で足す。gone・bad・mj_session は数えない。
+-- P2 §1：'league' の p_args.v = 3＝{league_id, v:3, since?, after?:{session_id, table_id|null}}＝mj_r_league3 の頁（more・next_after）。v 無しは今のまま全部。
 create or replace function public.mj_read(p_room_id uuid, p_what text, p_args jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
   v_me uuid; v_role text; r record; v_since jsonb; v_rules jsonb; v_st jsonb; v_lg jsonb; v_lid uuid; v_days jsonb;
   v_v3 boolean := false; v_req uuid[] := '{}'; v_load uuid[]; v_abs jsonb; v_e jsonb; v_ns jsonb;
+  v_lv3 boolean := false; v_as uuid; v_at uuid; v_pg jsonb; v_out jsonb; v_cnt boolean := true;
+  v_uk text; v_seat int; v_got boolean := false; v_t0 timestamptz; v_ms int;
+  v_min timestamptz := pg_catalog.date_trunc('minute', pg_catalog.now());
+  c_uuid constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 begin
-  v_me := mahjong_private.mj_me();
+  v_me := mahjong_private.mj_me_read();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
   if p_room_id is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'room_id'); end if;
   if p_what is null or p_what not in ('room', 'league') then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'what'); end if;
@@ -4019,10 +4193,24 @@ begin
   -- D2 §1：'league'＝p_args.league_id（uuid の字）・形が違えば bad what league_id（部屋の門の前＝行を読まない）
   if p_what = 'league' then
     if pg_catalog.jsonb_typeof(p_args) is distinct from 'object' or pg_catalog.jsonb_typeof(p_args -> 'league_id') is distinct from 'string'
-       or (p_args ->> 'league_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+       or (p_args ->> 'league_id') !~* c_uuid then
       return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'league_id');
     end if;
     v_lid := (p_args ->> 'league_id')::uuid;
+    -- P2 §1.2：v 3＝頁の読み。after＝前の頁の next_after（形の誤り＝bad what after）
+    if (p_args -> 'v') = '3'::jsonb then
+      v_lv3 := true;
+      if (p_args -> 'after') is not null and (p_args -> 'after') <> 'null'::jsonb then
+        if pg_catalog.jsonb_typeof(p_args -> 'after') <> 'object'
+           or pg_catalog.jsonb_typeof(p_args #> '{after,session_id}') is distinct from 'string' or (p_args #>> '{after,session_id}') !~* c_uuid
+           or ((p_args #> '{after,table_id}') is not null and (p_args #> '{after,table_id}') <> 'null'::jsonb
+               and (pg_catalog.jsonb_typeof(p_args #> '{after,table_id}') <> 'string' or (p_args #>> '{after,table_id}') !~* c_uuid)) then
+          return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'after');
+        end if;
+        v_as := (p_args #>> '{after,session_id}')::uuid;
+        v_at := case when pg_catalog.jsonb_typeof(p_args #> '{after,table_id}') = 'string' then (p_args #>> '{after,table_id}')::uuid end;
+      end if;
+    end if;
   end if;
   -- P5 §2（p5_sadame v1.3）：分けた読みは p_args.v = 3 の 'room' の時だけ（無い・3 でない＝今の v2 の全部の読み＝古い端末はそのまま読める）
   --   sessions＝開催 id の配列（任意・v 3 の時だけ見る）。形の誤り（配列でない・uuid の字でない・50 超え）だけ bad what sessions
@@ -4033,7 +4221,7 @@ begin
         return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'sessions');
       end if;
       for v_e in select e.value from pg_catalog.jsonb_array_elements(p_args -> 'sessions') e loop
-        if pg_catalog.jsonb_typeof(v_e) <> 'string' or (v_e #>> '{}') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+        if pg_catalog.jsonb_typeof(v_e) <> 'string' or (v_e #>> '{}') !~* c_uuid then
           return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'sessions');
         end if;
         v_req := v_req || (v_e #>> '{}')::uuid;
@@ -4046,128 +4234,179 @@ begin
     return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'since');
   end if;
 
-  select x.id, x.owner_user_id, x.deleted_at, x.kind, x.name, x.closed_at, x.read_ver, x.rule_set_id, x.rule_version, x.channel_key into r
-    from mahjong.rooms x where x.id = p_room_id;
-  if not found or r.deleted_at is not null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
-  if r.owner_user_id = v_me then
-    v_role := 'owner';
-  else
-    select a.role into v_role from mahjong.room_accounts a where a.room_id = p_room_id and a.user_id = v_me;
-    if v_role is not null and exists (select 1 from mahjong.room_bans b where b.room_id = p_room_id and b.user_id = v_me) then v_role := null; end if;
+  -- P2 §2.1 門（v 無しも v3 も・今の分と前の分の和）
+  v_uk := v_me::text;
+  if (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l
+       where l.kind = 'read:u1m' and l.key = v_uk and l.window_start >= v_min - interval '1 minute') > 80000 then
+    return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'read');
   end if;
-  if v_role is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); end if;
-  -- D2 §1：リーグが無い・他の部屋＝bad what league_id（取り消したリーグは読める）＝部屋の門の後（入でない人には在るかを見せない）
-  if v_lid is not null and not exists (select 1 from mahjong.leagues l where l.id = v_lid and l.room_id = p_room_id) then
-    return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'league_id');
-  end if;
-  update mahjong.room_accounts a set last_seen = pg_catalog.now()
-   where a.room_id = p_room_id and a.user_id = v_me and a.last_seen < pg_catalog.now() - interval '1 hour';
+  -- P2 §2.3 同時の読みの席（人ごとに4本）
+  for v_seat in 0 .. 3 loop
+    if pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtext('mj_read:' || v_uk), v_seat) then v_got := true; exit; end if;
+  end loop;
+  if not v_got then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'read_one'); end if;
+  v_t0 := pg_catalog.clock_timestamp();
 
-  if v_since is not null and (v_since::text)::numeric = r.read_ver then
-    return pg_catalog.jsonb_build_object('ok', true, 'same', true, 'read_ver', r.read_ver);
-  end if;
+  <<body>>
+  begin
+    select x.id, x.owner_user_id, x.deleted_at, x.kind, x.name, x.closed_at, x.read_ver, x.ns_ver, x.rule_set_id, x.rule_version, x.channel_key into r
+      from mahjong.rooms x where x.id = p_room_id;
+    if not found or r.deleted_at is not null then v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); v_cnt := false; exit body; end if;
+    if r.owner_user_id = v_me then
+      v_role := 'owner';
+    else
+      select a.role into v_role from mahjong.room_accounts a where a.room_id = p_room_id and a.user_id = v_me;
+      if v_role is not null and exists (select 1 from mahjong.room_bans b where b.room_id = p_room_id and b.user_id = v_me) then v_role := null; end if;
+    end if;
+    if v_role is null then v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'gone'); v_cnt := false; exit body; end if;
+    -- D2 §1：リーグが無い・他の部屋＝bad what league_id（取り消したリーグは読める）＝部屋の門の後（入でない人には在るかを見せない）
+    if v_lid is not null and not exists (select 1 from mahjong.leagues l where l.id = v_lid and l.room_id = p_room_id) then
+      v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'league_id'); v_cnt := false; exit body;
+    end if;
+    update mahjong.room_accounts a set last_seen = pg_catalog.now()
+     where a.room_id = p_room_id and a.user_id = v_me and a.last_seen < pg_catalog.now() - interval '1 hour';
 
-  select x.rules into v_rules from mahjong.rule_sets x where x.id = r.rule_set_id and x.version = r.rule_version;
+    if v_since is not null and (v_since::text)::numeric = r.read_ver then
+      v_out := pg_catalog.jsonb_build_object('ok', true, 'same', true, 'read_ver', r.read_ver); exit body;
+    end if;
 
-  if v_v3 then
-    -- P5 §2：中身を返す開催＝(a) (created_at, id) の最後の3つ（取り消しも）(b) 取り消していない最後（pickSession・開催の重なりの門と同じ並び）
-    --   (c) sessions に在るこの部屋の league null の開催。それ以外の id（まだ無い・他の部屋・リーグの日）は absent（読みは失敗しない）
-    select coalesce(pg_catalog.array_agg(x.id order by x.created_at, x.id), '{}') into v_load
-      from mahjong.sessions x
-     where x.room_id = p_room_id and x.league_id is null
-       and (x.id in (select y.id from mahjong.sessions y where y.room_id = p_room_id and y.league_id is null order by y.created_at desc, y.id desc limit 3)
-            or x.id = (select y.id from mahjong.sessions y where y.room_id = p_room_id and y.league_id is null and not y.voided order by y.created_at desc, y.id desc limit 1)
-            or x.id = any(v_req));
-    select coalesce(pg_catalog.jsonb_agg(d.id::text order by d.o), '[]'::jsonb) into v_abs
-      from (select q.id, pg_catalog.min(q.o) as o from pg_catalog.unnest(v_req) with ordinality as q(id, o)
-             where not exists (select 1 from mahjong.sessions x where x.id = q.id and x.room_id = p_room_id and x.league_id is null)
-             group by q.id) d;
-    -- members の n（取り消していない半荘に座った数）と last（その開催の日の最大）＝league null の全開催を1回で数える（画面の memberStats と同じ数え）
-    select coalesce(pg_catalog.jsonb_object_agg(q.mid, pg_catalog.jsonb_build_object('n', q.n, 'last', q.last)), '{}'::jsonb) into v_ns
-      from (select e2.value as mid, pg_catalog.count(*)::int as n, pg_catalog.to_char(pg_catalog.max(s2.date), 'YYYY-MM-DD') as last
-              from mahjong.hanchans h2 join mahjong.tables t2 on t2.id = h2.table_id join mahjong.sessions s2 on s2.id = t2.session_id
-                   cross join lateral pg_catalog.jsonb_each_text(h2.seats) e2
-             where h2.room_id = p_room_id and s2.room_id = p_room_id and s2.league_id is null and not h2.voided
-             group by e2.value) q;
-  end if;
+    select x.rules into v_rules from mahjong.rule_sets x where x.id = r.rule_set_id and x.version = r.rule_version;
 
-  with ss as (
-    select x.* from mahjong.sessions x where x.room_id = p_room_id and x.league_id is not distinct from v_lid   -- room＝リーグでない日・league＝そのリーグの日（全部）
-  ), sl as (
-    select ss.* from ss where not v_v3 or ss.id = any(v_load)   -- P5：中身を返す開催（v2 は全部）
-  ), tt as (
-    select y.* from mahjong.tables y join sl on sl.id = y.session_id
-  ), hh as (
-    select z.*, pg_catalog.row_number() over (partition by z.table_id order by z.created_at, z.id) as no
-      from mahjong.hanchans z join tt on tt.id = z.table_id
-  )
-  select pg_catalog.jsonb_build_object('v', case when v_v3 then 3 else 2 end,
-    'members', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
-                           -- P5 §2：v3 は n と last（上の v_ns・座っていない人は 0 と null）
-                           || case when v_v3 then coalesce(v_ns -> m.id::text, '{"n": 0, "last": null}'::jsonb) else '{}'::jsonb end
-                           order by m.created_at, m.id) from mahjong.members m where m.room_id = p_room_id), '[]'::jsonb),
-    'sessions', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', ss.id, 'date', pg_catalog.to_char(ss.date, 'YYYY-MM-DD'), 'rate', ss.rate)
-                           || case when ss.place is not null and ss.place <> '' then pg_catalog.jsonb_build_object('place', ss.place) else '{}'::jsonb end
-                           || case when ss.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
-                           order by ss.created_at, ss.id) from ss), '[]'::jsonb),
-    'tables', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', tt.id, 'session_id', tt.session_id, 'label', tt.label,
-                           'rules', (select q.rules from mahjong.rule_sets q where q.id = tt.rule_set_id and q.version = tt.rule_version), 'seats', tt.seats)
-                           || case when tt.rate_mode <> 'session' then pg_catalog.jsonb_build_object('rate_mode', tt.rate_mode) else '{}'::jsonb end
-                           || case when tt.rate_mode = 'num' then pg_catalog.jsonb_build_object('rate', tt.rate) else '{}'::jsonb end
-                           || case when tt.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
-                           -- C4 §3（N1）区切った卓だけ：続きの卓と、鍵が同じだったか（null＝lib は「鍵が違う」側に読む）
-                           || case when tt.next_table_id is not null then pg_catalog.jsonb_build_object('next_table_id', tt.next_table_id, 'split_same', tt.split_same) else '{}'::jsonb end
-                           order by tt.created_at, tt.id) from tt), '[]'::jsonb),
-    'hanchans', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('hanchan_id', hh.id, 'table_id', hh.table_id, 'no', hh.no,
-                           'seats', (select pg_catalog.jsonb_agg(e.value order by e.key::int) from pg_catalog.jsonb_each(hh.seats) e),
-                           'cells', (select pg_catalog.jsonb_agg(c.value order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
-                           'cell_ver', (select pg_catalog.jsonb_agg(c.version order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
-                           'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
-                           'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
-                           order by hh.created_at, hh.id) from hh), '[]'::jsonb),
-    'extras', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', e.table_id, 'member_id', e.member_id, 'kind', e.kind, 'value', e.value, 'version', e.version)
-                           order by e.table_id::text collate "C", e.kind collate "C", e.member_id::text collate "C") from mahjong.extras e join tt on tt.id = e.table_id), '[]'::jsonb),
-    'settles', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', z.session_id, 'rev', z.rev,
-                           'at', pg_catalog.to_char(z.made_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'content', z.content, 'used', z.used, 'missing', z.missing)
-                           order by z.made_at, z.session_id, z.rev) from mahjong.settle_snaps z join sl on sl.id = z.session_id), '[]'::jsonb))
-    into v_st;
-  if v_v3 then
-    v_st := v_st || pg_catalog.jsonb_build_object('loaded', (select coalesce(pg_catalog.jsonb_agg(u.id::text order by u.o), '[]'::jsonb) from pg_catalog.unnest(v_load) with ordinality as u(id, o)),
-                                                  'absent', v_abs);
-  end if;
+    -- D1 §2（d1_sadame v2.1）：その部屋のリーグ（取り消した物も・並び created_at, id）。★st の外の段★（st は写しと同じ形のまま）
+    --   l＝自分が L か（owner_user_id が自分／L のアカウントが無く自分が部屋の持ち主＝書きの時に倉庫が継ぐ）。owner_user_id そのものは返さない
+    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('league_id', l.id, 'name', l.name,
+             'date_from', pg_catalog.to_char(l.date_from, 'YYYY-MM-DD'), 'date_to', pg_catalog.to_char(l.date_to, 'YYYY-MM-DD'),
+             'rank_by', l.rank_by, 'min_games', l.min_games, 'players_main', l.players_main,
+             'rules', (select q.rules from mahjong.rule_sets q where q.id = l.rule_set_id and q.version = l.rule_version),
+             'rules_alt', (select q.rules from mahjong.rule_sets q where l.rule_set_id_alt is not null and q.id = l.rule_set_id_alt and q.version = l.rule_version_alt),
+             'version', l.version,
+             'l', l.owner_user_id = v_me or (v_role = 'owner' and not exists (select 1 from auth.users u where u.id = l.owner_user_id)))
+             || case when l.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
+             order by l.created_at, l.id), '[]'::jsonb)
+      into v_lg from mahjong.leagues l where l.room_id = p_room_id and (v_lid is null or l.id = v_lid);
 
-  -- D1 §2（d1_sadame v2.1）：その部屋のリーグ（取り消した物も・並び created_at, id）。★st の外の段★（st は写しと同じ形のまま）
-  --   l＝自分が L か（owner_user_id が自分／L のアカウントが無く自分が部屋の持ち主＝書きの時に倉庫が継ぐ）。owner_user_id そのものは返さない
-  select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('league_id', l.id, 'name', l.name,
-           'date_from', pg_catalog.to_char(l.date_from, 'YYYY-MM-DD'), 'date_to', pg_catalog.to_char(l.date_to, 'YYYY-MM-DD'),
-           'rank_by', l.rank_by, 'min_games', l.min_games, 'players_main', l.players_main,
-           'rules', (select q.rules from mahjong.rule_sets q where q.id = l.rule_set_id and q.version = l.rule_version),
-           'rules_alt', (select q.rules from mahjong.rule_sets q where l.rule_set_id_alt is not null and q.id = l.rule_set_id_alt and q.version = l.rule_version_alt),
-           'version', l.version,
-           'l', l.owner_user_id = v_me or (v_role = 'owner' and not exists (select 1 from auth.users u where u.id = l.owner_user_id)))
-           || case when l.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
-           order by l.created_at, l.id), '[]'::jsonb)
-    into v_lg from mahjong.leagues l where l.room_id = p_room_id and (v_lid is null or l.id = v_lid);
+    -- P2 §1.2：リーグの v3＝頁（read_ver・days・中身は mj_r_league3 の1つの写真）
+    if v_lv3 then
+      v_pg := mahjong_private.mj_r_league3(p_room_id, v_lid, (v_since::text)::bigint, v_as, v_at);
+      if v_pg ? 'bad' then v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'after'); v_cnt := false; exit body; end if;
+      v_out := pg_catalog.jsonb_build_object('ok', true, 'read_ver', v_pg -> 'read_ver',
+        'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
+                                              'channel_key', r.channel_key)
+                || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
+        'league', v_lg -> 0, 'days', v_pg -> 'days', 'st', v_pg -> 'st', 'more', v_pg -> 'more')
+        || case when v_pg ? 'next_after' then pg_catalog.jsonb_build_object('next_after', v_pg -> 'next_after') else '{}'::jsonb end;
+      exit body;
+    end if;
 
-  if v_lid is not null then
-    -- D2 §1：days＝その日の版（開催日に写した主と alt・league_save の後も前の日は前の版）・並び (created_at, id)
-    select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', x.id,
-             'rules', (select q.rules from mahjong.rule_sets q where q.id = x.rule_set_id and q.version = x.rule_version),
-             'rules_alt', (select q.rules from mahjong.rule_sets q where x.rule_set_id_alt is not null and q.id = x.rule_set_id_alt and q.version = x.rule_version_alt))
-             order by x.created_at, x.id), '[]'::jsonb)
-      into v_days from mahjong.sessions x where x.room_id = p_room_id and x.league_id = v_lid;
-    return pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
+    if v_v3 then
+      -- P5 §2：中身を返す開催＝(a) (created_at, id) の最後の3つ（取り消しも）(b) 取り消していない最後（pickSession・開催の重なりの門と同じ並び）
+      --   (c) sessions に在るこの部屋の league null の開催。それ以外の id（まだ無い・他の部屋・リーグの日）は absent（読みは失敗しない）
+      select coalesce(pg_catalog.array_agg(x.id order by x.created_at, x.id), '{}') into v_load
+        from mahjong.sessions x
+       where x.room_id = p_room_id and x.league_id is null
+         and (x.id in (select y.id from mahjong.sessions y where y.room_id = p_room_id and y.league_id is null order by y.created_at desc, y.id desc limit 3)
+              or x.id = (select y.id from mahjong.sessions y where y.room_id = p_room_id and y.league_id is null and not y.voided order by y.created_at desc, y.id desc limit 1)
+              or x.id = any(v_req));
+      select coalesce(pg_catalog.jsonb_agg(d.id::text order by d.o), '[]'::jsonb) into v_abs
+        from (select q.id, pg_catalog.min(q.o) as o from pg_catalog.unnest(v_req) with ordinality as q(id, o)
+               where not exists (select 1 from mahjong.sessions x where x.id = q.id and x.room_id = p_room_id and x.league_id is null)
+               group by q.id) d;
+      -- members の n（取り消していない半荘に座った数）と last（その開催の日の最大）＝league null の全開催を数える（画面の memberStats と同じ数え）
+      -- P2 §1.6：数えは room_ns の控え（ver＝読み始めの ns_ver 以上なら使う）。違えば★待つ鍵★を取ってから読み直し、まだ違えば数え直して ver＝読み始めの ns_ver で控える
+      select n.cache into v_ns from mahjong.room_ns n where n.room_id = p_room_id and n.ver >= r.ns_ver;
+      if not found then
+        perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mj_room_ns:' || p_room_id::text, 0));
+        select n.cache into v_ns from mahjong.room_ns n where n.room_id = p_room_id and n.ver >= r.ns_ver;
+        if not found then
+          select coalesce(pg_catalog.jsonb_object_agg(q.mid, pg_catalog.jsonb_build_object('n', q.n, 'last', q.last)), '{}'::jsonb) into v_ns
+            from (select e2.value as mid, pg_catalog.count(*)::int as n, pg_catalog.to_char(pg_catalog.max(s2.date), 'YYYY-MM-DD') as last
+                    from mahjong.hanchans h2 join mahjong.tables t2 on t2.id = h2.table_id join mahjong.sessions s2 on s2.id = t2.session_id
+                         cross join lateral pg_catalog.jsonb_each_text(h2.seats) e2
+                   where h2.room_id = p_room_id and s2.room_id = p_room_id and s2.league_id is null and not h2.voided
+                   group by e2.value) q;
+          insert into mahjong.room_ns (room_id, ver, cache) values (p_room_id, r.ns_ver, v_ns)
+            on conflict (room_id) do update set ver = excluded.ver, cache = excluded.cache where mahjong.room_ns.ver < excluded.ver;
+        end if;
+      end if;
+    end if;
+
+    with ss as (
+      select x.* from mahjong.sessions x where x.room_id = p_room_id and x.league_id is not distinct from v_lid   -- room＝リーグでない日・league＝そのリーグの日（全部）
+    ), sl as (
+      select ss.* from ss where not v_v3 or ss.id = any(v_load)   -- P5：中身を返す開催（v2 は全部）
+    ), tt as (
+      select y.* from mahjong.tables y join sl on sl.id = y.session_id
+    ), hh as (
+      select z.*, pg_catalog.row_number() over (partition by z.table_id order by z.created_at, z.id) as no
+        from mahjong.hanchans z join tt on tt.id = z.table_id
+    )
+    select pg_catalog.jsonb_build_object('v', case when v_v3 then 3 else 2 end,
+      'members', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
+                             -- P5 §2：v3 は n と last（上の v_ns・座っていない人は 0 と null）
+                             || case when v_v3 then coalesce(v_ns -> m.id::text, '{"n": 0, "last": null}'::jsonb) else '{}'::jsonb end
+                             order by m.created_at, m.id) from mahjong.members m where m.room_id = p_room_id), '[]'::jsonb),
+      'sessions', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', ss.id, 'date', pg_catalog.to_char(ss.date, 'YYYY-MM-DD'), 'rate', ss.rate)
+                             || case when ss.place is not null and ss.place <> '' then pg_catalog.jsonb_build_object('place', ss.place) else '{}'::jsonb end
+                             || case when ss.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
+                             order by ss.created_at, ss.id) from ss), '[]'::jsonb),
+      'tables', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', tt.id, 'session_id', tt.session_id, 'label', tt.label,
+                             'rules', (select q.rules from mahjong.rule_sets q where q.id = tt.rule_set_id and q.version = tt.rule_version), 'seats', tt.seats)
+                             || case when tt.rate_mode <> 'session' then pg_catalog.jsonb_build_object('rate_mode', tt.rate_mode) else '{}'::jsonb end
+                             || case when tt.rate_mode = 'num' then pg_catalog.jsonb_build_object('rate', tt.rate) else '{}'::jsonb end
+                             || case when tt.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
+                             -- C4 §3（N1）区切った卓だけ：続きの卓と、鍵が同じだったか（null＝lib は「鍵が違う」側に読む）
+                             || case when tt.next_table_id is not null then pg_catalog.jsonb_build_object('next_table_id', tt.next_table_id, 'split_same', tt.split_same) else '{}'::jsonb end
+                             order by tt.created_at, tt.id) from tt), '[]'::jsonb),
+      'hanchans', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('hanchan_id', hh.id, 'table_id', hh.table_id, 'no', hh.no,
+                             'seats', (select pg_catalog.jsonb_agg(e.value order by e.key::int) from pg_catalog.jsonb_each(hh.seats) e),
+                             'cells', (select pg_catalog.jsonb_agg(c.value order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
+                             'cell_ver', (select pg_catalog.jsonb_agg(c.version order by c.seat) from mahjong.cells c where c.hanchan_id = hh.id),
+                             'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
+                             'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+                             order by hh.created_at, hh.id) from hh), '[]'::jsonb),
+      'extras', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', e.table_id, 'member_id', e.member_id, 'kind', e.kind, 'value', e.value, 'version', e.version)
+                             order by e.table_id::text collate "C", e.kind collate "C", e.member_id::text collate "C") from mahjong.extras e join tt on tt.id = e.table_id), '[]'::jsonb),
+      'settles', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', z.session_id, 'rev', z.rev,
+                             'at', pg_catalog.to_char(z.made_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'content', z.content, 'used', z.used, 'missing', z.missing)
+                             order by z.made_at, z.session_id, z.rev) from mahjong.settle_snaps z join sl on sl.id = z.session_id), '[]'::jsonb))
+      into v_st;
+    if v_v3 then
+      v_st := v_st || pg_catalog.jsonb_build_object('loaded', (select coalesce(pg_catalog.jsonb_agg(u.id::text order by u.o), '[]'::jsonb) from pg_catalog.unnest(v_load) with ordinality as u(id, o)),
+                                                    'absent', v_abs);
+    end if;
+
+    if v_lid is not null then
+      -- D2 §1：days＝その日の版（開催日に写した主と alt・league_save の後も前の日は前の版）・並び (created_at, id)
+      select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', x.id,
+               'rules', (select q.rules from mahjong.rule_sets q where q.id = x.rule_set_id and q.version = x.rule_version),
+               'rules_alt', (select q.rules from mahjong.rule_sets q where x.rule_set_id_alt is not null and q.id = x.rule_set_id_alt and q.version = x.rule_version_alt))
+               order by x.created_at, x.id), '[]'::jsonb)
+        into v_days from mahjong.sessions x where x.room_id = p_room_id and x.league_id = v_lid;
+      v_out := pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
+        'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
+                                              'channel_key', r.channel_key)
+                || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
+        'league', v_lg -> 0, 'days', v_days, 'st', v_st);
+      exit body;
+    end if;
+
+    v_out := pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
       'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
-                                            'channel_key', r.channel_key)
+                                            'channel_key', r.channel_key)   -- 2c-2f §1：room_secret の後に新しい名を知る道
               || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
-      'league', v_lg -> 0, 'days', v_days, 'st', v_st);
-  end if;
+      'st', v_st, 'leagues', v_lg);
+  exception when query_canceled then
+    v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'read_slow');   -- P2 §2.2（塊の中の書き＝last_seen・room_ns は戻る）
+  end;
 
-  return pg_catalog.jsonb_build_object('ok', true, 'read_ver', r.read_ver,
-    'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
-                                          'channel_key', r.channel_key)   -- 2c-2f §1：room_secret の後に新しい名を知る道
-            || case when r.kind = 'shared' then pg_catalog.jsonb_build_object('name', r.name) else '{}'::jsonb end,
-    'st', v_st, 'leagues', v_lg);
+  -- P2 §2.2 数え（終わりと時間切れの両方・gone・bad は数えない）。(kind,key) の行は人ごと＝古い窓は同じ取引で消す
+  if v_cnt then
+    v_ms := greatest(1, pg_catalog.ceil(extract(epoch from pg_catalog.clock_timestamp() - v_t0) * 1000)::int);
+    delete from mahjong.limits l where l.kind = 'read:u1m' and l.key = v_uk and l.window_start < v_min - interval '1 minute';
+    insert into mahjong.limits (kind, key, window_start, count) values ('read:u1m', v_uk, v_min, v_ms)
+      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + excluded.count;
+  end if;
+  return v_out;
 end $fn$;
 revoke all on function public.mj_read(uuid, text, jsonb) from public, anon, authenticated;
 grant execute on function public.mj_read(uuid, text, jsonb) to authenticated;
