@@ -93,7 +93,7 @@ err('outs が並びでない', [{ rate: 100, hanchans: [H([500, 100, -200, -400]
 console.log('■ 乱数の卓（決まった種）＝合計0・払いの合計が貸し借りと同じ・払う回数は人数−1 まで');
 let seed = 20261120;
 const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
-const R = { players: 4, tie: 'split' };
+const R = { players: 4 }; // A13＝同点はいつも上家取り（split は無い）
 let bad = 0, runs = 0;
 for (let k = 0; k < 2000; k++) {
   const people = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'].slice(0, 4 + rnd(5));

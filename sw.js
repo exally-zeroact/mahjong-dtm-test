@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '6d9d71c67f30';
+const VER = 'cc39ee245a17';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '9d6d5048ecc05e7831a6f7c671ed461ad0f1a0cde2617ebb1c3238a162712ea4'],
@@ -30,7 +30,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
   ['/league.html', '7ccae6a1ccb102414140241c88aceeb0fd91f6ba059cfad413199bd5cf939d1a'],
-  ['/lib/hanchan-pt.mjs', '841826d12076a4f168ffcf70df7827e907530edab6baa1ca671c0a3cbf0b045b'],
+  ['/lib/hanchan-pt.mjs', 'f1a67f90e95c393059bd3c420abb0cfde632b31f7a1e4fa079229a0113a4b04d'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', '54e4ca25a6efee57b71f1856406f6b33b5808c0f4b07dd162831dc53dee0714c'],
   ['/lib/outbox.mjs', 'f35b2ec198a083e9aa5362ba5f035b97f959bf6bb54bfd178a5f512ceeb26bb9'],
