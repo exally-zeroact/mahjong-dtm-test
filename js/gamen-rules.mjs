@@ -24,7 +24,8 @@ export const RULE_ERR = {
 };
 const DETAIL = [
   { key: 'round', label: '端数', vals: [['gosha', '五捨六入'], ['shisha', '四捨五入'], ['kirisute', '切り捨て'], ['none', '丸めない']] },
-  { key: 'tie', label: '同じ点', vals: [['kamicha', '上家取り'], ['split', '分ける']] },
+  // A13（11-23 司さん「ルールの上家取りを消す」）＝同じ点はいつも点を入れる画面の［上家］の印の順。選びは隠す。鍵は残す＝保存は下の out で今の値をそのまま写す
+  { key: 'tie', label: '同じ点', vals: [['kamicha', '上家取り'], ['split', '分ける']], hide: true },
   { key: 'tobi_zero', label: '0点ちょうど', vals: [[true, '飛び'], [false, '飛びでない']] },
   // 飛び賞を払う先は隠す（B2 tobi_chip_v3.md＝飛び賞は卓で人ごとに ±・払う先を選ばない）。鍵は残す＝保存は下の out で今の値をそのまま写す
   { key: 'tobi_from', label: '飛び賞を払う先', vals: [['busted', '飛ばした人'], ['all', '全員']], hide: true },
