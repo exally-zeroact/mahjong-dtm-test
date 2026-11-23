@@ -131,6 +131,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let viewSnap = false;
   let confirming = false; // 入っていない物があるまま終える時の確かめ（開いている画面の間だけ）
   let closeErr = null;    // 対局終了を残せなかった時の err
+  let goHome = false;     // A11：［対局終了］の後、並びを送り切ったらホームへ（端末に残さない・送れずに止まったら精算に残る）
   let pmErr = null;       // チップ等の［−］［＋］が弾かれた時の字（黙らない・v1.1）
   let dropAllAsk = false; // P6g §3：［全部捨てる］の確かめの段
   const HELD_GATE = '止まっている点を先に片付けてください'; // P6g §4 書きの門の字
@@ -252,8 +253,14 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (patch.closed) { try { localStorage.removeItem(PCLOSE); } catch { /* 読めなくても closed が勝つ */ } if (!table && !closedHold()) setTable(closedTable()); } // 終わった＝終える送りの印は要らない
     if ((patch.channel_key || patch.closed) && mounted) joinChan(); // 2c-2f：新しい名へ付け直す（古い名は外す）・終えた部屋は外すだけ
   }
-  function loginStop(err) { stopped = 'login'; loginErr = err || 'mj_session'; clearTimeout(retryTimer); rerender(); }
-  function goneStop() { stopped = 'gone'; clearTimeout(retryTimer); leaveChan(); rerender(); }
+  /* A11 §1：送り切った（並び・1秒まとめ・続きが全部空）時だけホームへ。done 以外で終わった道は homeOff で落とす */
+  function homeOff() { if (!goHome) return; goHome = false; rerender(); }
+  function homeTry() {
+    if (!goHome || dead || page !== 'seisan' || outbox.length || merge.size || st.needs_upload || pendingRule || pendingStart) return false;
+    goHome = false; location.assign('/'); return true;
+  }
+  function loginStop(err) { homeOff(); stopped = 'login'; loginErr = err || 'mj_session'; clearTimeout(retryTimer); rerender(); }
+  function goneStop() { homeOff(); stopped = 'gone'; clearTimeout(retryTimer); leaveChan(); rerender(); }
   // 置き換えた後に描くのは room・seisan・rules の頁だけ（edit・pick は入れ物・focus・打ちかけを壊さない＝出る時に描く・v2 止め2）
   function rerender() { if (!dead && ['room', 'seisan', 'rules'].includes(page)) render(); }
   function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy].join('|'); }
@@ -261,13 +268,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
 
   /* 送り（約束⑤＝sb().rpc を直に呼び {data,error,status} を outboxStep へ） */
   async function sendOutbox() {
-    if (!WRITE_READY || !mounted || dead || stopped || lane || st.needs_upload) return;
-    if (closedHold()) return; // 控えが closed で並びが在る＝送らない（倉庫は bad closed で返す・B3b-1 §0 止め3）
-    if (!canSend(outbox)) return;
+    if (!WRITE_READY || !mounted || dead || stopped || lane || st.needs_upload) { if (!lane) homeOff(); return; } // lane＝送りの最中（その返りが続ける）
+    if (closedHold()) { homeOff(); return; } // 控えが closed で並びが在る＝送らない（倉庫は bad closed で返す・B3b-1 §0 止め3）
+    if (!canSend(outbox)) { homeOff(); return; }
     if (offline()) return; // 'online' を待つ（先回りはここ・outboxStep は返しの判じだけ）
     let head = outbox[0];
     if (head.sent_at && Date.now() - Date.parse(head.sent_at) > SENT_MAX_MS) {
-      outbox = holdHead(outbox, 'stale'); save(OUTR, outbox); refreshTag(); return; // 倉庫に入ったか確かめられない＝自動で送り直さない
+      outbox = holdHead(outbox, 'stale'); save(OUTR, outbox); homeOff(); refreshTag(); return; // 倉庫に入ったか確かめられない＝自動で送り直さない
     }
     if (!head.sent_at) { head = { ...head, sent_at: new Date().toISOString() }; outbox = [head, ...outbox.slice(1)]; save(OUTR, outbox); } // ★送った印を先に保存★（v1 止め1）
     lane = true;
@@ -277,14 +284,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     lane = false;
     if (dead) return;
     aizuOut(res && res.data); // 2c-2f：ok と read_ver ならその場で合図（待たない）
-    if (!outbox.length || outbox[0].op_id !== head.op_id) { kick(); return; }
+    if (!outbox.length || outbox[0].op_id !== head.op_id) { homeOff(); kick(); return; }
     const s = outboxStep(res);
     if (s.kind !== 'retry') { retryN = 0; clearTimeout(retryTimer); }
     if (s.kind === 'done') {
       outbox = outbox.slice(1); save(OUTR, outbox);
       refreshTag();
       if (outbox.length) { sendOutbox(); return; }
-      if (pendingStart || pendingRule) { kick(); return; }
+      if (pendingStart || pendingRule) { homeOff(); kick(); return; }
+      if (homeTry()) return; // A11
       sync(); return; // 送りで並びが空になった時に読み直す
     }
     if (s.kind === 'retry') { clearTimeout(retryTimer); retryTimer = setTimeout(() => sendOutbox(), retryDelay(retryN++)); refreshTag(); return; }
@@ -292,11 +300,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (s.kind === 'reload') { goneStop(); return; }
     if (s.kind === 'closed') { // 足し①：黙って捨てない＝その組と後ろは並びに残し（送り直さない）、写しもそのまま。控えに closed
       outbox = holdHead(outbox, 'closed'); save(OUTR, outbox);
-      roomInfo({ closed: true }); pendingStart = null; rerender(); return;
+      homeOff(); roomInfo({ closed: true }); pendingStart = null; rerender(); return;
     }
     outbox = [{ ...outbox[0], held: { err: s.err, ...(s.at !== undefined ? { at: s.at } : {}), ...(s.what !== undefined ? { what: s.what } : {}) } }, ...outbox.slice(1)]; // conflict・stop＝先頭で止める（後ろは送らない）・P6g：what も残す（busy の字）
     save(OUTR, outbox);
-    pendingStart = null; startMsg = null;
+    pendingStart = null; startMsg = null; goHome = false;
     rerender();
   }
   function kick() {
@@ -608,6 +616,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
 
   function render() {
+    if (goHome && page !== 'seisan') goHome = false; // A11 止め2：精算を離れた（打ちかけ・別の頁）＝ホームへ飛ばない
     // 終えた部屋の頁は room・seisan・rules だけ（他に居たら room へ・B3b-1 §3）
     if (room.closed && !['room', 'seisan', 'rules'].includes(page)) { page = 'room'; entry = null; picking = null; }
     if (closedObi) closedObi(!!room.closed && !closedHold()); // 足し①の帯が出る時は「見ることはできます」の帯を外す（帯は1枚）
@@ -1228,10 +1237,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const errLine = closeErr ? '<div class="r-red"><b>' + (closeErr === HELD_GATE ? esc(HELD_GATE) : '対局終了を残せませんでした（' + esc(closeErr) + '）') + '</b></div>' : '';
     // ［対局終了］の所＝入っていない物があれば1回目は確かめ（同じ位置に［戻って入れる］・その下に赤の箱と［n件のまま対局終了］）
     // 終えた部屋は［対局終了］を出さない・終える送りの最中は押せない形（B3b-1 §3）
-    const cz = closingOn() ? ' disabled' : '';
+    const cz = closingOn() || goHome ? ' disabled' : ''; // A11：ホームへ行く送りの間も押せない
+    const bz = ' aria-busy="' + (goHome ? 'true' : 'false') + '"';
     const closeArea = (label) => (room.closed ? '' : confirming && s.missing.length
-      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2"' + cz + '>' + s.missing.length + '件のまま対局終了</button>'
-      : '<button class="btn btn-main" id="sClose"' + cz + '>' + label + '</button>');
+      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2"' + cz + bz + '>' + s.missing.length + '件のまま対局終了</button>'
+      : '<button class="btn btn-main" id="sClose"' + cz + bz + '>' + label + '</button>');
     let h = top;
     if (last) {
       if (lastMissing.length) h += '<div class="r-red"><b>' + hm(last.at) + ' に対局終了（入っていない物 ' + lastMissing.length + '件のまま・額は出しません）</b></div>';
@@ -1368,17 +1378,21 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         tables: tabs.map((t) => ({ table_id: t.table_id, rate_mode: rateModeOf(t), rate: tableRate(t, ss), version: t.version ?? 1 })),
         hanchans: st.hanchans.filter((h) => tabs.some((t) => t.table_id === h.table_id)).map((h) => ({ hanchan_id: h.hanchan_id, table_id: h.table_id, version: h.version, cell_ver: h.cell_ver.slice(), order_version: h.order_version, tobi_version: h.tobi_version, yakitori_version: h.yakitori_version ?? 1 })),
       };
+      goHome = !st.needs_upload; // A11：commit の中の送りが早く返る道（canSend 偽など）でも落とせるよう、先に立てる
       const r = commit([{ op: 'settle_snap', session_id: d.sid, rev: revs + 1, content: { ten: s.ten, pt10: s.pt10, pt10NoRate: s.pt10NoRate, pay: s.pay, sig: sessionSig(st, d.sid) }, used, missing: s.missing }]);
       confirming = false;
       closeErr = r.ok ? null : (r.msg || r.err || '?');
+      if (!r.ok) goHome = false;
       if (r.ok) viewSnap = false;
+      if (homeTry()) return; // 並びに積まずに空のまま（起きない見込み・積んだら done で飛ぶ）
       render();
     };
     if (q('#sClose')) q('#sClose').onclick = () => {
+      if (goHome) return;
       if (d.s.missing.length) { confirming = true; closeErr = null; render(); return; } // 1回目は確かめだけ
       doClose();
     };
-    if (q('#sClose2')) q('#sClose2').onclick = () => { if (confirming) doClose(); };
+    if (q('#sClose2')) q('#sClose2').onclick = () => { if (confirming && !goHome) doClose(); };
     if (q('#sBack')) q('#sBack').onclick = goMissing;
     if (q('#sGo')) q('#sGo').onclick = goMissing;
     if (q('#sSnap')) q('#sSnap').onclick = () => { viewSnap = true; render(); };
