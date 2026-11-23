@@ -5,7 +5,7 @@
  *   lockPlayers＝人数は見せるだけ（C4 対局の［ルール］で次の回から変える時＝人数は変えられない・倉庫は bad at players）
  *   部屋を作る時（打てる）と、対局の右上［ルール］から見る時（readOnly＝見るだけ）の両方で使う。
  *   並び＝人数とレート（人数 4人/3人・1pt＝[ ]点・なし/50/100/200/500）→ 点（持ち点／返し・ウマ・オカ・飛び賞＝行の右に値 ›）
- *        → チップ・祝儀（1枚＝[ ]pt＋入切）→ 詳しいルール ›
+ *        → チップ・祝儀（1枚＝[ ]pt＋入切）（A9＝詳しいルールの節は無い・箱下と0点ちょうどは飛び賞の下）
  *   対局にリーグ戦の入切は置かない（司さん 11-20「ごちゃごちゃになる」）。
  */
 import { defaultRules } from '../lib/rules.mjs';
@@ -22,15 +22,17 @@ export const RULE_ERR = {
   chip_pt10: 'チップ1枚の pt は 0.1〜999.9 です（0.1 単位）。',
   shugi_pt10: '祝儀1枚の pt は 0.1〜999.9 です（0.1 単位）。',
 };
+// A9（11-23 司さん・絵に赤線）＝［詳しいルール］の節を消す。箱下と0点ちょうどは飛び賞のすぐ下に並べる（この並びの順）。
+// 端数と終局の供託は選びを隠す（新しいルールは lib の既定＝丸めない・トップ）。鍵は残す＝保存は下の out で今の値をそのまま写す（古い部屋のルールも読める）
 const DETAIL = [
-  { key: 'round', label: '端数', vals: [['gosha', '五捨六入'], ['shisha', '四捨五入'], ['kirisute', '切り捨て'], ['none', '丸めない']] },
+  { key: 'round', label: '端数', vals: [['gosha', '五捨六入'], ['shisha', '四捨五入'], ['kirisute', '切り捨て'], ['none', '丸めない']], hide: true },
+  { key: 'hakoshita', label: '箱下', vals: [[true, 'あり'], [false, 'なし']] },
   // A13（11-23 司さん「ルールの上家取りを消す」）＝同じ点はいつも点を入れる画面の［上家］の印の順。選びは隠す。鍵は残す＝保存は下の out で今の値をそのまま写す
   { key: 'tie', label: '同じ点', vals: [['kamicha', '上家取り'], ['split', '分ける']], hide: true },
   { key: 'tobi_zero', label: '0点ちょうど', vals: [[true, '飛び'], [false, '飛びでない']] },
   // 飛び賞を払う先は隠す（B2 tobi_chip_v3.md＝飛び賞は卓で人ごとに ±・払う先を選ばない）。鍵は残す＝保存は下の out で今の値をそのまま写す
   { key: 'tobi_from', label: '飛び賞を払う先', vals: [['busted', '飛ばした人'], ['all', '全員']], hide: true },
-  { key: 'hakoshita', label: '箱下', vals: [[true, 'あり'], [false, 'なし']] },
-  { key: 'kyotaku_end', label: '終局の供託', vals: [['top', 'トップ'], ['kieru', '消える']] },
+  { key: 'kyotaku_end', label: '終局の供託', vals: [['top', 'トップ'], ['kieru', '消える']], hide: true },
 ];
 const toInt = (s) => { const t = String(s).replace(/[,，\s]/g, '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/^[−ー－]/, '-'); return /^-?\d+$/.test(t) ? Number(t) : NaN; };
 const toPt10 = (s) => { const t = String(s).trim().replace(/[０-９．]/g, (c) => (c === '．' ? '.' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0))); if (!/^\d+(\.\d)?$/.test(t)) return NaN; return Math.round(Number(t) * 10); };
@@ -49,7 +51,7 @@ export function umaText(uma) {
 export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) {
   const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
-  const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi・detail）
+  const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi）
 
   function li(label, right, opts = {}) {
     const tag = opts.key && !readOnly ? 'button type="button" data-open="' + opts.key + '"' : 'div';
@@ -83,6 +85,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
     h += li('オカ', 'トップ取り');
     h += li('飛び賞', !okInt(r.tobi_pt) ? '—' : r.tobi_pt ? r.tobi_pt + 'pt' : 'なし', { key: 'tobi' });
     if (open.has('tobi')) h += '<div class="li li-sub"><span>飛び賞</span><span class="li-v">' + box('rTobi', bv(r.tobi_pt)) + ' pt</span></div>';
+    for (const d of DETAIL) if (!d.hide) h += '<div class="li"><span>' + d.label + '</span><span class="li-v">' + mini('d-' + d.key, d.vals, r[d.key]) + '</span></div>';
     h += '</div><h3 class="sec">チップ・祝儀</h3><div class="list">';
     for (const [k, label, id] of [['chip_pt10', 'チップ', 'rChip'], ['shugi_pt10', '祝儀', 'rShugi']]) {
       const on = r[k] !== null;
@@ -95,11 +98,6 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       const on = r.yakitori === true, p = r.yakitori_pt, okP = Number.isInteger(p) && p >= 1 && p <= 999;
       if (readOnly) h += li('やきとり', !on ? 'なし' : okP ? '1枚 ＝ <b>' + p + '</b> pt' : 'あり・1枚 0 pt＝数えません');
       else h += '<div class="li"><span>やきとり</span><span class="li-v">1枚 ＝ ' + box('rYaki', on || okP ? String(p) : '5', 'numeric') + ' pt ' + sw('rYakiOn', on) + '</span></div>';
-    }
-    h += '</div><div class="list list-gap">';
-    h += li('詳しいルール', '', { key: 'detail' });
-    if (open.has('detail') || readOnly) {
-      for (const d of DETAIL) if (!d.hide) h += '<div class="li li-sub"><span>' + d.label + '</span><span class="li-v">' + mini('d-' + d.key, d.vals, r[d.key]) + '</span></div>';
     }
     h += '</div>';
     el.innerHTML = h;

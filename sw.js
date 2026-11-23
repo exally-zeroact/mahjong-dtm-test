@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '7687565677f8';
+const VER = 'f8d65b772410';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0d58530e789f31f302cf0515a40f7d9214e462c583a23e97fe476c626e1c9b4b'],
@@ -22,7 +22,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-home.mjs', '5e75738a9d456331aa315c9b2662aaf8545380f9a3f76b3557cbe88a3ac749b3'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
   ['/js/gamen-room.mjs', '9c8196bc8d0b208dca4ee543696765b7a545bba943bcc7fcd79de129af7bdfd2'],
-  ['/js/gamen-rules.mjs', 'e3f4b38e2e232e1b8ba352da21d61952d9ab9725145af1bf9600cb4b69d62304'],
+  ['/js/gamen-rules.mjs', '9e01c7fa536c017943393f3b0762f0f959f73286bc029341d390f1dc581e5b04'],
   ['/js/gamen-taikyoku.mjs', '840cca8f2029a50e67d0dc7be942a310b6e3101073d03871c004adf09a1026f5'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
@@ -36,7 +36,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
   ['/lib/outbox.mjs', 'f35b2ec198a083e9aa5362ba5f035b97f959bf6bb54bfd178a5f512ceeb26bb9'],
   ['/lib/room-state.mjs', 'feb41cde7786124c12d4d7556ca92f5d01cc4e621892a596f007e804f717cc54'],
-  ['/lib/rules.mjs', '060d48a267043999ffae45b50bdb6e7883587cf281d5442bafc4557f23626c01'],
+  ['/lib/rules.mjs', 'ccf11bc953e6dcc630e1f86b1bc5a21ac822853257ef79b130fb16d960a09df9'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],
   ['/lib/score.mjs', '8bb312dcb210b70cf618df8f3b8bf30a40260f21a3943443cefe0fddb118d824'],
   ['/lib/seisan.mjs', '8f6cdc10bc92c659d200b98693c411c4a8d63de8a353895a490868ec9ce77b60'],
