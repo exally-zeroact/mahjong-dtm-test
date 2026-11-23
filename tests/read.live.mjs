@@ -112,7 +112,7 @@ const WT_IDS = Object.fromEntries(WT_RK.map((k) => [k, {}]));
 const WT_ID_KEYS = ['hanchan_id', 'table_id', 'member_id', 'session_id'];
 const wtId = (rk, v) => (typeof v !== 'string' ? v : /^[a-z]\d+$/.test(v) ? (WT_IDS[rk][v] ||= U()) : U());
 const wtOp = (rk, o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k,
-  WT_ID_KEYS.includes(k) ? wtId(rk, v) : (k === 'seats' || k === 'ton_order') && Array.isArray(v) ? v.map((x) => wtId(rk, x)) : v]));
+  WT_ID_KEYS.includes(k) ? wtId(rk, v) : (k === 'seats' || k === 'ton_order' || k === 'seen_seats') && Array.isArray(v) ? v.map((x) => wtId(rk, x)) : v]));
 const WT_OK = WT.cases.filter((c) => (c.want_db ?? c.want) === 'ok')
   .map((c) => ({ ...c, ops: c.ops_repeat ? Array.from({ length: c.ops_repeat.n }, () => c.ops_repeat.op) : c.ops }));
 const withRules = (R) => { const st = emptyState(); st.rules = R; return st; };

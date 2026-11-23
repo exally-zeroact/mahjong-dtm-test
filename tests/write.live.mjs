@@ -262,7 +262,7 @@ const WT_IDS = Object.fromEntries(WT_RK.map((k) => [k, {}]));
 const WT_ID_KEYS = ['hanchan_id', 'table_id', 'member_id', 'session_id'];
 const wtId = (rk, v) => (typeof v !== 'string' ? v : /^[a-z]\d+$/.test(v) ? (WT_IDS[rk][v] ||= U()) : U());
 const wtOp = (rk, o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k,
-  WT_ID_KEYS.includes(k) ? wtId(rk, v) : (k === 'seats' || k === 'ton_order') && Array.isArray(v) ? v.map((x) => wtId(rk, x)) : v]));
+  WT_ID_KEYS.includes(k) ? wtId(rk, v) : (k === 'seats' || k === 'ton_order' || k === 'seen_seats') && Array.isArray(v) ? v.map((x) => wtId(rk, x)) : v]));
 const wtOps = (rk, ops) => A(...ops.map((o) => `${lit(JSON.stringify(wtOp(rk, o)))}::jsonb`));
 const WT_CASES = WT.cases.map((c) => ({ ...c, ops: c.ops_repeat ? Array.from({ length: c.ops_repeat.n }, () => c.ops_repeat.op) : c.ops }));
 const ROOMS = [['ra', 1, '{"players":4,"chip_pt10":10}'], ['rc', 1, '{"players":4,"tobi_from":"all","chip_pt10":10,"shugi_pt10":10}'],
@@ -1753,7 +1753,7 @@ const WAZA = [
   ['extra_set の行なしで bv≠0 を見ない（F）', 'mahjong_private.mj_w_op', 'if v_bv <> 0 then', 'if false then', null, '⑪ extra_set：行が無く bv 1'],
   ['hanchan_seats が inactive を見ない', 'mahjong_private.mj_w_op', 'where x.room_id = p_room and not x.active', 'where false and not x.active', null, '⑪ hanchan_seats：inactive でも'],
   ['hanchan_seats が今の席の inactive も弾く', 'mahjong_private.mj_w_op', '\n                 and not exists (select 1 from pg_catalog.jsonb_each_text(h.seats) w where w.value = x.id::text)) then', ') then', null, '⑪ hanchan_seats：inactive でも'],
-  ['顔ぶれが変わっても ton_order を残す', 'mahjong_private.mj_w_op', 'set ton_order = null, order_version', 'set ton_order = h.ton_order, order_version', null, '⑪ hanchan_seats：顔ぶれが変わる'],
+  ['顔ぶれが変わっても ton_order を残す', 'mahjong_private.mj_w_op', 'set ton_order = null, order_cells = null, order_version', 'set ton_order = h.ton_order, order_cells = h.order_cells, order_version', null, '⑪ hanchan_seats：顔ぶれが変わる'],
   ['seats_version を上げない', 'mahjong_private.mj_w_op', 'set seats = v_j2, seats_version = x.seats_version + 1', 'set seats = v_j2', null, '⑪ hanchan_seats：並べ替え'],
   ['hanchan_seats が半荘の印を書かない', 'mahjong_private.mj_w_op', "'seats', h.seats, v_j2, h.seats_version + 1);\n    perform mahjong_private.mj_w_changed(h.id, p_me);", "'seats', h.seats, v_j2, h.seats_version + 1);", null, '⑪ hanchan_seats：並べ替え'],
   ['レートの印を書かない（mj_w_trate）', 'mahjong_private.mj_w_trate', 'perform mahjong_private.mj_w_tchanged(p_tid, p_me);', 'null;', null, '⑪ table_edit：num・50'],
