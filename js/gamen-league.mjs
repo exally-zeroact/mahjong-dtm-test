@@ -10,7 +10,8 @@
  *   ★印★（op_id・league_id・送る中身・base_version）は押した時に1回だけ作り localStorage に部屋ごとに持つ＝答えが決まるまで同じ物で送り直す。
  *   返しごとに印を「残す／消す」は定め §1 の表の通り（KEEP＝残す）。字は gamen-core.mjs errText(res, 'league')。
  * 合図＝読んだ部屋の channel_key に入り、受けたらその部屋を since なしで読み直す（倉庫が league の op でも read_ver を上げて合図を出す）。
- * 作らない物：人を外す画面・リーグを取り消すボタン・リーグの対局／卓（D2）・順位表（D3）・［このリーグで対局を始める］。
+ * D2（d2_sadame v1.1 §3）：取り消していないリーグ（終えていない部屋）に［このリーグで対局を始める］→ taikyoku.html?room=<id>&league=<league_id>。
+ * 作らない物：人を外す画面・リーグを取り消すボタン・順位表（D3）。
  */
 import { needLogin, showLogin, rpc, errText, sb, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
@@ -180,6 +181,7 @@ function renderList() {
       if (owner && !closed && l.l !== true) h += '<button class="btn-s" type="button" data-own="' + esc(l.league_id) + '" data-r="' + esc(rid) + '">自分を L にする</button>';
       if (!closed) h += '<button class="btn-s" type="button" data-edit="' + esc(l.league_id) + '" data-r="' + esc(rid) + '"' + (l.l === true ? '' : ' disabled') + '>設定を変える</button>';
       h += '</span></div>';
+      if (!closed) h += '<div class="li li-sub lg-play"><a class="btn-s" data-play="' + esc(l.league_id) + '" href="taikyoku.html?room=' + encodeURIComponent(rid) + '&amp;league=' + encodeURIComponent(l.league_id) + '">このリーグで対局を始める</a></div>';
     }
     const mem = Array.isArray(x.read.st.members) ? x.read.st.members.filter((m) => m && m.active !== false) : [];
     h += '<div class="li"><span>名簿 <b data-nmem>' + mem.length + '</b>人</span><button class="btn-s" type="button" data-roster="' + esc(rid) + '" aria-expanded="' + x.roster + '">名簿を見る</button></div>';

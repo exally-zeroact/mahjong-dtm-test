@@ -62,6 +62,9 @@ export function errText(res, way) {
   if (way === 'league') {
     const at = res && (res.at || res.what);
     if (e === 'too_many') return '24時間に作れるリーグは5つまでです。';
+    // D2（d2_sadame v1.1 §3）：リーグの日の dup＝読み直して開く（字は出さない）・L でない入が卓と日を足そうとした
+    if (e === 'dup' && at === 'session') return '';
+    if (e === 'mj_role' && res.need === 'L') return '卓と日を足せるのはリーグの L だけです';
     // full＝H2 の後は op_results の mj_caps 行の欠けだけ（leagues・*・history・rule_sets の上限は無い・fullji_sadame v1.1 §2）
     if (e === 'full') return '倉庫で止まりました。もう一度押しても同じです。';
     if (e === 'mj_role') return 'この操作は管か持ち主だけです（リーグの設定はそのリーグの L だけ）。';
@@ -75,6 +78,9 @@ export function errText(res, way) {
       if (at === 'name') return 'リーグの名前は1〜40字で入れてください。';
       if (at === 'date_from' || at === 'date_to') return '期間は始め≦終わりで入れてください。';
       if (at === 'rules' || at === 'rules_alt') return 'ルールの人数が合いません。';
+      if (at === 'date') return '今日はこのリーグの期間の外です'; // D2：session_add の期間の門
+      if (at === 'alt') return 'この日はもう一方の卓を作れません';  // D2：table_add の alt
+      if (at === 'rate') return '倉庫で止まりました。もう一度押しても同じです。'; // D2：リーグの日の rate
     }
   }
   switch (e) {

@@ -244,3 +244,14 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .lg-date { width: 124px; max-width: none; flex: none; font-size: 15px; }
 .lg-mbtn { margin-left: 8px; }
 .lg-form .err { margin: 4px 4px 0; }
+/* D2 リーグの対局（d2_sadame v1.1 §3・絵 mahjong_league_v157 ②）＝［卓1］［卓2］…は横に流す（何卓でも）・14px 字＝高さ 36（押す所 44 は見えない ::after） */
+.r-taku { position: relative; display: flex; gap: 4px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 4px 0; margin: -4px 0 0; }
+.r-taku::-webkit-scrollbar { display: none; }
+.r-tk { position: relative; flex: none; display: inline-flex; align-items: center; height: 36px; padding: 0 10px; white-space: nowrap; font: inherit; font-size: 14px; font-weight: 700; border: 1px solid var(--c-sen); border-radius: 18px; background: var(--c-men); color: var(--c-ji-usui); }
+.r-tk::after { content: ""; position: absolute; inset: -4px 0; }
+.r-tk small { font-size: 12px; letter-spacing: -.04em; }
+.r-tk[aria-pressed="true"] { background: var(--c-kon); border-color: var(--c-kon); color: var(--c-kon-ji); }
+.r-tk-add { border-style: dashed; }
+.r-tk-add:disabled { opacity: .5; }
+.lg-play { justify-content: flex-end; }
+.lg-play .btn-s { display: inline-flex; align-items: center; text-decoration: none; }

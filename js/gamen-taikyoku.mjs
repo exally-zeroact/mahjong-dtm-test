@@ -10,7 +10,7 @@ import { needLogin, showLogin, rpc, errText, rememberRoom, patchRoom, myRooms, r
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
-import { mountRoom, readRoom, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
+import { mountRoom, readRoom, readLeague, saveLeagueInfo, hasLeagueInfo, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
 let me = null;
@@ -180,12 +180,15 @@ async function urlJoin(token) {
 /* ── 部屋の中 ── */
 let openSeq = 0; // 開き直したら前の「ルールを読む」の続きを捨てる
 const CLOSED_OBI = 'この部屋は終わりました。見ることはできます。';
-/* note＝［部屋を終える］の返しの字（もう終わっていた時など・開き直した部屋の中に出す） */
-async function openRoom(roomId, note) {
+/* note＝［部屋を終える］の返しの字（もう終わっていた時など・開き直した部屋の中に出す）
+ * lid＝D2 リーグの対局（league.html の［このリーグで対局を始める］＝?room=<id>&league=<league_id>）。
+ *   リーグの一覧は倉庫の mj_my_rooms から＝この端末の控えに部屋が無くても開く（控えには足さない・最初の mj_read 'league' で rules を知る） */
+async function openRoom(roomId, note, lid) {
   leaveRoom(); // 前の部屋の読み・送り・時計・合図を止める（ルールを読む道でも・2c-2f）
-  const room = myRooms(me.id).find((x) => x.room_id === roomId);
+  let room = myRooms(me.id).find((x) => x.room_id === roomId);
+  if (!room && lid) room = { room_id: roomId, kind: 'shared', name: '', role: null };
   if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
-  history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId));
+  history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId) + (lid ? '&league=' + encodeURIComponent(lid) : ''));
   obi('');
   // 終えた部屋の帯は mountRoom の前（ルールが届いていない端末・gateOnly の道でも出る・B3b-1 §3 止め2）。足し①の帯が出る時は mountRoom が外す（帯は1枚）
   if (room.closed === true) obi(CLOSED_OBI, 'warn');
@@ -193,20 +196,20 @@ async function openRoom(roomId, note) {
   // 部屋なしは URL で入れない（倉庫が潰す）＝［部屋名と URL］を出さない（B3b で［みんなで見る部屋にする］に替わる）
   const share = room.kind !== 'solo' ? () => showMade(room, null) : null;
   const seq = ++openSeq;
-  if (!room.rules) { readRules(roomId, share, seq); return; }
-  mountRoom($('vRoom'), roomOpts(room, share, note));
+  if (!room.rules || (lid && !hasLeagueInfo(me.id, lid))) { readRules(roomId, share, seq, lid, room); return; }
+  mountRoom($('vRoom'), roomOpts(room, share, note, lid));
 }
 /* 部屋の中へ渡す物。closedObi(on)＝終えた部屋の帯（on＝出す・false＝外す）・reopen(note)＝終えた後に読み専で開き直す */
-function roomOpts(room, share, note) {
+function roomOpts(room, share, note, lid) {
   const rid = room.room_id;
-  return { me, room, showShare: share, bar, relogin, note,
+  return { me, room, showShare: share, bar, relogin, note, ...(lid ? { league: { league_id: lid } } : {}),
     closedObi: (on) => { if (on) obi(CLOSED_OBI, 'warn'); else if ($('obi').textContent === CLOSED_OBI) obi(''); },
-    reopen: (n) => openRoom(rid, n) };
+    reopen: (n) => openRoom(rid, n, lid) };
 }
 /* rules の無い端末（join・一覧から入った）＝mountRoom の前に mj_read（2d §3・B3b-1 約束④）。
  * 読めるまで「部屋のルールを読んでいます」＋［もう一度］・10秒ごと（頁が見えている間・mountRoom の外で回す）。
  * rules と closed は控えの行だけを書き換える（ホームの並びと at を変えない＝rememberRoom を通さない・約束⑦） */
-function readRules(roomId, share, seq) {
+function readRules(roomId, share, seq, lid, room0) {
   bar({ back: 'ホーム', title: '対局' });
   $('vRoom').innerHTML = '<p class="setsumei" id="rReading">部屋のルールを読んでいます</p><p class="err" id="rReadErr"></p><button class="btn btn-line" id="rReadAgain">もう一度</button>' +
     (share ? '<button class="btn" id="rShare">部屋名と URL</button>' : '');
@@ -217,19 +220,24 @@ function readRules(roomId, share, seq) {
     if (!alive() || busyRead) return;
     if (navigator.onLine === false) { $('rReadErr').textContent = errText({ err: 'offline' }); return; }
     busyRead = true;
-    const res = await readRoom(roomId, null);
+    const res = lid ? await readLeague(roomId, lid, null) : await readRoom(roomId, null); // D2：リーグの対局は 'league'（room・league・days が来る）
     busyRead = false;
     if (!alive()) { clearInterval(timer); return; }
     const d = res && res.data;
-    if (d && d.ok === true && d.room && d.room.rules) {
+    if (d && d.ok === true && d.room && d.room.rules && (!lid || d.league)) {
       clearInterval(timer);
       const patch = { rules: d.room.rules };
       if (d.room.closed === true) patch.closed = true;
-      const room = patchRoom(me.id, roomId, patch);
+      let room = patchRoom(me.id, roomId, patch);
+      if (!room && lid && room0) { // 控えに無い部屋（リーグの一覧から）＝控えに足さずに今だけの形
+        room = Object.assign(room0, patch, { name: d.room.name || '', role: d.room.role ?? null, owner: d.room.owner === true, ...(typeof d.room.channel_key === 'string' ? { channel_key: d.room.channel_key } : {}) });
+      }
       if (!room) { openRoom(roomId); return; }
-      mountRoom($('vRoom'), roomOpts(room, share));
+      if (lid) saveLeagueInfo(me.id, lid, d);
+      mountRoom($('vRoom'), roomOpts(room, share, undefined, lid));
       return;
     }
+    if (lid && d && d.ok === false && d.err === 'bad') { clearInterval(timer); $('rReadErr').textContent = errText(d, 'league'); $('rReadAgain').hidden = true; return; } // bad league_id＝このリーグは見つかりません
     const e = res && res.error;
     const err = d && d.ok === false ? d.err : e && (e.status === 401 || res.status === 401 || /jwt/i.test(e.message || '')) ? 'mj_session' : 'net';
     if (err === 'mj_session') { clearInterval(timer); relogin(() => openRoom(roomId)); return; }
@@ -273,7 +281,7 @@ function start(user) {
   const token = tokenFromPath(location.pathname);
   if (token) { urlJoin(token); return; }
   const q = new URLSearchParams(location.search);
-  if (q.get('room')) { openRoom(q.get('room')); return; }
+  if (q.get('room')) { openRoom(q.get('room'), undefined, q.get('league') || undefined); return; }
   show('vChoose');
 }
 
