@@ -13,6 +13,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { stripJsComments } from '../scripts/apply-schema.mjs';
+import { MIHARI_EXPR, mihariAka } from '../scripts/sweep-mihari.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = stripJsComments(fs.readFileSync(path.join(ROOT, 'js/supa-config.js'), 'utf8'));
@@ -201,5 +202,52 @@ for (const [i, [name, want, , cons]] of CASES.entries()) {
 }
 if (left[0].n !== 0 || left[0].u !== 0 || left[0].o !== 0) { f++; console.log(`  ✗ 試験の行が倉庫に残った（部屋 ${left[0].n}・仮の人 ${left[0].u}・操作 ${left[0].o}）＝戻っていない`); }
 else { p++; console.log('  ✓ 試験の行（部屋・仮の人・操作）は倉庫に1行も残っていない'); }
+/* ── P7 掃除の見張り5つ（p7_sadame v2.1 §1-6 ②・scripts/sweep-mihari.mjs と同じ式）──
+ * 今の khaw で5つとも緑＋塊の中で1つずつ壊すと★その1つだけ★赤（塊は最後に戻す＝倉庫にも cron にも残らない）。読めない時も赤。 */
+{
+  const BR = [
+    ['1 消して9日の部屋', '1 ', `v_u := gen_random_uuid();
+      insert into auth.users(id,email,aud,role,is_anonymous) values (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false);
+      insert into mahjong.rooms(name,room_no,pass_hash,url_token_hash,owner_user_id,channel_key,deleted_at)
+        values ('試験の部屋',lpad((floor(random()*1e8))::bigint::text,8,'0'),'p',md5(random()::text),v_u,md5(random()::text), now() - interval '9 days');`],
+    ['2 今日の sweep:bad', '2 ', `insert into mahjong.limits(kind,key,window_start,count) values ('sweep:bad','test:mihari',date_trunc('day',now()),1);`],
+    ['3 昨日の sweep:tailbad', '3 ', `insert into mahjong.limits(kind,key,window_start,count) values ('sweep:tailbad','test:mihari',date_trunc('day',now()) - interval '1 day',1);`],
+    ['4 tick を止める', '4 mj-sweep-tick', `perform cron.alter_job((select jobid from cron.job where jobname = 'mj-sweep-tick'), active := false);`],
+    ['4 tail を消す', '4 mj-sweep-tail', `perform cron.unschedule('mj-sweep-tail');`],   // cron.job へ直の insert は postgres に許されていない＝2本の判定は下の JS で見る
+    ['5 tick の succeeded が無い', '5 mj-sweep-tick', `delete from cron.job_run_details d using cron.job j where j.jobid = d.jobid and j.jobname = 'mj-sweep-tick' and d.status = 'succeeded';`],
+    ['5 tail の failed 1つ', '5 mj-sweep-tail', `insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)
+      select j.jobid, (select coalesce(max(runid), 0) + 1 from cron.job_run_details), 0, 'postgres', 'postgres', 'test', 'failed', 'test:mihari', now(), now() from cron.job j where j.jobname = 'mj-sweep-tail';`],
+  ];
+  const sqlM = `do $m$ declare res jsonb := '{}'; v_u uuid; begin
+  res := res || jsonb_build_object('now', ${MIHARI_EXPR});
+${BR.map(([, , body], i) => `  begin
+    ${body}
+    res := res || jsonb_build_object('b${i}', ${MIHARI_EXPR});
+    raise exception 'MJUNDO';
+  exception when others then
+    if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('b${i}_err', sqlerrm); end if;
+  end;`).join('\n')}
+  raise exception 'MJRESULT%', res::text;
+end $m$;`;
+  let mr = null, why = '';
+  try { await q(sqlM); why = '結果の例外が来なかった'; } catch (e) {
+    const at = e.message.indexOf('MJRESULT');
+    if (at < 0) why = e.message.slice(0, 300); else mr = JSON.parse(e.message.slice(at + 8).split(String.fromCharCode(10))[0]);
+  }
+  const ck = (name, cond, w = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (w ? ' — ' + w : '')); } };
+  if (!mr) ck('見張り5つが読めた', false, why);
+  else {
+    const now = mihariAka(mr.now);
+    ck('見張り5つ＝今の khaw で全部緑', now.length === 0, now.join(' / '));
+    BR.forEach(([name, head], i) => {
+      const err = mr[`b${i}_err`];
+      const aka = mihariAka(mr[`b${i}`]);
+      const only = head === '4 mj-sweep-tail' ? aka.length >= 1 && aka.every((x) => /^[45] mj-sweep-tail/.test(x)) && aka[0].startsWith(head) : aka.length === 1 && aka[0].startsWith(head);   // job が無い＝その job の 4 と 5 が赤
+      ck(`見張り：${name} → その1つだけ赤`, !err && only, err || aka.join(' / '));
+    });
+    { const two = JSON.parse(JSON.stringify(mr.now)); two.jobs['mj-sweep-tail'].all = 2; two.jobs['mj-sweep-tail'].active = 2; const a2 = mihariAka(two); ck('見張り：tail が2本 → 4 だけ赤（式）', a2.length === 1 && a2[0].startsWith('4 mj-sweep-tail'), a2.join(' / ')); }
+    ck('見張り：読めない時（空）も赤', mihariAka(null).length > 0 && mihariAka({ jobs: {} }).length > 0);
+  }
+}
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

@@ -987,6 +987,23 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_pair_pre(uuid, uuid, jsonb) from public, anon, authenticated;
 
+-- ── P7（p7_sadame v2.1）掃除の量：部屋をまたぐ印・外部キーの子の索引9つ（§1-5）・尾の索引4つ（§1-2a） ──
+alter table mahjong.rooms add column if not exists swept_at timestamptz;   -- 1-b の後に書く＝次の回は他の部屋が先（§1-3）
+create index if not exists rooms_rule on mahjong.rooms(rule_set_id, rule_version) where rule_set_id is not null;   -- rooms_rule_fk
+create index if not exists settle_snaps_room on mahjong.settle_snaps(room_id);
+create index if not exists extras_member on mahjong.extras(member_id);
+create index if not exists devices_member on mahjong.devices(member_id) where member_id is not null;
+create index if not exists room_accounts_member_all on mahjong.room_accounts(member_id) where member_id is not null;
+create index if not exists sessions_rule on mahjong.sessions(rule_set_id, rule_version);
+create index if not exists sessions_rule_alt on mahjong.sessions(rule_set_id_alt, rule_version_alt) where rule_set_id_alt is not null;
+create index if not exists tables_rule on mahjong.tables(rule_set_id, rule_version);
+create index if not exists hanchans_rule on mahjong.hanchans(rule_set_id, rule_version);
+create index if not exists op_results_at_only on mahjong.op_results(at);
+create index if not exists creates_at on mahjong.creates(at);
+create index if not exists limits_window on mahjong.limits(window_start);
+create index if not exists room_accounts_nyu_seen on mahjong.room_accounts(last_seen) where role = 'nyu';
+create index if not exists rooms_sweep_pick on mahjong.rooms(swept_at nulls first, deleted_at, id) where deleted_at is not null;   -- §2 の測り（11-23）＝部屋を選ぶ所が呼びごとに rooms を読み切っていた（10秒ごと）＝消した部屋だけの小さい索引・選ぶ順そのまま
+
 -- ── ついでの掃除（段2b-2・案 mahjong_tataki_2026-11-20/sweep_sekkei.md v1.2＝設計前 taiketsu 止め3→叩き直し 止め1→止め0）──
 -- 呼ぶのは入口（mj_room_create・mj_room_join）の ok:true を返す直前だけ（外側も begin … exception で包む＝掃除が落ちても入口の返しは変わらない）。
 -- ★待たない★＝取る行は全部 for update skip locked・関数に lock_timeout 50ms（取れない待ちは 55P03 でその手順の塊だけ戻る）。
@@ -998,7 +1015,8 @@ revoke all on function mahjong_private.mj_pair_pre(uuid, uuid, jsonb) from publi
 --     塊が落ちた部屋は limits ('sweep:bad', 部屋, 今日) の印＝その日は飛ばす
 --   4 totals の数え直し（1日1回・印 sweep:recount）  2 入の room_accounts 180日（持ち主とその部屋のリーグの L は残す・members.user_id は残す）
 --   3 古い行＝op_results 7日・creates 2日・limits（kind の終わり 1m＝10分・1h＝2時間・1d／u1d／sweep:*＝2日・★他の kind は消さず log★）
-create or replace function mahjong_private.mj_sweep(p_max int default 100) returns void
+-- P7：手順1（部屋の消し）だけ＝mj_sweep_room（1部屋・true＝部屋を1つ選べた）。尾（2・3・4）は mj_sweep_tail（別の取引で毎分＝§1-2a）
+create or replace function mahjong_private.mj_sweep_room(p_max int default 1000) returns boolean
 language plpgsql security definer set search_path = '' set lock_timeout = '50ms' as $fn$
 declare
   v_max  int := greatest(coalesce(p_max, 100), 1);
@@ -1013,7 +1031,7 @@ begin
       into v_room, v_del, v_rs, v_rv, v_open from mahjong.rooms x
      where x.deleted_at < pg_catalog.now() - interval '7 days'
        and not exists (select 1 from mahjong.limits l where l.kind = 'sweep:bad' and l.key = x.id::text and l.window_start = v_day)
-     order by x.deleted_at, x.id
+     order by x.swept_at nulls first, x.deleted_at, x.id   -- P7 §1-3：1-b の後の部屋は他の部屋の後へ
      limit 1 for update of x skip locked;
     if v_room is not null then
       -- 子の行の数（各表 v_max+1 で打ち切る＝数えも枠の内）
@@ -1119,6 +1137,7 @@ begin
         end if;
         -- 1行も消せなかった（全部ほかが持っている等）＝例外で塊を戻して sweep:bad の印＝その日は飛ばす（同じ部屋で手順1を止めない）
         if v_left = v_max then raise exception 'mj_sweep_stuck'; end if;
+        update mahjong.rooms set swept_at = pg_catalog.now() where id = v_room;   -- P7 §1-3
       end if;
     end if;
   exception when others then
@@ -1133,25 +1152,28 @@ begin
     end if;
   end;
 
-  -- ── 4 totals の数え直し（1日1回） ──
-  begin
-    select t.rooms_all into v_all from mahjong.totals t where t.id = 1 for update skip locked;
-    if found then
-      insert into mahjong.limits (kind, key, window_start, count) values ('sweep:recount', '*', v_day, 1)
-        on conflict (kind, key, window_start) do nothing;
-      get diagnostics v_d = row_count;
-      if v_d = 1 then
-        select pg_catalog.count(*) into v_real from mahjong.rooms x where x.kind = 'shared' and x.closed_at is null;   -- 段C の式
-        if v_real <> v_all then
-          raise log 'mj_sweep recount % -> %', v_all, v_real;
-          update mahjong.totals set rooms_all = v_real where id = 1;
-        end if;
-      end if;
-    end if;
-  exception when others then
-    raise log 'mj_sweep recount %', sqlstate;
-  end;
+  return v_room is not null;
+end $fn$;
+revoke all on function mahjong_private.mj_sweep_room(int) from public, anon, authenticated;
 
+-- P7 §1-2b：尾の消し損ねの印（黙らない）＝limits ('sweep:tailbad', 手順, 今日)。この insert も落ちたら例外のまま上へ（cron の job は failed）
+create or replace function mahjong_private.mj_sweep_tailbad(p_step text) returns void
+language plpgsql security definer set search_path = '' as $fn$
+begin
+  insert into mahjong.limits (kind, key, window_start, count)
+    values ('sweep:tailbad', p_step, pg_catalog.date_trunc('day', pg_catalog.now()), 1)
+    on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
+end $fn$;
+revoke all on function mahjong_private.mj_sweep_tailbad(text) from public, anon, authenticated;
+
+-- P7 §1-2a：尾＝2 入180日 → 3 古い行 → 窓の無い kind（1日1回）→ cron の記録 → 4 数え直し（印の無い日だけ totals を取る＝最後）
+create or replace function mahjong_private.mj_sweep_tail(p_max int default 1000) returns void
+language plpgsql security definer set search_path = '' set lock_timeout = '50ms' as $fn$
+declare
+  v_max  int := greatest(coalesce(p_max, 1000), 1);
+  v_all int; v_real bigint; v_d bigint;
+  v_day  timestamptz := pg_catalog.date_trunc('day', pg_catalog.now());
+begin
   -- ── 2 入の room_accounts 180日（持ち主・その部屋のリーグの L は残す） ──
   begin
     delete from mahjong.room_accounts z where z.ctid = any(array(
@@ -1162,6 +1184,7 @@ begin
        limit v_max for update of a skip locked));
   exception when others then
     raise log 'mj_sweep nyu %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('nyu');
   end;
 
   -- ── 3 古い行 ──
@@ -1170,28 +1193,104 @@ begin
       select y.ctid from mahjong.op_results y where y.at < pg_catalog.now() - interval '7 days' limit v_max for update skip locked));
   exception when others then
     raise log 'mj_sweep op_results %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('op_results');
   end;
   begin
     delete from mahjong.creates z where z.ctid = any(array(
       select y.ctid from mahjong.creates y where y.at < pg_catalog.now() - interval '2 days' limit v_max for update skip locked));
   exception when others then
     raise log 'mj_sweep creates %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('creates');
   end;
   begin
     delete from mahjong.limits z where z.ctid = any(array(
       select y.ctid from mahjong.limits y
-       where (y.kind like '%1m' and y.window_start < pg_catalog.now() - interval '10 minutes')
+       where y.window_start < pg_catalog.now() - interval '10 minutes'   -- P7：limits_window が効く前置き（下の3つはどれもこれより古い）
+         and ((y.kind like '%1m' and y.window_start < pg_catalog.now() - interval '10 minutes')
           or (y.kind like '%1h' and y.window_start < pg_catalog.now() - interval '2 hours')
-          or ((y.kind like '%1d' or y.kind like 'sweep:%') and y.window_start < pg_catalog.now() - interval '2 days')
+          or ((y.kind like '%1d' or y.kind like 'sweep:%') and y.window_start < pg_catalog.now() - interval '2 days'))
        limit v_max for update skip locked));
-    if exists (select 1 from mahjong.limits y where not (y.kind like '%1m' or y.kind like '%1h' or y.kind like '%1d' or y.kind like 'sweep:%')) then
-      raise log 'mj_sweep limits: kind に窓が無い行がある（消さない）';
-    end if;
   exception when others then
     raise log 'mj_sweep limits %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('limits');
+  end;
+  -- 窓が無い kind（消さない）＝1日1回だけ全部を読む（印 sweep:kindcheck）・在れば log と tailbad
+  begin
+    insert into mahjong.limits (kind, key, window_start, count) values ('sweep:kindcheck', '*', v_day, 1)
+      on conflict (kind, key, window_start) do nothing;
+    get diagnostics v_d = row_count;
+    if v_d = 1 and exists (select 1 from mahjong.limits y where not (y.kind like '%1m' or y.kind like '%1h' or y.kind like '%1d' or y.kind like 'sweep:%')) then
+      raise log 'mj_sweep limits: kind に窓が無い行がある（消さない）';
+      perform mahjong_private.mj_sweep_tailbad('kind');
+    end if;
+  exception when others then
+    raise log 'mj_sweep kindcheck %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('kindcheck');
+  end;
+  -- cron の記録＝自分の2つの job の行だけ・7日より古い物（共有の倉庫・他のアプリの行は触らない＝§1-7）
+  begin
+    if exists (select 1 from pg_catalog.pg_namespace n where n.nspname = 'cron') then
+      execute 'delete from cron.job_run_details d where d.jobid in (select j.jobid from cron.job j where j.jobname in (''mj-sweep-tick'', ''mj-sweep-tail'')) and d.end_time < pg_catalog.now() - interval ''7 days''';
+    end if;
+  exception when others then
+    raise log 'mj_sweep cron %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('cron');
+  end;
+
+  -- ── 4 totals の数え直し（1日1回・★今日の印が無い時だけ totals を取る★＝先に印を鍵なしで見る・最後の手順） ──
+  begin
+    if not exists (select 1 from mahjong.limits l where l.kind = 'sweep:recount' and l.key = '*' and l.window_start = v_day) then
+      select t.rooms_all into v_all from mahjong.totals t where t.id = 1 for update skip locked;
+      if found then
+        insert into mahjong.limits (kind, key, window_start, count) values ('sweep:recount', '*', v_day, 1)
+          on conflict (kind, key, window_start) do nothing;
+        get diagnostics v_d = row_count;
+        if v_d = 1 then
+          select pg_catalog.count(*) into v_real from mahjong.rooms x where x.kind = 'shared' and x.closed_at is null;   -- 段C の式
+          if v_real <> v_all then
+            raise log 'mj_sweep recount % -> %', v_all, v_real;
+            update mahjong.totals set rooms_all = v_real where id = 1;
+          end if;
+        end if;
+      end if;
+    end if;
+  exception when others then
+    raise log 'mj_sweep recount %', sqlstate;
+    perform mahjong_private.mj_sweep_tailbad('recount');
   end;
 end $fn$;
+revoke all on function mahjong_private.mj_sweep_tail(int) from public, anon, authenticated;
+
+-- 作る/入るの ok の直前（6か所）は今まで通り＝部屋1つ＋尾（cron が無くても進む＝§1-4）
+create or replace function mahjong_private.mj_sweep(p_max int default 100) returns void
+language plpgsql security definer set search_path = '' set lock_timeout = '50ms' as $fn$
+begin
+  perform mahjong_private.mj_sweep_room(p_max);
+  perform mahjong_private.mj_sweep_tail(p_max);
+end $fn$;
 revoke all on function mahjong_private.mj_sweep(int) from public, anon, authenticated;
+
+-- P7 §1-2：10秒ごとの tick＝1つの取引を短く（p_ms か p_rooms 回の早い方）・尾は入れない・外側は例外を飲まない（部屋ごとの失敗は sweep:bad）
+create or replace function mahjong_private.mj_sweep_tick(p_rooms int default 5, p_batch int default 1000, p_ms int default 200) returns int
+language plpgsql security definer set search_path = '' set lock_timeout = '50ms' as $fn$
+declare
+  v_t0 timestamptz := pg_catalog.clock_timestamp();
+  v_n  int := 0;
+begin
+  loop
+    exit when v_n >= greatest(coalesce(p_rooms, 5), 1);
+    exit when v_n > 0 and pg_catalog.clock_timestamp() - v_t0 >= pg_catalog.make_interval(secs => greatest(coalesce(p_ms, 200), 1) / 1000.0);
+    v_n := v_n + 1;
+    exit when not mahjong_private.mj_sweep_room(p_batch);
+  end loop;
+  return v_n;
+end $fn$;
+revoke all on function mahjong_private.mj_sweep_tick(int, int, int) from public, anon, authenticated;
+
+-- P7 §1-1：時間で回す（cron.schedule は同じ名なら上書き＝当て直しで2本にならない・jobid も保つ）
+create extension if not exists pg_cron;
+select cron.schedule('mj-sweep-tick', '10 seconds', 'select mahjong_private.mj_sweep_tick()');
+select cron.schedule('mj-sweep-tail', '* * * * *', 'select mahjong_private.mj_sweep_tail(1000)');
 
 -- ── 入口1本目：部屋を作る（設計図 §2・§3.0・§3.1・§3.2・案 v18_login_sekkei.md G＋前の叩き room_create_tome.txt 止め2直し5）──
 -- ⓪ 呼んだ人＝mj_me（null なら {ok:false, err:'mj_session'}＝画面は「ログインが切れました」・K-10）。作った人が持ち主で管。

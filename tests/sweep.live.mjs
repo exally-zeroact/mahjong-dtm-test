@@ -13,6 +13,9 @@
  *  ⑥ 落ちる部屋（history を消すと例外の trigger）→ create の ok が返る・sweep:bad の印・手順2〜4 は動く・次の呼びは飛ばして次の部屋を消す
  *  ④-1 版 105 の消した部屋＝1回目に消える版は p_max 以下・5回の内に消える
  *  ④-2 rule_set_id が null の消した部屋に版 105＝5回の内に消える（null の穴）
+ *  ⑩ P7（p7_sadame v2.1 §3）tick：消して10日の大きい部屋（1-b）＋後に消した小さい部屋2つ → tick(1,1000) 3回で小さい2つが消え、大きい部屋に swept_at・1回 500ms 未満
+ *     わざと：swept_at の順を外す／swept_at を書かない（塊の中で関数を書き換えて戻す）→ 小さい部屋が残る＝赤になる事を毎回見る
+ *     cron.schedule を2回当てても job は1本・jobid は同じ。回す間は2つの job を cron.alter_job(active false) で止め、終わりで戻す（戻ったかも見る）
  *  ⑨ 1行も消せない大きい消した部屋（rule_sets の消しを trigger で空に）→ 2回目で mj_sweep_stuck・部屋は残り sweep:bad の印（raise を外すと赤＝確かめた）
  *  ⑧ 1回の掃除（p_max 100・④の部屋）の時間を clock_timestamp で測る
  * 数えは全部自分の行だけ（作った room_id・key が 'test:' の limits・作った op_id）。
@@ -118,7 +121,7 @@ const OLDC = `jsonb_build_object('lim', ${LIMC},
   'o8', exists (select 1 from mahjong.op_results where op_id = '${OPS.o8}'), 'o6', exists (select 1 from mahjong.op_results where op_id = '${OPS.o6}'))`;
 
 const sql = `do ${q('sw')} declare res jsonb := '{}'; r jsonb; i int; kc int; n int; t0 timestamptz; a0 int; e text;
-  us uuid[] := '{}'; ss uuid[] := '{}'; r0 uuid; v uuid; rs uuid; v2 uuid; rs2 uuid; s1 uuid; s2 uuid; t1 uuid; t2 uuid; lg uuid; m uuid; ms float8[] := '{}';
+  us uuid[] := '{}'; ss uuid[] := '{}'; r0 uuid; v uuid; rs uuid; v2 uuid; rs2 uuid; v3 uuid; rs3 uuid; jb bigint; tms float8[] := '{}'; fd text; fd2 text; s1 uuid; s2 uuid; t1 uuid; t2 uuid; lg uuid; m uuid; ms float8[] := '{}';
 begin
   /* khaw の前から在る古い行を先に掃く（掃除は ok の返しでも走る＝自分の行の数えが揺れない・塊の最後で全部戻る） */
   for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
@@ -132,6 +135,10 @@ begin
       'auth', has_function_privilege('authenticated', p.oid, 'EXECUTE'), 'public', exists (select 1 from aclexplode(p.proacl) x where x.grantee = 0),
       'definer', p.prosecdef, 'config', p.proconfig)
     from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'mahjong_private' and p.proname = 'mj_sweep'));
+  res := res || jsonb_build_object('priv2', (select jsonb_object_agg(p.proname, jsonb_build_object('anon', has_function_privilege('anon', p.oid, 'EXECUTE'),
+      'auth', has_function_privilege('authenticated', p.oid, 'EXECUTE'), 'public', exists (select 1 from aclexplode(p.proacl) x where x.grantee = 0),
+      'definer', p.prosecdef, 'config', p.proconfig))
+    from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'mahjong_private' and p.proname in ('mj_sweep_room', 'mj_sweep_tail', 'mj_sweep_tick', 'mj_sweep_tailbad')));
   /* 部屋 R0（人 1 が作る＝今の部屋・掃除の対象でない） */
   ${asWho(1)}
   r := public.mj_room_create(gen_random_uuid(), ${lit('掃除の試験')}, ${lit(PASS)}, '{"players":4}'::jsonb, jsonb_build_object('url_token_hash', ${lit(TOKH)}));
@@ -247,6 +254,40 @@ begin
   ${undo('tm', `${mkRoom('v', 'rs', { deleted: "now() - interval '8 days'" })} ${bigKids('v', 'rs')}
     for i in 1..5 loop t0 := clock_timestamp(); ${SW(100)} ms := ms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
     res := res || jsonb_build_object('tm', to_jsonb(ms), 'tm_kids', ${KIDS('v')});`)}
+  /* ⑩ P7 tick（部屋をまたぐ）＋わざと2つ＋当て直しで job 1本 */
+  ${undo('tk', `${mkRoom('v', 'rs', { deleted: "now() - interval '10 days'" })} ${bigKids('v', 'rs')}
+    insert into mahjong.history (room_id, group_id, op, actor_user_id, actor_role) select v, gen_random_uuid(), 'x', us[1], 'kan' from generate_series(1, 3000);
+    ${mkRoom('v2', 'rs2', { deleted: "now() - interval '9 days'" })}
+    ${mkRoom('v3', 'rs3', { deleted: "now() - interval '8 days'" })}
+    tms := '{}';
+    for i in 1..3 loop t0 := clock_timestamp(); n := mahjong_private.mj_sweep_tick(1, 1000); tms := tms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
+    res := res || jsonb_build_object('tk', jsonb_build_object('v', exists (select 1 from mahjong.rooms where id = v), 'v_swept', (select swept_at is not null from mahjong.rooms where id = v),
+      'v2', exists (select 1 from mahjong.rooms where id = v2), 'v3', exists (select 1 from mahjong.rooms where id = v3), 'ms', to_jsonb(tms), 'n', n));`)}
+  ${undo('tkw1', `fd := pg_get_functiondef('mahjong_private.mj_sweep_room(int)'::regprocedure); fd2 := replace(fd, 'x.swept_at nulls first, ', '');
+    if fd2 = fd then raise exception 'waza1 の字が見つからない'; end if; execute fd2;
+    ${mkRoom('v', 'rs', { deleted: "now() - interval '10 days'" })} ${bigKids('v', 'rs')}
+    insert into mahjong.history (room_id, group_id, op, actor_user_id, actor_role) select v, gen_random_uuid(), 'x', us[1], 'kan' from generate_series(1, 3000);
+    ${mkRoom('v2', 'rs2', { deleted: "now() - interval '9 days'" })}
+    ${mkRoom('v3', 'rs3', { deleted: "now() - interval '8 days'" })}
+    tms := '{}';
+    for i in 1..3 loop t0 := clock_timestamp(); n := mahjong_private.mj_sweep_tick(1, 1000); tms := tms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
+    res := res || jsonb_build_object('tkw1', jsonb_build_object('v', exists (select 1 from mahjong.rooms where id = v), 'v_swept', (select swept_at is not null from mahjong.rooms where id = v),
+      'v2', exists (select 1 from mahjong.rooms where id = v2), 'v3', exists (select 1 from mahjong.rooms where id = v3), 'ms', to_jsonb(tms), 'n', n));`)}
+  ${undo('tkw2', `fd := pg_get_functiondef('mahjong_private.mj_sweep_room(int)'::regprocedure); fd2 := replace(fd, 'update mahjong.rooms set swept_at = pg_catalog.now() where id = v_room;', '');
+    if fd2 = fd then raise exception 'waza2 の字が見つからない'; end if; execute fd2;
+    ${mkRoom('v', 'rs', { deleted: "now() - interval '10 days'" })} ${bigKids('v', 'rs')}
+    insert into mahjong.history (room_id, group_id, op, actor_user_id, actor_role) select v, gen_random_uuid(), 'x', us[1], 'kan' from generate_series(1, 3000);
+    ${mkRoom('v2', 'rs2', { deleted: "now() - interval '9 days'" })}
+    ${mkRoom('v3', 'rs3', { deleted: "now() - interval '8 days'" })}
+    tms := '{}';
+    for i in 1..3 loop t0 := clock_timestamp(); n := mahjong_private.mj_sweep_tick(1, 1000); tms := tms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
+    res := res || jsonb_build_object('tkw2', jsonb_build_object('v', exists (select 1 from mahjong.rooms where id = v), 'v_swept', (select swept_at is not null from mahjong.rooms where id = v),
+      'v2', exists (select 1 from mahjong.rooms where id = v2), 'v3', exists (select 1 from mahjong.rooms where id = v3), 'ms', to_jsonb(tms), 'n', n));`)}
+  ${undo('cj', `jb := (select jobid from cron.job where jobname = 'mj-sweep-tick');
+    perform cron.schedule('mj-sweep-tick', '10 seconds', 'select mahjong_private.mj_sweep_tick()');
+    perform cron.schedule('mj-sweep-tick', '10 seconds', 'select mahjong_private.mj_sweep_tick()');
+    res := res || jsonb_build_object('cj', jsonb_build_object('n', (select count(*) from cron.job where jobname = 'mj-sweep-tick'),
+      'same', (select jobid from cron.job where jobname = 'mj-sweep-tick') = jb));`)}
   /* ⑤ totals の数え直し */
   ${undo('tot', `delete from mahjong.limits where kind = 'sweep:recount' and window_start = date_trunc('day', now());
     update mahjong.totals set rooms_all = rooms_all + 3 where id = 1;
@@ -272,7 +313,15 @@ let p = 0, f = 0;
 const ok = (name, cond, why = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (why ? ' — ' + why : '')); } };
 if (!isTest) console.log('★中止★ test の倉庫でない');
 else {
-  const { text: t } = await mq(sql);
+  const JOBS = `(select jobid from cron.job where jobname in ('mj-sweep-tick', 'mj-sweep-tail'))`;
+  const stop = await mq(`select cron.alter_job(j, active := false) from ${JOBS} q(j)`);
+  if (stop.status >= 300) console.log('★job を止められなかった★ ' + stop.text.slice(0, 200));
+  let t;
+  try { ({ text: t } = await mq(sql)); }
+  finally {
+    const back = await mq(`select cron.alter_job(j, active := true) from ${JOBS} q(j)`);
+    if (back.status >= 300) console.log('★job を戻せなかった★ ' + back.text.slice(0, 200));
+  }
   let msg = t; try { msg = JSON.parse(t).message || t; } catch (_) { /* 素の字 */ }
   const at = msg.indexOf('MJRESULT');
   if (at < 0) console.log('★失敗★ 結果の例外が来なかった: ' + msg.slice(0, 800));
@@ -336,6 +385,22 @@ if (out) {
   /* ⑤ */
   ok('⑤ 印の無い日は totals のずれ +3 を直す', Number(out.tot1) === 0, String(out.tot1));
   ok('⑤ 同じ日の2回目は直さない（印が在る）', Number(out.tot2) === 3 && out.tot_mark === true, `${out.tot2} ${out.tot_mark}`);
+  /* ⓪ P7 の4つ */
+  for (const [fn, cfg] of [['mj_sweep_room', ['search_path=""', 'lock_timeout=50ms']], ['mj_sweep_tail', ['search_path=""', 'lock_timeout=50ms']],
+    ['mj_sweep_tick', ['search_path=""', 'lock_timeout=50ms']], ['mj_sweep_tailbad', ['search_path=""']]]) {
+    const x = (out.priv2 || {})[fn] || {};
+    ok(`⓪ ${fn}：anon・authenticated・PUBLIC に EXECUTE 無し・definer・${cfg.join(' ')}`, x.anon === false && x.auth === false && x.public === false && x.definer === true && J(x.config) === J(cfg), J(x));
+  }
+  /* ⑩ */
+  const tk = out.tk || {};
+  ok('⑩ tick(1,1000) 3回＝大きい部屋は残って swept_at・後に消した小さい部屋2つは消える', tk.v === true && tk.v_swept === true && tk.v2 === false && tk.v3 === false, J(tk));
+  ok('⑩ tick 1回が 3回とも 500ms 未満', Array.isArray(tk.ms) && tk.ms.length === 3 && tk.ms.every((x) => Number(x) < 500), J(tk.ms));
+  console.log(`    （⑩ tick の ms＝${(tk.ms || []).map((x) => Number(x).toFixed(1)).join(' / ')}）`);
+  for (const [k, name] of [['tkw1', 'swept_at の順を外す'], ['tkw2', 'swept_at を書かない']]) {
+    const w = out[k] || {};
+    ok(`⑩ わざと（${name}）→ 小さい部屋が残る＝上の試験が赤になる`, !out[k + '_err'] && w.v2 === true && !(w.v === true && w.v_swept === true && w.v2 === false && w.v3 === false), J(w) + ' ' + (out[k + '_err'] || ''));
+  }
+  ok('⑩ cron.schedule を2回当てても job は1本・jobid は同じ', out.cj && Number(out.cj.n) === 1 && out.cj.same === true, J(out.cj));
   /* ⑥ */
   const bd = out.bad || {}, bd2 = out.bad2 || {};
   ok('⑥ 落ちる部屋が在っても create の ok が返る', bd.ret && bd.ret.ok === true, J(bd.ret));
@@ -349,6 +414,9 @@ if (isTest) {
     (select count(*)::int from mahjong.limits where key like 'test:%') as lim,
     (select count(*)::int from pg_proc where proname = 'mj_test_boom') as boom`);
   let left = null; try { left = JSON.parse(lf.text)[0]; } catch (_) { /* 字 */ }
+  const jb = await mq(`select count(*)::int as n from cron.job where jobname in ('mj-sweep-tick', 'mj-sweep-tail') and active`);
+  let jn = null; try { jn = JSON.parse(jb.text)[0].n; } catch (_) { /* 字 */ }
+  ok('⑩ 終わりで2つの job が active に戻った', jn === 2, jb.text.slice(0, 200));
   ok('倉庫に試験の人・部屋・数え・trigger が1つも残っていない', left && left.u === 0 && left.rooms === 0 && left.lim === 0 && left.boom === 0, lf.text.slice(0, 200));
 }
 console.log(`\nsweep: ${p} passed, ${f} failed`);
