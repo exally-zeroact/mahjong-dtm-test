@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
-  kindOf, yakiUsed, tobiUsed, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
+  kindOf, yakiUsed, tobiUsed, readArgs, sessionOfRef, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
 import { readOps } from './mj-ops.test.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
@@ -546,7 +546,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   if (!st.hanchans[0]) throw new Error('門の写しに半荘が無い');
   ok('今の部屋は ok', roomGate(st).mode === 'ok' && migrateState(st).gate.mode === 'ok');
   ok('新しい部屋（emptyState）も st.rules を持たない古い写しも ok', migrateState(emptyState()).gate.mode === 'ok' && migrateState({ members: [], sessions: [], tables: [{ table_id: 't1', session_id: 's1', rules }] }).gate.mode === 'ok');
-  for (const v of [3, '3', 3.5, -1, null]) {
+  for (const v of [4, '3', 3.5, -1, null]) {
     const x = { ...clone(st), v }; const keep = J(x);
     const m = migrateState(x);
     ok('st.v ' + J(v) + ' → newer・形を直さない・写しは1字も変わらない', m.gate.mode === 'newer' && !m.migrated && m.st === x && J(x) === keep, J(m.gate));
@@ -1149,6 +1149,54 @@ console.log('■ D2 リーグの頁の写し scope（d2_sadame v1.1 §2）');
   const c3 = applyOps(a.state, [hs('h1', [10000, 20000, 30000, 40000], { table_id: 'u1' }), { op: 'extra_add', table_id: 'u1', member_id: 'm1', kind: 'chip', add: 1 }, { op: 'extra_add', table_id: 'u1', member_id: 'm2', kind: 'chip', add: -1 }], { scope: nl });
   ok('D2 isL 偽でも hanchan_start・extra_add（nyu）は ok＝1回目の点が入る', c3.ok && c3.state.hanchans.some((h) => h.hanchan_id === 'h1' && h.table_id === 'u1'), ER(c3));
   ok('D2 scope でない写しのリーグの session_add は今のまま err direct', ER(applyOps(m4, [sa()])) === 'direct');
+}
+console.log('■ P5 分けた読み（p5_sadame v1.3 §3＝loaded・unloaded・readArgs）');
+{
+  const ER = (r) => (r.ok ? 'ok' : r.res.err + (r.res.at ? '@' + r.res.at : '') + (r.res.id ? ':' + r.res.id : ''));
+  // s0＝頭だけ（中身を読んでいない）・s1＝読んだ開催
+  const full = applyOps(base(), [{ op: 'session_add', session_id: 's0', date: '2026-11-19', rate: 100 }, { op: 'table_add', table_id: 't0', session_id: 's0', label: '卓1' },
+    hs('h1', [40000, 30000, 20000, 10000]), { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 2 }, { op: 'extra_add', table_id: 't1', member_id: 'm2', kind: 'chip', add: -2 }]).state;
+  const P = clone(full);
+  P.v = 3; P.loaded = ['s1']; P.absent = [];
+  P.tables = P.tables.filter((t) => t.session_id !== 's0');
+  ok('P5 v3 の写しは門を通る（migrateState ok・形を直さない・loaded を残す）', (() => { const m = migrateState(clone(P), rules); return m.gate.mode === 'ok' && !m.migrated && J(m.st.loaded) === J(['s1']) && m.st.v === 3; })());
+  ok('P5 v2 の写しは loaded を足さない（全部読み済み）・並びを捨てない（migrated 偽）', (() => { const m = migrateState(clone(full), rules); return !m.migrated && !('loaded' in m.st) && m.st.v === 2; })());
+  const u1 = applyOps(P, [{ op: 'table_add', table_id: 't9', session_id: 's0', label: '卓2' }]);
+  ok('P5 読んでいない開催への table_add → unloaded@session_id:s0・写しは変わらない', ER(u1) === 'unloaded@session_id:s0' && u1.state === P, ER(u1));
+  ok('P5 読んでいない開催の settle_snap → unloaded@session_id:s0', ER(applyOps(P, [{ op: 'settle_snap', session_id: 's0', rev: 1, content: {}, used: {}, missing: [] }])) === 'unloaded@session_id:s0');
+  ok('P5 写しに無い卓の hanchan_start・extra_add・table_seats → unloaded@table_id', ER(applyOps(P, [hs('h9', [40000, 30000, 20000, 10000], { table_id: 't0' })])) === 'unloaded@table_id:t0'
+    && ER(applyOps(P, [{ op: 'extra_add', table_id: 't0', member_id: 'm1', kind: 'chip', add: 1 }])) === 'unloaded@table_id:t0'
+    && ER(applyOps(P, [{ op: 'table_seats', table_id: 't0', seats: SEATS }])) === 'unloaded@table_id:t0');
+  ok('P5 写しに無い半荘の cell_set・hanchan_void → unloaded@hanchan_id', ER(applyOps(P, [{ op: 'cell_set', hanchan_id: 'h0', seat: 0, value: 100, base_version: 1 }])) === 'unloaded@hanchan_id:h0'
+    && ER(applyOps(P, [{ op: 'hanchan_void', hanchan_id: 'h0' }])) === 'unloaded@hanchan_id:h0');
+  const ok1 = applyOps(P, [hs('h2', [25000, 25000, 25000, 25000]), { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 41000, base_version: 1 }, { op: 'session_edit', session_id: 's0', place: '東' }]);
+  ok('P5 読んだ開催の op と頭だけの開催の session_edit は ok', ok1.ok, ER(ok1));
+  const all = { ...clone(P), loaded: ['s0', 's1'] };
+  ok('P5 全部の開催が loaded なら写しに無い卓・半荘は今と同じ bad（unloaded にしない）', ER(applyOps(all, [hs('h9', [40000, 30000, 20000, 10000], { table_id: 'tz' })])) === 'bad'
+    && ER(applyOps(all, [{ op: 'cell_set', hanchan_id: 'hz', seat: 0, value: 100, base_version: 1 }])) === 'bad');
+  ok('P5 loaded の無い写し（base・emptyState）は unloaded を出さない', ER(applyOps(base(), [hs('h9', [40000, 30000, 20000, 10000], { table_id: 'tz' })])) === 'bad'
+    && ER(applyOps(emptyState(), [{ op: 'table_add', table_id: 'tz', session_id: 'sz', label: '卓1' }])) === 'bad');
+  const na = applyOps(P, [{ op: 'session_add', session_id: 's2', date: '2026-11-23', rate: 100 }, { op: 'table_add', table_id: 't2', session_id: 's2', label: '卓1' }, hs('h3', [40000, 30000, 20000, 10000], { table_id: 't2' })]);
+  ok('P5 session_add で作った開催は loaded に足す＝続く table_add・hanchan_start が当たる・元の写しの loaded は変えない', na.ok && J(na.state.loaded) === J(['s1', 's2']) && J(P.loaded) === J(['s1']), ER(na));
+  const s0 = sessionSeisan(P, 's0'), b0 = sessionBreakdown(P, 's0');
+  ok('P5 頭だけの開催の精算 → err unloaded（ok と 0 を出さない）', s0.ok === false && s0.err === 'unloaded' && !('ten' in s0), J(s0));
+  ok('P5 頭だけの開催の1人ずつ → ok 偽・by／order／rates／count は空', b0.ok === false && b0.err === 'unloaded' && J(b0.by) === '{}' && b0.order.length === 0 && b0.rates.length === 0 && b0.count === 0);
+  ok('P5 読んだ開催の精算と1人ずつは全部の写しと同じ', canon(sessionSeisan(P, 's1').ten) === canon(sessionSeisan(full, 's1').ten) && sessionSeisan(P, 's1').ok
+    && canon(sessionBreakdown(P, 's1').by) === canon(sessionBreakdown(full, 's1').by), J(sessionSeisan(P, 's1')));
+  ok('P5 loaded の無い写しの精算は今と同じ（unloaded にしない）', sessionSeisan(full, 's0').ok === true && sessionBreakdown(full, 's0').ok === undefined);
+  // readArgs
+  const I = (n) => '00000000-0000-4000-8000-0000000000' + String(n).padStart(2, '0');
+  const R = { v: 3, members: [], sessions: [{ session_id: I(1), date: '2026-11-20', rate: 100 }, { session_id: I(2), date: '2026-11-21', rate: 100 }],
+    tables: [{ table_id: 'ta', session_id: I(2) }], hanchans: [{ hanchan_id: 'ha', table_id: 'ta' }], extras: [], settles: [], loaded: [I(2)], absent: [I(9)] };
+  const ob = [{ op_id: 'x', ops: [{ op: 'session_add', session_id: I(5), date: '2026-11-23' }, { op: 'table_add', table_id: 'tb', session_id: I(5), label: '卓1' }, hs('hb', [1, 2, 3, 4], { table_id: 'tb' })] },
+    { op_id: 'y', ops: [{ op: 'cell_set', hanchan_id: 'hb', seat: 0, value: 100, base_version: 1 }, { op: 'cell_set', hanchan_id: 'ha', seat: 0, value: 100, base_version: 1 }] }];
+  ok('P5 readArgs：並びの session_add の開催は入れない（その卓・半荘の op も）・写しの半荘→卓→開催を引く', J(readArgs(R, ob, null, 7)) === J({ v: 3, sessions: [I(2)], since: 7 }), J(readArgs(R, ob, null, 7)));
+  ok('P5 readArgs：開いている頁の開催を先頭に・loaded に無ければ since 無し', J(readArgs(R, ob, I(1), 7)) === J({ v: 3, sessions: [I(1), I(2)] }));
+  ok('P5 readArgs：absent に返った id は since を止めない', J(readArgs(R, [], I(9), 7)) === J({ v: 3, sessions: [I(9)], since: 7 }));
+  ok('P5 readArgs：並びの table_add（読んでいない開催）から開催を引く', J(readArgs(R, [{ op_id: 'z', ops: [{ op: 'table_add', table_id: 'td', session_id: I(1), label: '卓2' }, { op: 'extra_add', table_id: 'td', member_id: 'm1', kind: 'chip', add: 1 }] }], null, 7)) === J({ v: 3, sessions: [I(1)] }));
+  ok('P5 readArgs：loaded の無い写し（v2）は since 無し＝v3 を読み直す・read_ver が無ければ since 無し', J(readArgs(full, [], null, 7)) === J({ v: 3, sessions: [] }) && J(readArgs(R, [], null, null)) === J({ v: 3, sessions: [] }));
+  ok('P5 readArgs：uuid の字でない id は入れない・50 まで', J(readArgs(R, [], 's1', 7).sessions) === '[]' && readArgs(R, [{ op_id: 'w', ops: Array.from({ length: 60 }, (_, i) => ({ op: 'settle_snap', session_id: '00000000-0000-4000-8000-0000000001' + String(i).padStart(2, '0') })) }], null, 7).sessions.length === 50);
+  ok('P5 sessionOfRef：table_rules の新しい卓は元の卓の開催・引けなければ null', sessionOfRef(R, [{ ops: [{ op: 'table_rules', table_id: 'ta', new_table_id: 'tn' }] }], 'table_id', 'tn') === I(2) && sessionOfRef(R, [], 'table_id', 'tq') === null);
 }
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;

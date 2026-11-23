@@ -9,6 +9,8 @@
  * §4-2 門：ログイン無し mj_session・入っていない人 gone・無い部屋 gone・出された人 gone・消した部屋 gone・閉じた部屋 closed:true で読める・solo の持ち主・
  *   入の役・what 違い bad・since の形・since 同じで same・書いた後 read_ver+1・弾かれた組と送り直しは +1 しない・開催の重なりの門（dup what session）
  * §4-3 room_close：history_count 20000 の部屋でも member_add・room_close が ok（H1′＝F の門もたたみも無い）
+ * P5（p5_sadame v1.3 §5）：p_args.v 3 の分けた読み＝100開催×60半荘の部屋（倉庫へ直に入れて塊ごと戻す）で loaded（(a) 最後の3＋(b) 取り消していない最後＋(c) sessions）・absent・
+ *   members の n／last・v 無しは今の v2・形の誤りは bad what sessions・same・大きさと時間（既定の読みが v2 の 1/20 以下）
  * D1（d1_sadame v2.1 §4）：leagues は st の外の段・形・版・取り消し・l・他の部屋・same・取り消したリーグの L を外す道
  * --waza：壊して狙った試験が赤になるか（壊した関数は塊の初めに当てる＝塊ごと戻る）
  * 使い方: node tests/read.live.mjs [--waza]
@@ -76,6 +78,10 @@ const LCF = { op: 'league_create', league_id: 'a0000000-0000-4000-8000-00000000d
 const L2 = 'a0000000-0000-4000-8000-00000000d103', LF = 'a0000000-0000-4000-8000-00000000d102';
 const [DS1, DS2, DT1, DT2, DT3] = ['e301', 'e302', 'e303', 'e304', 'e305'].map((x) => 'a0000000-0000-4000-8000-00000000' + x);
 const RDL = (lid, extra = {}) => RD('rg', { league_id: lid, ...extra }, `'league'`);
+/* P5：100開催×60半荘（98〜100 は取り消し＝(b) は 97）・2日目の1半荘を取り消す・最新はリーグの日（room の読みに出ない） */
+const PM = [U(), U(), U(), U()], P5_RAND = U();
+const P5_N = 100, P5_H = 60;
+const RDV3 = (extra) => `public.mj_read(rg, 'room', jsonb_build_object('v', 3${extra ? ', ' + extra : ''}))`;
 const RM4 = `public.mj_write(rg, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', 'account_remove', 'user_id', us[4])))`;
 
 /* ── 写しと倉庫の st を同じ形に揃える（§ 頭の注の4つだけ） ── */
@@ -286,6 +292,37 @@ begin
     ${asWho(3)} ${T('dl_g', RDL(L1))}
     ${asWho(1)} ${T('dl_b1', RDL(LF))} ${T('dl_b2', RDL('a0000000-0000-4000-8000-00000000d1ff'))}
     ${T('dl_b3', RD('rg', {}, `'league'`))} ${T('dl_b4', RDL('L1'))}`)}
+  /* P5 分けた読み（塊ごと戻す） */
+  ${undo('p5', `${asWho(1)} ${RS}
+    ${T('p5_m', WR('rg', PM.map((id, i) => ({ op: 'member_add', member_id: id, name: 'P5の' + i }))))}
+    ${RS} ${T('p5_lc', WR('rg', [LC1]))}
+    insert into mahjong.sessions (id, room_id, date, voided, rate, rule_set_id, rule_version, created_at)
+      select gen_random_uuid(), rg, date '2026-01-01' + k, k >= ${P5_N - 2}, 100, x.rule_set_id, x.rule_version, now() - (1000 - k) * interval '1 second'
+        from generate_series(1, ${P5_N}) k, mahjong.rooms x where x.id = rg;
+    insert into mahjong.sessions (id, room_id, league_id, date, rate, rule_set_id, rule_version, created_at)
+      select gen_random_uuid(), rg, ${lit(L1)}::uuid, date '2026-06-01', 100, x.rule_set_id, x.rule_version, now() from mahjong.rooms x where x.id = rg;
+    insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version, created_at)
+      select gen_random_uuid(), rg, z.id, '卓1', 4, z.rule_set_id, z.rule_version, z.created_at from mahjong.sessions z where z.room_id = rg;
+    insert into mahjong.hanchans (id, room_id, table_id, players, seats, rule_set_id, rule_version, rules_snapshot, voided, created_at)
+      select gen_random_uuid(), rg, t.id, 4, jsonb_build_object('0', ${lit(PM[0])}, '1', ${lit(PM[1])}, '2', ${lit(PM[2])}, '3', ${lit(PM[3])}),
+             t.rule_set_id, t.rule_version, qr.rules, (j = 1 and z.date = date '2026-01-02'), t.created_at + j * interval '1 millisecond'
+        from mahjong.tables t join mahjong.sessions z on z.id = t.session_id join mahjong.rule_sets qr on qr.id = t.rule_set_id and qr.version = t.rule_version,
+             generate_series(1, ${P5_H}) j
+       where t.room_id = rg;
+    insert into mahjong.cells (hanchan_id, seat, value) select h.id, k, (array[40000, 30000, 20000, 10000])[k + 1] from mahjong.hanchans h, generate_series(0, 3) k where h.room_id = rg;
+    analyze mahjong.sessions; analyze mahjong.tables; analyze mahjong.hanchans; analyze mahjong.cells;
+    ${ROW('p5_ids', `select jsonb_agg(id order by created_at, id) from mahjong.sessions where room_id = rg and league_id is null`)}
+    ${ROW('p5_lg', `select id from mahjong.sessions where room_id = rg and league_id is not null`)}
+    ${ROW('p5_t0', 'clock_timestamp()')} ${T('p5_def', RDV3())} ${ROW('p5_t1', 'clock_timestamp()')}
+    ${T('p5_v2', RD('rg'))} ${ROW('p5_t2', 'clock_timestamp()')}
+    ${T('p5_req', RDV3(`'sessions', jsonb_build_array((select id::text from mahjong.sessions where room_id = rg and league_id is null order by created_at, id offset 4 limit 1), ${lit(S1)}, ${lit(P5_RAND)}, (select id::text from mahjong.sessions where room_id = rg and league_id is not null))`))}
+    ${ROW('p5_t3', 'clock_timestamp()')}
+    ${T('p5_vs', RD('rg', { v: '3' }))} ${T('p5_v4', RD('rg', { v: 4 }))}
+    ${T('p5_b1', RD('rg', { v: 3, sessions: Array.from({ length: 51 }, () => U()) }))}
+    ${T('p5_b50', RD('rg', { v: 3, sessions: Array.from({ length: 50 }, () => U()) }))}
+    ${T('p5_b2', RD('rg', { v: 3, sessions: ['x'] }))} ${T('p5_b3', RD('rg', { v: 3, sessions: 'a' }))} ${T('p5_b4', RD('rg', { v: 3, sessions: [1] }))}
+    ${T('p5_sn', RD('rg', { v: 3, sessions: null }))}
+    ${T('p5_same', RDV3(`'since', (select read_ver from mahjong.rooms where id = rg)`))}`)}
   /* solo */
   ${asWho(1)}
   ${T('made_rs', CR(null, { players: 4 }))} rs := (r->>'room_id')::uuid;
@@ -421,6 +458,39 @@ function check(o) {
   ok('D2 入でない人 → gone', isErr(o.dl_g, 'gone'), J(o.dl_g));
   ok('D2 他の部屋のリーグ・無いリーグ・league_id 無し・uuid でない → bad what league_id', isErr(o.dl_b1, 'bad', { what: 'league_id' }) && isErr(o.dl_b2, 'bad', { what: 'league_id' })
     && isErr(o.dl_b3, 'bad', { what: 'league_id' }) && isErr(o.dl_b4, 'bad', { what: 'league_id' }), J([o.dl_b1, o.dl_b2, o.dl_b3, o.dl_b4]));
+  /* P5（p5_sadame v1.3 §5） */
+  {
+    const d = o.p5_def, v2 = o.p5_v2, rq = o.p5_req, ids = o.p5_ids || [];
+    const sids = (x) => (x && x.st && x.st.sessions ? x.st.sessions.map((z) => z.session_id) : null);
+    const tsid = (x) => (x && x.st && x.st.tables ? [...new Set(x.st.tables.map((t) => t.session_id))] : null);
+    const want = ids.slice(P5_N - 4);   // (a) 98〜100（取り消し）＋(b) 97
+    ok('P5 塊が回った（人4・リーグ・100開催）', !o.p5_err && isOk(o.p5_m) && isOk(o.p5_lc) && ids.length === P5_N, J([o.p5_err, o.p5_m, o.p5_lc, ids.length]));
+    ok('P5 既定の loaded＝(a) 最後の3（取り消しも）＋(b) 取り消していない最後・(created_at, id) の順', isOk(d) && d.st.v === 3 && J(d.st.loaded) === J(want) && J(d.st.absent) === '[]', J(d && d.st ? [d.st.loaded, d.st.absent] : d).slice(0, 400));
+    ok('P5 開催の頭は全部（リーグの日は出ない）・卓・半荘・cells は loaded の開催だけ', isOk(d) && J(sids(d)) === J(ids) && J(tsid(d)) === J(want) && d.st.hanchans.length === 4 * P5_H
+      && d.st.hanchans.every((h) => d.st.tables.some((t) => t.table_id === h.table_id)), J([sids(d) && sids(d).length, tsid(d), d && d.st && d.st.hanchans.length]));
+    const sub = (x, keep) => { const k = new Set(keep); const tt = x.st.tables.filter((t) => k.has(t.session_id)); const ti = new Set(tt.map((t) => t.table_id));
+      return { tables: tt, hanchans: x.st.hanchans.filter((h) => ti.has(h.table_id)), extras: x.st.extras.filter((e) => ti.has(e.table_id)), settles: x.st.settles.filter((z) => k.has(z.session_id)) }; };
+    ok('P5 読んだ開催の中身は v2 の全部の読みと同じ（卓・半荘の no・cells・extras・settles）', isOk(d) && isOk(v2) && canon(sub(d, want)) === canon(sub(v2, want)));
+    ok('P5 sessions 指定＝その開催が増える・他の部屋／無い id／リーグの日＝absent（頼んだ順）・中身は返さない', isOk(rq) && J(rq.st.loaded) === J([ids[4], ...want])
+      && J(rq.st.absent) === J([S1, P5_RAND, o.p5_lg]) && J(tsid(rq)) === J([ids[4], ...want]), J(rq && rq.st ? [rq.st.loaded, rq.st.absent] : rq).slice(0, 500));
+    ok('P5 p_args.v の無い読みは今の v2 の全部（st.v 2・loaded／absent 無し・members に n 無し）', isOk(v2) && v2.st.v === 2 && !('loaded' in v2.st) && !('absent' in v2.st)
+      && v2.st.members.every((m) => !('n' in m)) && J(tsid(v2)) === J(ids), J(v2 && v2.st ? [v2.st.v, Object.keys(v2.st)] : v2).slice(0, 300));
+    ok('P5 v が 3 でない（字の 3・4）も v2 の全部', isOk(o.p5_vs) && o.p5_vs.st.v === 2 && isOk(o.p5_v4) && o.p5_v4.st.v === 2 && !('loaded' in o.p5_v4.st));
+    const stat = (st, mid) => { const hs = st.hanchans.filter((h) => !h.voided && h.seats.includes(mid)); let last = null;
+      for (const h of hs) { const t = st.tables.find((x) => x.table_id === h.table_id); const z = t && st.sessions.find((x) => x.session_id === t.session_id); if (z && (!last || z.date > last)) last = z.date; }
+      return { n: hs.length, last }; };
+    const nl = isOk(d) && isOk(v2) ? d.st.members.map((m) => [m.name, m.n, m.last, stat(v2.st, m.member_id)]) : [];
+    ok('P5 members の n／last＝全開催の数（取り消した半荘は数えない・画面の memberStats と同じ）', nl.length >= 4 && nl.every(([, n, last, w]) => n === w.n && last === w.last)
+      && nl.filter(([, n]) => n === P5_N * P5_H - 1).length === 4, J(nl).slice(0, 500));
+    ok('P5 sessions の形の誤り（51本・uuid でない・配列でない・数）→ bad what sessions', isErr(o.p5_b1, 'bad', { what: 'sessions' }) && isErr(o.p5_b2, 'bad', { what: 'sessions' })
+      && isErr(o.p5_b3, 'bad', { what: 'sessions' }) && isErr(o.p5_b4, 'bad', { what: 'sessions' }), J([o.p5_b1, o.p5_b2, o.p5_b3, o.p5_b4]));
+    ok('P5 50本の無い id は ok・全部 absent・sessions null は既定の読み', isOk(o.p5_b50) && o.p5_b50.st.absent.length === 50 && isOk(o.p5_sn) && J(o.p5_sn.st.loaded) === J(want));
+    ok('P5 v 3 でも since が今の版 → same', o.p5_same && o.p5_same.ok === true && o.p5_same.same === true, J(o.p5_same));
+    const ms = (a, b) => Math.round((Date.parse(o[b]) - Date.parse(o[a])));
+    const bd = J(d || {}).length, b2 = J(v2 || {}).length, br = J(rq || {}).length;
+    P5_MEASURE = { def_bytes: bd, v2_bytes: b2, req_bytes: br, def_ms: ms('p5_t0', 'p5_t1'), v2_ms: ms('p5_t1', 'p5_t2'), req_ms: ms('p5_t2', 'p5_t3') };
+    ok('P5 既定の読みの大きさが v2（' + P5_N * P5_H + '半荘）の 1/20 以下', isOk(d) && bd * 20 <= b2, J(P5_MEASURE));
+  }
   /* §4-3 */
   ok('§4-3（H1′）history_count 20000 の部屋で member_add → ok', isOk(o.fc_ma), J(o.fc_ma));
   ok('§4-3（H1′）その部屋で room_close → ok・数えは書いた分だけ増える（たたまない）', isOk(o.fc_cl) && Number(o.fc_hc) >= 2, J([o.fc_cl, o.fc_hc]));
@@ -468,9 +538,20 @@ const WZ = [
     ['D2 league_save の後も前の日']],
   ['W14 他の部屋のリーグを通す', () => brk('public.mj_read', [['where l.id = v_lid and l.room_id = p_room_id) then', 'where l.id = v_lid) then']]),
     ['D2 他の部屋のリーグ']],
+  ['W15 P5 (a) の 3 を 2 に', () => brk('public.mj_read', [['order by y.created_at desc, y.id desc limit 3)', 'order by y.created_at desc, y.id desc limit 2)']]),
+    ['P5 既定の loaded']],
+  ['W16 P5 (b) を外す', () => brk('public.mj_read', [['and not y.voided order by y.created_at desc, y.id desc limit 1)', 'and false order by y.created_at desc, y.id desc limit 1)']]),
+    ['P5 既定の loaded']],
+  ['W17 P5 sessions の部屋の確かめを外す', () => brk('public.mj_read', [["where x.room_id = p_room_id and x.league_id is null\n       and (x.id in", "where (x.room_id = p_room_id and x.league_id is null or x.id = any(v_req))\n       and (x.id in"]]),
+    ['P5 sessions 指定']],
+  ['W18 P5 n に取り消した半荘を入れる', () => brk('public.mj_read', [['and s2.league_id is null and not h2.voided', 'and s2.league_id is null']]),
+    ['P5 members の n']],
+  ['W19 P5 v 3 の印を見ずに分ける', () => brk('public.mj_read', [["(p_args -> 'v') = '3'::jsonb then", 'true then']]),
+    ['P5 p_args.v の無い読み']],
 ];
 
 let pass = 0, fail = 0;
+var P5_MEASURE = null;
 const say = (name, c, info) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (info ? ' — ' + String(info).slice(0, 900) : '')); } };
 const leftCheck = async () => {
   const { text } = await mq(`select (select count(*)::int from auth.users where email like '%@${MAIL}') as u, (select count(*)::int from mahjong.rooms where name like '${NB}%') as r`);
@@ -483,6 +564,7 @@ if (!WAZA) {
   if (a.err) say('塊が回った', false, a.err);
   else for (const [n, c, info] of check(a.out)) say(n, c, info);
   await leftCheck();
+  if (P5_MEASURE) console.log('  P5 測り（バイト・倉庫の中の ms）：' + J(P5_MEASURE));
   console.log(`\nread: ${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
 } else {
