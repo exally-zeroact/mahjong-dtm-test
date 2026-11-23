@@ -32,6 +32,7 @@
 import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, readArgs, sessionOfRef, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, unholdBusy, heldAny } from '../lib/outbox.mjs';
 import { hanchanPt } from '../lib/hanchan-pt.mjs';
+import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid, sb, patchRoom, rpc, errText } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
@@ -755,7 +756,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
   function whyText(r) {
     if (r.why === 'sum') return r.no + '回目：素点の合計が ' + diffText(r.diff) + '（計に入れていません）';
-    if (r.why === 'order') return r.no + '回目：同じ点の人がいます。起家からの順を入れてください（「' + r.no + '回」を押す）';
+    if (r.why === 'order') return r.no + '回目：同じ点の人の［上家］を押してください（「' + r.no + '回」を押す）';
     return r.no + '回目：入れ直してください（' + r.why + '）';
   }
 
@@ -989,7 +990,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     h += '</div><p class="sec">新しい人</p><label class="r-in"><span>名前</span><input id="pNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
     h += '<div id="pCand"></div><p class="err" id="pErr"></p>';
     h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で' + (p.only ? '決める' : '始める') + '</button>' +
-      '<p class="r-hint">席（東南西北）は選ばない。同点の時だけ「上家はどっち？」を聞く（ルールが上家取りの時）。</p></div>';
+      '<p class="r-hint">席（東南西北）は選ばない。</p></div>';
     el.innerHTML = h;
     wirePick();
   }
@@ -1054,13 +1055,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       // C4 §5a：番号は鎖の通し番号・数えはその回の卓のルール（直す書きはその回の卓のまま＝運ばない）
       const xr = chainView(st, table.table_id).rows.find((y) => y.hanchan_id === hid);
       const xt = st.tables.find((y) => y.table_id === x.table_id);
-      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), step: 'cells', order: orderIdx(x) || [], voided: x.voided,
+      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)), voided: x.voided, // A13：前の並びから同じ点の人の［上家］の印を戻す
         // 開いた時の値と版（2d §3「edit の entry の版は今のまま」＝読み直しで写しが替わっても、ぶつかれば conflict で止める）
         orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version } };
     } else {
       const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
-      entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', step: 'cells', order: [] }; // D2 止め2：保存は開いた時の卓へ
+      entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', marks: [] }; // D2 止め2：保存は開いた時の卓へ
     }
     page = 'edit'; render();
   }
@@ -1083,8 +1084,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     let pt = null;
     if (filled) {
       const c = checkEntry(R, cells, lost);
-      if (c.ok && (!c.needOrder || e.order.length === n)) {
-        const g = hanchanPt(R, cells, { order: c.needOrder ? e.order : [...Array(n).keys()], lost });
+      const k = c.ok && c.needOrder ? fromMarks(R, cells, e.marks) : null; // A13：同じ点は［上家］の印の順（印が足りなければ pt を出さない）
+      if (c.ok && (!k || k.ok)) {
+        const g = hanchanPt(R, cells, { order: k ? k.order : [...Array(n).keys()], lost });
         if (g.ok) pt = g.pt10;
       }
     }
@@ -1102,21 +1104,19 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const { n, kieru } = eRules();
     bar({ back: '対局', onBack: toRoom, title: e.no + '回目の点を' + (e.hanchan_id ? '直す' : '入れる') });
     let h = '';
-    if (e.step === 'cells') {
+    {
       const c = liveCalc();
-      h += '<div class="r-ent">' + e.seats.map((m, i) => '<label class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></label>').join('') + '</div>';
+      // A13（11-23 司さん）＝全員の行の点のすぐ左に、いつも［上家］（押したら色だけ変わる・番号は出さない）
+      const lb = kamLabels(); // A13 v2 §1 [stop1]：描くたびに labels から（番号を消さない）
+      h += '<div class="r-ent">' + e.seats.map((m, i) => '<div class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><button type="button" class="r-kam" data-kam="' + i + '" aria-pressed="' + lb[i].on + '" aria-label="' + esc(nameOf(m)) + 'が' + lb[i].text + '">' + lb[i].text + '</button><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></div>').join('') + '</div>';
       if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" readonly inputmode="none" value="' + esc(e.lost) + '" autocomplete="off"></label>';
       h += sumLine(c) + '<p class="r-hint">pt と順位は点から自動で出す。</p>';
-    } else if (e.step === 'order') {
-      h += '<p class="sec">同じ点の人がいます。起家から順に押してください　<b class="kon">' + e.order.length + '／' + n + '</b></p>';
-      h += '<div class="chips">' + e.seats.map((m, i) => '<button data-ord="' + i + '" aria-pressed="' + e.order.includes(i) + '">' + (e.order.includes(i) ? (e.order.indexOf(i) + 1) + '. ' : '') + esc(nameOf(m)) + '</button>').join('') + '</div>';
-      h += '<button class="btn-s" id="eOrdReset">押し直す</button>';
     }
     h += '<p class="err" id="eErr"></p>';
-    h += '<button class="btn btn-main" id="eOk">' + (e.step !== 'cells' ? '次へ' : e.hanchan_id ? '直す' : '入れる') + '</button>';
+    h += '<button class="btn btn-main" id="eOk">' + (e.hanchan_id ? '直す' : '入れる') + '</button>';
     if (e.hanchan_id) h += '<button class="btn btn-line" id="eVoid">' + (e.voided ? 'この半荘を戻す' : 'この半荘を取り消す') + '</button>';
-    else if (e.step === 'cells') h += '<button class="btn btn-line" id="ePeople">人を替える</button>';
-    if (e.step === 'cells') h += '<div class="kp-sp" id="eKpSp" hidden></div>' + KP_HTML;
+    else h += '<button class="btn btn-line" id="ePeople">人を替える</button>';
+    h += '<div class="kp-sp" id="eKpSp" hidden></div>' + KP_HTML;
     el.innerHTML = h;
     wireEdit();
   }
@@ -1134,12 +1134,19 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     for (const inp of el.querySelectorAll('[data-c]')) inp.placeholder = sugText(c, Number(inp.dataset.c));
     for (const s of el.querySelectorAll('[data-p]')) { const i = Number(s.dataset.p); s.textContent = c.pt ? fmtPt(c.pt[i]) : ''; s.className = 'r-er-p ' + (c.pt ? sign(c.pt[i]) : ''); }
     el.querySelector('#eSum').outerHTML = sumLine(c);
+    drawKam();
+  }
+  // A13 v2：［上家］の字と押した印は今の点と印から毎回引く（同じ点の組は点で変わる）
+  function kamLabels() { const e = entry; return labels(eRules().R, e.cells.map(toInt), e.marks); }
+  function drawKam() {
+    const lb = kamLabels();
+    for (const b of el.querySelectorAll('[data-kam]')) { const i = Number(b.dataset.kam), x = lb[i]; b.setAttribute('aria-pressed', String(x.on)); b.textContent = x.text; b.setAttribute('aria-label', nameOf(entry.seats[i]) + 'が' + x.text); }
   }
   function entryNext() {
     const e = entry;
     const { R, n, kieru } = eRules();
     const err = (t) => { el.querySelector('#eErr').textContent = t; };
-    if (e.step === 'cells') {
+    {
       readCells();
       const cells = e.cells.map(toInt);
       if (cells.some((x) => Number.isNaN(x))) return err('全員の点を数で入れてください。');
@@ -1151,12 +1158,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (!c.ok && c.why === 'sum') return err('素点の合計が ' + diffText(c.diff) + 'です。');
       if (!c.ok) return err('入れられません（' + c.why + '）。');
       e.num = cells; e.lostNum = lost;
-      if (!c.needOrder) e.order = [];
-      if (c.needOrder && e.order.length !== n) { e.order = []; e.step = 'order'; render(); return; }
-      return save1();
-    }
-    if (e.step === 'order') {
-      if (e.order.length !== n) return err('全員を押してください。');
+      // A13：同じ点の人がいて［上家］の印が足りなければ同じ画面で止める（別の画面・窓にしない）
+      const k = c.needOrder ? fromMarks(R, cells, e.marks) : { need: false };
+      if (k.need && !k.ok) return err('同じ点の人の［上家］を押してください。');
+      e.order = k.need ? k.order : [];
       return save1();
     }
   }
@@ -1172,7 +1177,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       ops = [];
       e.num.forEach((v, i) => { if (v !== h.cells[i]) ops.push({ op: 'cell_set', hanchan_id: h.hanchan_id, seat: i, value: v, base_version: h.cell_ver[i] }); });
       if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.version });
-      const ton = e.order.length ? e.order.map((i) => e.seats[i]) : null;
+      const was = h.ton_order ? h.ton_order.map((m) => e.seats.indexOf(m)) : null;
+      // A13：同じ点の組の中の前後が前と同じなら並びは書かない（同じ点でない人の位置は答えを変えない＝要らない版上げをしない）
+      const ton = e.order.length && !(was && sameTie(eRules().R, e.num, was, e.order)) ? e.order.map((i) => e.seats[i]) : null;
       if (ton && canon(ton) !== canon(h.ton_order)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, ton_order: ton, base_version: h.order_version });
     }
     if (ops.length) {
@@ -1198,7 +1205,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       const r = h && chainView(st, t.table_id).rows.find((x) => x.hanchan_id === h.hanchan_id);
       if (r) m = { ...m, no: r.no };
       if (m.why === 'sum') return pre + m.no + '回目＝素点の合計が ' + diffText(m.diff);
-      if (m.why === 'order') return pre + m.no + '回目＝起家からの順がまだ';
+      if (m.why === 'order') return pre + m.no + '回目＝同じ点の人の［上家］がまだ';
       return pre + m.no + '回目＝入れ直しが要ります';
     }
     // 自由な項目（2c-3b）：合計が合わない／お金の数え方がこの版に無い（③-2 の前）
@@ -1460,7 +1467,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       }
       picking = null;
       if (only) { toRoom(); return; }
-      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: new Array(t.rules.players).fill(''), lost: '0', step: 'cells', order: [] };
+      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: new Array(t.rules.players).fill(''), lost: '0', marks: [] };
       page = 'edit'; render();
     };
   }
@@ -1523,8 +1530,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     }
     if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); const t = tOf(entry.tid); picking = { seats: entry.seats.slice(), tid: entry.tid, n: t ? t.rules.players : n }; entry = null; page = 'pick'; render(); };
     if (q('#eVoid')) q('#eVoid').onclick = () => { const r = commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); if (r && r.msg) { el.querySelector('#eErr').textContent = r.msg; return; } toRoom(); }; // P6g §4：門で止めたら部屋へ戻らず字
-    if (q('#eOrdReset')) q('#eOrdReset').onclick = () => { entry.order = []; render(); };
-    for (const b of el.querySelectorAll('[data-ord]')) b.onclick = () => { const i = Number(b.dataset.ord); if (!entry.order.includes(i)) entry.order.push(i); render(); };
+    // A13［上家］：押せば印・もう1回で外す。鍵盤が開いていても箱から focus を外さない（鍵盤を閉じない＝頁がずれず押した手が逃げない）
+    for (const b of el.querySelectorAll('[data-kam]')) {
+      b.addEventListener('mousedown', (ev) => ev.preventDefault());
+      b.onclick = () => {
+        readCells();
+        entry.marks = tapMark(eRules().R, entry.cells.map(toInt), entry.marks, Number(b.dataset.kam)); // 2人の同点は相手の印を外す（ラジオ）
+        const er = q('#eErr'); if (er) er.textContent = '';
+        liveUpdate();
+      };
+    }
   }
 
   window.addEventListener('pagehide', flushMerge);
