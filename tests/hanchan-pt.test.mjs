@@ -10,8 +10,9 @@ import { defaultRules } from '../lib/rules.mjs';
 let p = 0, f = 0;
 const ok = (name, cond, why = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (why ? ' — ' + why : '')); } };
 const J = JSON.stringify;
-const R4 = (o = {}) => ({ players: 4, ...o });
-const R3 = (o = {}) => ({ players: 3, ...o });
+// 端数は五捨六入で固定（A9 で新しいルールの既定は「丸めない」＝この表は保存済みの五捨六入の卓の守り・答えは替えない）
+const R4 = (o = {}) => ({ players: 4, round: 'gosha', ...o });
+const R3 = (o = {}) => ({ players: 3, round: 'gosha', ...o });
 const pt = (r, c, o) => hanchanPt(r, c, o);
 const eqPt = (name, r, c, o, want) => { const g = pt(r, c, o); ok(`${name} ${J(c)} → ${J(want)}`, g.ok && J(g.pt10) === J(want), J(g)); };
 const eqErr = (name, r, c, o, err) => { const g = pt(r, c, o); ok(`${name} → ${err}`, !g.ok && g.err === err, J(g)); };
@@ -86,6 +87,16 @@ eqErr('100点単位でない', R4(), [40050, 30000, 20000, 9950], {}, 'cells');
 eqErr('人数と長さが違う', R4(), [40000, 30000, 30000], {}, 'cells');
 eqErr('ルールが通らない', { players: 5 }, [20000, 20000, 20000, 20000, 20000], {}, 'rules');
 eqErr('消えた供託が負', R4(), [40000, 30000, 20000, 10000], { lost: -1000 }, 'lost');
+
+console.log('■ A9 新しいルールの既定＝丸めない（(素点−返し)/1000＋ウマ をそのまま・0.1pt）');
+ok('既定の round は none（4人・3人）', defaultRules(4).round === 'none' && defaultRules(3).round === 'none');
+// 2位 2.5+10＝12.5・3位 −12.4−10＝−22.4・4位 −15.5−20＝−35.5・トップ＝逆の 45.4
+eqPt('既定（4人）は丸めない', defaultRules(4), [35400, 32500, 17600, 14500], {}, [454, 125, -224, -355]);
+// 同点・印の順 0,1,2,3：2位 5.4+10＝15.4・3位 −14.9−10＝−24.9・4位 −15.9−20＝−35.9・トップ 45.4
+eqPt('既定（4人）・同点は上家取り・丸めない', defaultRules(4), [35400, 35400, 15100, 14100], { order: [0, 1, 2, 3] }, [454, 154, -249, -359]);
+// 3人 35000持ち 40000返し ウマ15/0/−15：2位 −7.7+0＝−7.7・3位 −22.6−15＝−37.6・トップ 45.3
+eqPt('既定（3人）は丸めない', defaultRules(3), [55300, 32300, 17400], {}, [453, -77, -376]);
+eqPt('古い五捨六入の卓は今まで通り（3人）', R3(), [55300, 32300, 17400], {}, [460, -80, -380]);
 
 console.log('■ 3人（35000持ち 40000返し・ウマ15-0-15・オカ15）');
 // 2位 −5+0・3位 −20−15・トップ 40

@@ -23,7 +23,8 @@ const clone = (x) => JSON.parse(J(x));
 const SEATS = ['m1', 'm2', 'm3', 'm4'];
 
 // 箱下は「なし」で固定（この試験の答えは − を 0 で止めた形で書いてある・S2 で既定が「あり」に替わっても狙いは替えない）
-const rules = { ...defaultRules(4), rate: 100, chip_pt10: 20, shugi_pt10: 10, hakoshita: false };
+// 端数は「五捨六入」で固定（この試験の答えは五捨六入で書いてある・A9 で新しいルールの既定が「丸めない」に替わっても、古い卓の守りとして残す）
+const rules = { ...defaultRules(4), rate: 100, chip_pt10: 20, shugi_pt10: 10, hakoshita: false, round: 'gosha' };
 /* 部屋のルールは op で送らない＝写しの st.rules に置く（画面が開いた時に room.rules を置くのと同じ） */
 const withRules = (R) => { const st = emptyState(); st.rules = R; return st; };
 const base = (R = rules) => {
