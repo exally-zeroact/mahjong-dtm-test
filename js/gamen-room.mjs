@@ -133,6 +133,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   if (mig.migrated) { save(OUTR, outbox); save(KEYR, st); }
   let page = first || 'room'; // room | edit | pick | seisan | rules
   let entry = null;
+  let prefill = null; // E2 §6：始めがぶつかった（open／new）＝読み直した後にその回を開いて、この端末が打った数を空いた箱へ入れる
   let picking = null;
   let viewSnap = false;
   let confirming = false; // 入っていない物があるまま終える時の確かめ（開いている画面の間だけ）
@@ -323,10 +324,48 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       outbox = holdHead(outbox, 'closed'); save(OUTR, outbox);
       homeOff(); roomInfo({ closed: true }); pendingStart = null; rerender(); return;
     }
+    if (s.kind === 'conflict' && startConflict(head, s)) return;
     outbox = [{ ...outbox[0], held: { err: s.err, ...(s.at !== undefined ? { at: s.at } : {}), ...(s.what !== undefined ? { what: s.what } : {}) } }, ...outbox.slice(1)]; // conflict・stop＝先頭で止める（後ろは送らない）・P6g：what も残す（busy の字）
     save(OUTR, outbox);
     pendingStart = null; startMsg = null; goHome = false;
     rerender();
+  }
+  // E2 §6：hanchan_start が conflict {what:'open'|'new'}＝止めない。その op と、並びの後ろの同じ uuid の op を消し、読み直してからその回を開く
+  //   （何も自動で送らない・打った数は空いた箱へ入れて見せる＝見ないまま捨てない）
+  function startConflict(head, s) {
+    const at = s.at;
+    const so = head.ops.find((o) => o.op === 'hanchan_start');
+    if (!so || !at || typeof at !== 'object' || (at.what !== 'open' && at.what !== 'new') || typeof at.hanchan_id !== 'string') return false;
+    const gone = so.hanchan_id;
+    outbox = outbox.map((it) => { const ops = it.ops.filter((o) => o.hanchan_id !== gone); return ops.length === it.ops.length ? it : { op_id: uuid(), ops }; }).filter((it) => it.ops.length);
+    save(OUTR, outbox);
+    prefill = { target: at.hanchan_id, seats: so.seats.slice(), cells: so.cells.slice(), tobiR: so.tobi_to && Array.isArray(so.tobi_to.r) ? so.tobi_to.r.slice() : [] };
+    pendingStart = null; startMsg = null; since = null;
+    refreshTag(); sync();
+    return true;
+  }
+  // 読み直した写しに目当ての回が在れば開く（無ければ次の読みを待つ）
+  function openPrefill() {
+    const p = prefill;
+    if (room.closed) { prefill = null; return false; }
+    const x = st.hanchans.find((h) => h.hanchan_id === p.target);
+    if (!x) return false;
+    prefill = null;
+    const typed = (m) => { const j = p.seats.indexOf(m); return j >= 0 && Number.isInteger(p.cells[j]) ? p.cells[j] : null; };
+    const xr = chainView(st, x.table_id).rows.find((y) => y.hanchan_id === x.hanchan_id);
+    const no = xr ? xr.no : x.no;
+    if (!x.voided && x.cells.some((v) => v === null)) {
+      startEntry(x.hanchan_id);
+      const other = [];
+      entry.seats.forEach((m, i) => { const t = typed(m); if (t === null) return; if (x.cells[i] === null) entry.cells[i] = boxNum(t); else if (x.cells[i] !== t) other.push(nameOf(m) + ' ' + x.cells[i].toLocaleString('ja-JP') + '点'); });
+      entry.note = other.length ? '他の端末が先に ' + no + '回目を入れました（' + other.join('・') + '）' : '他の端末が先に ' + no + '回目を始めました。空いた所に打った点を入れました。';
+    } else {
+      // Build note：目当ての回がもう埋まった（new）＝新しい回として打った数を残して開く
+      startEntry(null);
+      if (entry && page === 'edit' && !entry.hanchan_id) { entry.seats.forEach((m, i) => { const t = typed(m); if (t !== null) entry.cells[i] = boxNum(t); }); entry.tobiR = p.tobiR.filter((i) => i < entry.seats.length); entry.note = '他の端末が先に ' + no + '回目を入れました。打った点は残しています。'; }
+    }
+    if (page === 'edit') render(); // startEntry が描いた後に打った数を入れた＝描き直す（pick へ行った時は startEntry が描いた）
+    return true;
   }
   function kick() {
     if (dead || lane) return;
@@ -643,6 +682,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // 終えた部屋の頁は room・seisan・rules だけ（他に居たら room へ・B3b-1 §3）
     if (room.closed && !['room', 'seisan', 'rules'].includes(page)) { page = 'room'; entry = null; picking = null; }
     if (closedObi) closedObi(!!room.closed && !closedHold()); // 足し①の帯が出る時は「見ることはできます」の帯を外す（帯は1枚）
+    if (prefill && openPrefill()) return;
     if (page === 'edit') return renderEdit();
     if (page === 'pick') return renderPick();
     if (page === 'seisan') return renderSeisan();
@@ -768,7 +808,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         const c = r.by[p.member_id];
         if (!c) { h += '<td class="r-na">—</td>'; continue; }
         const big = r.ok && c.pt10 !== null ? '<b class="' + sign(c.pt10) + '">' + fmtPt(c.pt10) + '</b>' : '<b class="zero">—</b>';
-        const small = (c.rank !== null ? (c.rank + 1) + '位 ' : '') + boxNum(c.cell);
+        const small = c.cell === null ? 'まだ' : (c.rank !== null ? (c.rank + 1) + '位 ' : '') + boxNum(c.cell);
         h += '<td>' + big + '<small>' + small + '</small></td>';
       }
       h += '</tr>';
@@ -778,8 +818,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (v.rows.length > 10) h += '<p class="r-hint">↑ 上へなぞると 1回・2回 が出る（計は動かない）</p>';
     return h;
   }
+  // E2 §2：点がまだの席の名前（seats＝席の番号）
+  const cellsWho = (hid, seats) => { const h = st.hanchans.find((x) => x.hanchan_id === hid); const nm = h && Array.isArray(seats) ? seats.map((i) => nameOf(h.seats[i])).filter(Boolean) : []; return nm.length ? '（' + nm.join('・') + '）' : ''; };
   function whyText(r) {
     if (r.why === 'sum') return r.no + '回目：素点の合計が ' + diffText(r.diff) + '（計に入れていません）';
+    if (r.why === 'cells') return r.no + '回目＝点がまだ' + cellsWho(r.hanchan_id, r.seats);
     if (r.why === 'order') return r.no + '回目：同じ点の人の［上家］を押してください（「' + r.no + '回」を押す）';
     return r.no + '回目：入れ直してください（' + r.why + '）';
   }
@@ -1138,12 +1181,14 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const tobiROf = (t) => (t && Array.isArray(t.r) ? t.r.filter((x) => Number.isInteger(x)) : []);
   const tobiRSorted = (a) => [...new Set(a)].sort((x, y) => x - y);
   function startEntry(hid) {
+    // E2 §3：鎖に開いている回（取り消していない・点がまだの席が在る）が在れば、新しい回でなくその回を開く（鎖に1つだけ）
+    if (!hid && table) { const ch = tableChain(st, table.table_id); const op = st.hanchans.find((h) => ch.includes(h.table_id) && !h.voided && h.cells.some((v) => v === null)); if (op) hid = op.hanchan_id; }
     if (hid) {
       const x = st.hanchans.find((y) => y.hanchan_id === hid);
       // C4 §5a：番号は鎖の通し番号・数えはその回の卓のルール（直す書きはその回の卓のまま＝運ばない）
       const xr = chainView(st, table.table_id).rows.find((y) => y.hanchan_id === hid);
       const xt = st.tables.find((y) => y.table_id === x.table_id);
-      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: orderCovered(xt ? xt.rules : R, x.cells, x.ton_order, Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null) ? marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)) : [], voided: x.voided, tobiR: tobiROf(x.tobi_to), // A13：前の並びから同じ点の人の［上家］の印を戻す（§6＝覆っていない新しい同点なら印は空＝押し直し・行ごと）
+      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => (v === null ? '' : boxNum(Number(v)))), lost: String(x.lost || 0), marks: x.cells.includes(null) ? [] : orderCovered(xt ? xt.rules : R, x.cells, x.ton_order, Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null) ? marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)) : [], voided: x.voided, tobiR: tobiROf(x.tobi_to), // A13：前の並びから同じ点の人の［上家］の印を戻す（§6＝覆っていない新しい同点なら印は空＝押し直し・行ごと）
         // 開いた時の値と版（2d §3「edit の entry の版は今のまま」＝読み直しで写しが替わっても、ぶつかれば conflict で止める）
         orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version, order_cells: Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null, tobiR: tobiROf(x.tobi_to), tobi_version: x.tobi_version } };
     } else {
@@ -1190,6 +1235,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       // E1（A19 11-26 司さん）＝行は［名前］…［飛び賞］［上家］［点］・pt の字は消して点の箱を右端に。［飛び賞］は押した人がもらう（何人でも）
       const tb = tobiBtnOn();
       h += '<div class="r-ent' + (tb ? ' r-ent-tb' : '') + '">' + e.seats.map((m, i) => '<div class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span>' + (tb ? '<button type="button" class="r-kam r-tobi" data-tobi="' + i + '" aria-pressed="' + e.tobiR.includes(i) + '" aria-label="' + esc(nameOf(m)) + 'が飛び賞をもらう">飛び賞</button>' : '') + '<button type="button" class="r-kam" data-kam="' + i + '" aria-pressed="' + lb[i].on + '" aria-label="' + esc(nameOf(m)) + 'が' + lb[i].text + '">' + lb[i].text + '</button><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"></div>').join('') + '</div>';
+      if (e.note) h += '<p class="r-check mada" id="eNote">' + esc(e.note) + '</p>';
       if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" readonly inputmode="none" value="' + esc(e.lost) + '" autocomplete="off"></label>';
       h += sumLine(c) + '<p class="r-hint">pt と順位は点から自動で出す。</p>';
     }
@@ -1231,11 +1277,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     {
       readCells();
       const cells = e.cells.map(toInt);
-      if (cells.some((x) => Number.isNaN(x))) return err('全員の点を数で入れてください。');
-      if (cells.some((x) => x % 100 !== 0)) return err('点は100点単位で入れてください。');
-      if (cells.some((x) => Math.abs(x) > CELL_MAX)) return err('点は ±' + CELL_MAX.toLocaleString('ja-JP') + ' までです。');
+      // E2 §1（11-26 司さん＝代表1人でも各自でも）：1つでも入っていれば入れる（空いた席は null）・全部空は止める
+      const blank = e.cells.map((v) => String(v).trim() === '');
+      if (blank.every(Boolean) || cells.some((x, i) => Number.isNaN(x) && !blank[i])) return err('全員の点を数で入れてください。');
+      if (e.hanchan_id && blank.some((b, i) => b && e.orig.cells[i] !== null)) return err('入っている点は消せません。数を入れてください。');
+      const got = cells.filter((x) => !Number.isNaN(x));
+      if (got.some((x) => x % 100 !== 0)) return err('点は100点単位で入れてください。');
+      if (got.some((x) => Math.abs(x) > CELL_MAX)) return err('点は ±' + CELL_MAX.toLocaleString('ja-JP') + ' までです。');
       const lost = kieru ? toInt(e.lost || '0') : 0;
       if (Number.isNaN(lost) || lost < 0 || lost % 1000 !== 0 || lost > LOST_MAX) return err('消えた供託は0〜' + LOST_MAX.toLocaleString('ja-JP') + 'の1000点単位です。');
+      if (blank.some(Boolean)) { e.num = cells.map((x) => (Number.isNaN(x) ? null : x)); e.lostNum = lost; e.order = []; return save1(); } // E2 §2：合計と［上家］は全員そろってから
       const c = checkEntry(R, cells, lost);
       if (!c.ok && c.why === 'sum') return err('素点の合計が ' + diffText(c.diff) + 'です。');
       if (!c.ok) return err('入れられません（' + c.why + '）。');
@@ -1247,25 +1298,26 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       return save1();
     }
   }
+  const seenN = (tid) => { const ch = tableChain(st, tid); return st.hanchans.filter((h) => ch.includes(h.table_id)).length; };
   function save1() {
     const e = entry;
     let ops;
     if (!e.hanchan_id) {
-      const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: true }; // C4 §3 U1：新しい版はいつも follow:true（区切られた卓なら倉庫が鎖の最後へ）
+      const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: true, seen_n: seenN(e.tid) }; // E2 §5 seen_n＝この端末が持つ鎖の回の数（取り消しも数える）・C4 §3 U1：新しい版はいつも follow:true（区切られた卓なら倉庫が鎖の最後へ）
       if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); }
       if (tobiBtnOn() && e.tobiR.length) op.tobi_to = { r: tobiRSorted(e.tobiR) }; // E1 §6 // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
       ops = [op];
     } else {
       const h = { hanchan_id: e.hanchan_id, ...e.orig };
       ops = [];
-      e.num.forEach((v, i) => { if (v !== h.cells[i]) ops.push({ op: 'cell_set', hanchan_id: h.hanchan_id, seat: i, value: v, base_version: h.cell_ver[i] }); });
+      e.num.forEach((v, i) => { if (v !== h.cells[i]) ops.push({ op: 'cell_set', hanchan_id: h.hanchan_id, seat: i, value: v, base_version: h.cell_ver[i] ?? 0 }); }); // E2 §4：行が無い席は版0（倉庫が v1 で入れる）
       // E1 §6：押した人が変わった時だけ tobi_set（版＝開いた時の tobi_version）。点を直しても押した人は変えない
       if (tobiBtnOn() && canon(tobiRSorted(e.tobiR)) !== canon(tobiRSorted(h.tobiR))) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, tobi_to: { r: tobiRSorted(e.tobiR) }, base_version: h.tobi_version });
       if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.version });
       const was = h.ton_order ? h.ton_order.map((m) => e.seats.indexOf(m)) : null;
       // A13：同じ点の組の中の前後が前と同じなら並びは書かない（同じ点でない人の位置は答えを変えない＝要らない版上げをしない）
       // A13 §6：前と同じでも、保存した人が見た点（order_cells）が今の同点の組を覆っていなければ見た点を付けて書き直す
-      const cov = orderCovered(eRules().R, e.num, h.ton_order, h.order_cells);
+      const cov = e.num.includes(null) ? true : orderCovered(eRules().R, e.num, h.ton_order, h.order_cells); // E2：点がまだの回は並びを書かない（e.order は空）
       const ton = e.order.length && !(was && sameTie(eRules().R, e.num, was, e.order) && cov) ? e.order.map((i) => e.seats[i]) : null;
       if (ton && (canon(ton) !== canon(h.ton_order) || !cov)) ops.push({ op: 'hanchan_order', hanchan_id: h.hanchan_id, ton_order: ton, base_version: h.order_version, seen_cells: e.num.slice(), seen_seats: e.seats.slice() });
     }
@@ -1293,6 +1345,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (r) m = { ...m, no: r.no };
       if (m.why === 'sum') return pre + m.no + '回目＝素点の合計が ' + diffText(m.diff);
       if (m.why === 'order') return pre + m.no + '回目＝同じ点の人の［上家］がまだ';
+      if (m.why === 'cells') return pre + m.no + '回目＝点がまだ' + (h ? cellsWho(h.hanchan_id, m.seats) : '');
       return pre + m.no + '回目＝入れ直しが要ります';
     }
     // 自由な項目（2c-3b）：合計が合わない／お金の数え方がこの版に無い（③-2 の前）
