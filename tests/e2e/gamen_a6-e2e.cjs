@@ -220,7 +220,8 @@ async function run(br, port) {
   const step = async (k, f) => { if (!want(k)) return; DB.clear(); LW = 1; for (const x of Object.keys(CTL)) delete CTL[x]; try { await f(); } catch (e) { fail++; let pv = ''; if (process.env.DBG && lastPg) pv = '  頁=' + (await lastPg.evaluate(() => location.pathname + ' ' + document.body.innerText.slice(0, 400)).catch(() => '?')); bad.push('止まった(' + k + '): ' + String(e.message || e).split('\n')[0].slice(0, 300) + pv); } };
   try {
     const DELQ = '部屋を消すと、入っていた人も誰も開けなくなります。7日の間は、ホームの［対局］（部屋を作る・入る）の一番下から戻せます。'; // a27_sadame §2（止め2）
-    const isLast = (pg, sel) => pg.evaluate((s) => { const b = document.querySelector(s); return !!b && b.parentElement.lastElementChild === b; }, sel);
+    // 一番下＝見える物の一番下（KPSP の鍵盤の下の空き .kp-sp は釦より下に置く・鍵盤を閉じている間は hidden＝数えない）
+    const isLast = (pg, sel) => pg.evaluate((s) => { const b = document.querySelector(s); if (!b) return false; let l = b.parentElement.lastElementChild; while (l && l !== b && l.classList.contains('kp-sp') && l.hidden) l = l.previousElementSibling; return l === b; }, sel);
     await step('D1', async () => {
       mkRoom('d1');
       const A = await device('A1', 'u1', seedOf('u1', [rowOf('d1', 'u1', 9)]));
