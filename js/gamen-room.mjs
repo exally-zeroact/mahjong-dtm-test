@@ -31,9 +31,8 @@
  *   入力・人を選ぶは開いた時の table_id に結ぶ（保存はその卓へ）・± のまとめの鍵は 卓|人|種（流す時もその卓へ）。
  * L でない入の1回目（§3 止め1）：リーグの日で L でない人は、半荘0本の卓でも table_seats を送らない（席は hanchan_start の seats だけ）。
  */
-import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, readArgs, sessionOfRef, roomGate, gateText, orderIdx, canon, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
+import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, readArgs, sessionOfRef, roomGate, gateText, orderIdx, canon, tobiUsed, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
 import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, unholdBusy, heldAny } from '../lib/outbox.mjs';
-import { hanchanPt } from '../lib/hanchan-pt.mjs';
 import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
 import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
@@ -787,7 +786,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
 
   // 窓の種＝人ごとに ±・合計0（司さん 11-21「チップと同じやろが」＝飛び賞も同じ形）。lib の tableView が used[kind]・w[kind]・w[kind+'Big'|'Pt10']・v[kind+'Sum'] を返す種だけ出る
   //   ＝飛び賞（'tobi'・B2 tobi_chip_v3.md）は tobi が true かつ tobi_pt≥1 の卓だけ used.tobi が立つ。受け取る人を選ぶ窓は無くした
-  const KINDS = [{ kind: 'chip', label: 'チップ' }, { kind: 'shugi', label: '祝儀' }, { kind: 'yaki', label: 'やきとり' }, { kind: 'tobi', label: '飛び賞' }];
+  const KINDS = [{ kind: 'chip', label: 'チップ' }, { kind: 'shugi', label: '祝儀' }, { kind: 'yaki', label: 'やきとり' }]; // E1（A19）：飛び賞は窓の行でなく点の行の［飛び賞］釦（hanchanView の tobiPt）
   const perOf = (v, kind) => (kind === 'chip' ? R.chip_pt10 : kind === 'shugi' ? R.shugi_pt10 : (v.tableForSeisan || {})[kind + '_pt10']);
   function renderWindows(v) {
     // 足し①（終えた部屋に送れていない点が在る）＝この端末の額は部屋の額と違う＝窓は名前だけと赤い1行（v4 止め4）
@@ -818,8 +817,6 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     }
     return h + '</div>';
   }
-  // 飛び賞のヒント（止めない・お金は動かさない）＝飛んだ半荘が在るのに飛び賞の行が全部0
-  const tobiHintLine = (on) => (on ? '<p class="r-check mada" id="rTobiHint">飛び賞が入っていません</p>' : '');
   function renderCheck(v) {
     const bad = [];
     for (const { kind, label } of KINDS) if (v.used[kind] && v[kind + 'Sum'] !== 0) bad.push(label + 'の合計が ' + fmtCnt(v[kind + 'Sum']) + ' 合いません');
@@ -833,11 +830,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       for (const { kind, label } of KINDS) if (p.used[kind] && p[kind + 'Sum'] !== 0) bad.push(v.splits[i].upto + '回目までの' + label + 'の合計が ' + fmtCnt(p[kind + 'Sum']) + ' 合いません');
       for (const c of p.cust || []) if (c.ng) bad.push(v.splits[i].upto + '回目までの' + c.name + 'の合計が ' + fmtCnt(c.sum) + ' 合いません');
     }
-    if (bad.length) return tobiHintLine(v.tobiHint) + '<p class="r-check bad">' + esc(bad.join('・')) + '</p>';
+    if (bad.length) return '<p class="r-check bad">' + esc(bad.join('・')) + '</p>';
     const okParts = [];
     for (const { kind, label } of KINDS) if (v.used[kind]) okParts.push(label + 'の合計 0');
     okParts.push('合計 0');
-    return tobiHintLine(v.tobiHint) + '<p class="r-check ok">✓ ' + okParts.join('・') + '</p>';
+    return '<p class="r-check ok">✓ ' + okParts.join('・') + '</p>';
   }
 
   // C4 §2：次の回から変えられる時＝部屋を作れる立場（WHO table_rules＝kan）・終えていない部屋・卓が在り取り消していない・リーグの日でない
@@ -1137,19 +1134,22 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const hs = ch.flatMap((tid) => st.hanchans.filter((x) => x.table_id === tid && !x.voided));
     return hs.length ? hs[hs.length - 1].seats.slice() : null;
   }
+  // E1 §6：保存の形 tobi_to = {"r":[並べた重ならない席]}。昔の鍵の形（テスト線だけ）は押していない扱い
+  const tobiROf = (t) => (t && Array.isArray(t.r) ? t.r.filter((x) => Number.isInteger(x)) : []);
+  const tobiRSorted = (a) => [...new Set(a)].sort((x, y) => x - y);
   function startEntry(hid) {
     if (hid) {
       const x = st.hanchans.find((y) => y.hanchan_id === hid);
       // C4 §5a：番号は鎖の通し番号・数えはその回の卓のルール（直す書きはその回の卓のまま＝運ばない）
       const xr = chainView(st, table.table_id).rows.find((y) => y.hanchan_id === hid);
       const xt = st.tables.find((y) => y.table_id === x.table_id);
-      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: orderCovered(xt ? xt.rules : R, x.cells, x.ton_order, Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null) ? marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)) : [], voided: x.voided, // A13：前の並びから同じ点の人の［上家］の印を戻す（§6＝覆っていない新しい同点なら印は空＝押し直し・行ごと）
+      entry = { hanchan_id: hid, tid: x.table_id, no: xr ? xr.no : x.no, R: xt ? xt.rules : R, seats: x.seats.slice(), cells: x.cells.map((v) => boxNum(Number(v))), lost: String(x.lost || 0), marks: orderCovered(xt ? xt.rules : R, x.cells, x.ton_order, Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null) ? marksFromOrder(xt ? xt.rules : R, x.cells, orderIdx(x)) : [], voided: x.voided, tobiR: tobiROf(x.tobi_to), // A13：前の並びから同じ点の人の［上家］の印を戻す（§6＝覆っていない新しい同点なら印は空＝押し直し・行ごと）
         // 開いた時の値と版（2d §3「edit の entry の版は今のまま」＝読み直しで写しが替わっても、ぶつかれば conflict で止める）
-        orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version, order_cells: Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null } };
+        orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version, order_cells: Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null, tobiR: tobiROf(x.tobi_to), tobi_version: x.tobi_version } };
     } else {
       const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
-      entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', marks: [] }; // D2 止め2：保存は開いた時の卓へ
+      entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', marks: [], tobiR: [] }; // D2 止め2：保存は開いた時の卓へ
     }
     page = 'edit'; render();
   }
@@ -1169,16 +1169,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const empty = e.cells.map((v, i) => (String(v).trim() === '' ? i : -1)).filter((i) => i >= 0);
     const rest = want - got;
     const sug = nums === n - 1 && empty.length === 1 && rest % 100 === 0 && Math.abs(rest) <= CELL_MAX ? empty[0] : -1;
-    let pt = null;
-    if (filled) {
-      const c = checkEntry(R, cells, lost);
-      const k = c.ok && c.needOrder ? fromMarks(R, cells, e.marks) : null; // A13：同じ点は［上家］の印の順（印が足りなければ pt を出さない）
-      if (c.ok && (!k || k.ok)) {
-        const g = hanchanPt(R, cells, { order: k ? k.order : [...Array(n).keys()], lost });
-        if (g.ok) pt = g.pt10;
-      }
-    }
-    return { want, got, filled, pt, nums, rest, sug };
+    return { want, got, filled, nums, rest, sug }; // E1：行の pt の字は消した（pt と順位は対局の一覧で出す）
   }
   function sumLine(c) {
     const W = c.want.toLocaleString('ja-JP');
@@ -1196,7 +1187,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       const c = liveCalc();
       // A13（11-23 司さん）＝全員の行の点のすぐ左に、いつも［上家］（押したら色だけ変わる・番号は出さない）
       const lb = kamLabels(); // A13 v2 §1 [stop1]：描くたびに labels から（番号を消さない）
-      h += '<div class="r-ent">' + e.seats.map((m, i) => '<div class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span><button type="button" class="r-kam" data-kam="' + i + '" aria-pressed="' + lb[i].on + '" aria-label="' + esc(nameOf(m)) + 'が' + lb[i].text + '">' + lb[i].text + '</button><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"><span class="r-er-p ' + (c.pt ? sign(c.pt[i]) : '') + '" data-p="' + i + '">' + (c.pt ? fmtPt(c.pt[i]) : '') + '</span></div>').join('') + '</div>';
+      // E1（A19 11-26 司さん）＝行は［名前］…［飛び賞］［上家］［点］・pt の字は消して点の箱を右端に。［飛び賞］は押した人がもらう（何人でも）
+      const tb = tobiBtnOn();
+      h += '<div class="r-ent' + (tb ? ' r-ent-tb' : '') + '">' + e.seats.map((m, i) => '<div class="r-er"><span class="r-er-n">' + esc(nameOf(m)) + '</span>' + (tb ? '<button type="button" class="r-kam r-tobi" data-tobi="' + i + '" aria-pressed="' + e.tobiR.includes(i) + '" aria-label="' + esc(nameOf(m)) + 'が飛び賞をもらう">飛び賞</button>' : '') + '<button type="button" class="r-kam" data-kam="' + i + '" aria-pressed="' + lb[i].on + '" aria-label="' + esc(nameOf(m)) + 'が' + lb[i].text + '">' + lb[i].text + '</button><input class="r-er-v" readonly inputmode="none" data-c="' + i + '" value="' + esc(e.cells[i]) + '" placeholder="' + esc(sugText(c, i)) + '" autocomplete="off" aria-label="' + esc(nameOf(m)) + 'の素点"></div>').join('') + '</div>';
       if (kieru) h += '<label class="r-in"><span>消えた供託</span><input id="eLost" readonly inputmode="none" value="' + esc(e.lost) + '" autocomplete="off"></label>';
       h += sumLine(c) + '<p class="r-hint">pt と順位は点から自動で出す。</p>';
     }
@@ -1220,11 +1213,12 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     readCells();
     const c = liveCalc();
     for (const inp of el.querySelectorAll('[data-c]')) inp.placeholder = sugText(c, Number(inp.dataset.c));
-    for (const s of el.querySelectorAll('[data-p]')) { const i = Number(s.dataset.p); s.textContent = c.pt ? fmtPt(c.pt[i]) : ''; s.className = 'r-er-p ' + (c.pt ? sign(c.pt[i]) : ''); }
     el.querySelector('#eSum').outerHTML = sumLine(c);
     drawKam();
   }
   // A13 v2：［上家］の字と押した印は今の点と印から毎回引く（同じ点の組は点で変わる）
+  // E1：［飛び賞］釦は飛び賞を使う卓（tobi true・tobi_pt≥1）で払う先が「飛ばした人」の時だけ（「全員」は今のまま・釦なし）
+  function tobiBtnOn() { const R0 = eRules().R; return tobiUsed(R0) && R0.tobi_from === 'busted'; }
   function kamLabels() { const e = entry; return labels(eRules().R, e.cells.map(toInt), e.marks); }
   function drawKam() {
     const lb = kamLabels();
@@ -1258,12 +1252,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     let ops;
     if (!e.hanchan_id) {
       const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: true }; // C4 §3 U1：新しい版はいつも follow:true（区切られた卓なら倉庫が鎖の最後へ）
-      if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); } // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
+      if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); }
+      if (tobiBtnOn() && e.tobiR.length) op.tobi_to = { r: tobiRSorted(e.tobiR) }; // E1 §6 // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
       ops = [op];
     } else {
       const h = { hanchan_id: e.hanchan_id, ...e.orig };
       ops = [];
       e.num.forEach((v, i) => { if (v !== h.cells[i]) ops.push({ op: 'cell_set', hanchan_id: h.hanchan_id, seat: i, value: v, base_version: h.cell_ver[i] }); });
+      // E1 §6：押した人が変わった時だけ tobi_set（版＝開いた時の tobi_version）。点を直しても押した人は変えない
+      if (tobiBtnOn() && canon(tobiRSorted(e.tobiR)) !== canon(tobiRSorted(h.tobiR))) ops.push({ op: 'tobi_set', hanchan_id: h.hanchan_id, tobi_to: { r: tobiRSorted(e.tobiR) }, base_version: h.tobi_version });
       if (e.lostNum !== h.lost) ops.push({ op: 'kyotaku_set', hanchan_id: h.hanchan_id, value: e.lostNum, base_version: h.version });
       const was = h.ton_order ? h.ton_order.map((m) => e.seats.indexOf(m)) : null;
       // A13：同じ点の組の中の前後が前と同じなら並びは書かない（同じ点でない人の位置は答えを変えない＝要らない版上げをしない）
@@ -1358,10 +1355,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     }
     if (!viewSnap) {
       h += goBtn;
-      // 飛び賞のヒント（B2・止めない）＝この対局の卓のどれかで飛んだのに飛び賞の行が全部0
-      h += tobiHintLine(st.tables.some((t) => t.session_id === d.sid && !t.voided && tableView(st, t.table_id).tobiHint));
       if (!partial) {
-        if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + (d.used.yaki ? '・やきとり0' : '') + (d.used.tobi ? '・飛び賞0' : '') + '</p>';
+        if (!s.noRateTables.length) h += '<p class="r-check ok">✓ ' + d.count + '回とも合計0' + (d.used.chip ? '・チップ0' : '') + (d.used.shugi ? '・祝儀0' : '') + (d.used.yaki ? '・やきとり0' : '') + '</p>';
         else h += '<div class="r-red"><b>レートなしの卓は点に入れていません（pt で下に別に出します）</b></div>';
       }
     }
@@ -1383,8 +1378,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
           if (d.used.chip) parts.push('チップ ' + fmtCnt(b.chip) + '枚 ' + fmtPt(b.chip10));
           if (d.used.shugi) parts.push('祝儀 ' + fmtCnt(b.shugi) + '枚 ' + fmtPt(b.shugi10));
           if (d.used.yaki) parts.push('やきとり ' + fmtCnt(b.yaki) + '枚 ' + fmtPt(b.yaki10));
-          if (d.used.tobi) parts.push('飛び賞 ' + fmtCnt(b.tobi) + '枚 ' + fmtPt(b.tobi10));
-          const total10 = b.han + b.chip10 + b.shugi10 + b.yaki10 + b.tobi10 + b.cust10; // lib の kei と同じ足し方
+          const total10 = b.han + b.chip10 + b.shugi10 + b.yaki10 + (b.tobi10 || 0) + b.cust10; // lib の kei と同じ足し方（E1：飛び賞は半荘の pt に入る・昔の種 tobi の行は0）
           h += head + '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
         }
       }
@@ -1590,6 +1584,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (q('#eKp')) wireKeypad(el, { boxes: () => [...el.querySelectorAll('[data-c]'), ...(q('#eLost') ? [q('#eLost')] : [])], spec: () => KP_SPEC, onChange: liveUpdate });
     if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); const t = tOf(entry.tid); picking = { seats: entry.seats.slice(), tid: entry.tid, n: t ? t.rules.players : n }; entry = null; page = 'pick'; render(); };
     if (q('#eVoid')) q('#eVoid').onclick = () => { const r = commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); if (r && r.msg) { el.querySelector('#eErr').textContent = r.msg; return; } toRoom(); }; // P6g §4：門で止めたら部屋へ戻らず字
+    // E1［飛び賞］：押せばもらう印・もう1回で外す（何人でも）。鍵盤は閉じない（［上家］と同じ）
+    for (const b of el.querySelectorAll('[data-tobi]')) {
+      b.addEventListener('mousedown', (ev) => ev.preventDefault());
+      b.onclick = () => {
+        readCells();
+        const i = Number(b.dataset.tobi);
+        entry.tobiR = entry.tobiR.includes(i) ? entry.tobiR.filter((x) => x !== i) : [...entry.tobiR, i];
+        b.setAttribute('aria-pressed', String(entry.tobiR.includes(i)));
+      };
+    }
     // A13［上家］：押せば印・もう1回で外す。鍵盤が開いていても箱から focus を外さない（鍵盤を閉じない＝頁がずれず押した手が逃げない）
     for (const b of el.querySelectorAll('[data-kam]')) {
       b.addEventListener('mousedown', (ev) => ev.preventDefault());
