@@ -205,7 +205,7 @@ async function run(br, port) {
     ['字の箱も空と数える', 'js/gamen-room.mjs', 'nums === n - 1 && ', ''],
     ['多い少ないが逆', 'js/gamen-room.mjs', "(c.got > c.want ? ' 多い' : ' 少ない')", "(c.got > c.want ? ' 少ない' : ' 多い')"],
     ['供託の箱で変わらない', 'js/gamen-room.mjs', '    for (const inp of el.querySelectorAll("[data-c]")) inp.placeholder'.replace(/"/g, String.fromCharCode(39)), '    if (0) inp.placeholder'],
-    ['端末の鍵盤を出す', 'js/gamen-room.mjs', '<input class="r-er-v" readonly inputmode="none"', '<input class="r-er-v" inputmode="numeric"'],
+    ['端末の鍵盤を出す', 'js/kenban.mjs', "x.setAttribute('inputmode', 'none');", "x.setAttribute('inputmode', 'numeric');"],
     ['鍵盤を出さない', 'js/kenban.mjs', 'kp.hidden = false; if (sp)', 'if (sp)'],
     ['最初の数で置き換えない', 'js/kenban.mjs', "if (fresh) { neg = fresh === 'neg'; ip = ''; fp = null; }", ''],
     ['− の鍵が効かない', 'js/kenban.mjs', "} else if (key === 'neg') { if (spec.neg) neg = !neg; }", '}'],
