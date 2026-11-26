@@ -114,6 +114,14 @@ const Y1 = [U(), U()], Y2 = [U(), U()], Y3 = [U(), U()], Y4 = [U(), U()];
 const B1 = [U(), U()], B2 = [U(), U()], B3 = [U(), U()], B4 = [U(), U()];
 /* ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）：TS＝半荘0の卓・TSV＝取り消す卓 */
 const TS = U(), TSV = U();
+/* ⑤'' E2（A21・e_sadame v2 §E2）：TE＝E2 だけの卓（開催日 SA）・HE1〜HE3＝その卓の回 */
+const TE = U(), HE1 = U(), HE2 = U(), HE3 = U();
+const hsE = (h, cells, x = {}) => O('hanchan_start', { hanchan_id: h, table_id: TE, seats: MA.slice(0, 4), cells, ...x });
+const csE = (h, seat, value, bv) => O('cell_set', { hanchan_id: h, seat, value, base_version: bv });
+const NCE = (h) => `select count(*) from mahjong.cells where hanchan_id = '${h}'`;
+/* mj_read の2つの組み立て（素の room・v3）から回を1つ引く（cells・cell_ver） */
+const RDE = (h, v3) => `select jsonb_build_object('c', x -> 'cells', 'v', x -> 'cell_ver') from (select jsonb_path_query_first(public.mj_read(ra, 'room', '${v3 ? '{"v":3}' : '{}'}'::jsonb),
+  '$.** ? (@.hanchan_id == "${h}" && exists(@.cell_ver))') x) q`;
 const TSR = (t) => `select jsonb_build_object('seats', seats, 'sv', seats_version, 'v', version) from mahjong.tables where id = '${t}'`;
 const tse = (t, seats) => O('table_seats', { table_id: t, seats });
 const YR = (o) => `update mahjong.rule_sets set rules = rules || ${lit(JSON.stringify(o))}::jsonb where id = (select rule_set_id from mahjong.rooms where id = ra);`;
@@ -468,6 +476,39 @@ const body = `
   ${ROW('tr_empty_row', HR(HA2))}
   res := res || jsonb_build_object('fr_3all', mahjong_private.mj_tobi_ok('{"r":[0,1,2]}'::jsonb, 3::smallint), 'fr_3out', mahjong_private.mj_tobi_ok('{"r":[3]}'::jsonb, 3::smallint),
     'fr_4all', mahjong_private.mj_tobi_ok('{"r":[0,1,2,3]}'::jsonb, 4::smallint));
+  /* ⑤'' E2（e_sadame v2 §E2）1人でも点を入れる：空いた席は null（行を作らない）・開いている回は鎖に1つ・seen_n・行の無い席は版0 */
+  ${RS}
+  ${W('e_t', 2, 'ra', A(O('table_add', { table_id: TE, session_id: SA, label: 'E2' })))}
+  ${W('e1', 2, 'ra', A(hsE(HE1, [40000, null, 20000, null], { seen_n: 0 })))}
+  ${ROW('e1_nc', NCE(HE1))}
+  ${ROW('e1_row', HR(HE1))}
+  ${ROW('e1_rd', RDE(HE1, false))}
+  ${ROW('e1_rd3', RDE(HE1, true))}
+  ${W('e_open', 2, 'ra', A(hsE(HE2, [40000, 30000, 20000, 10000], { seen_n: 1 })))}
+  ${W('e_open_old', 2, 'ra', A(hsE(HE2, [40000, 30000, 20000, 10000])))}
+  ${W('e_resend', 2, 'ra', A(hsE(HE1, [40000, null, 20000, null], { seen_n: 0 })))}
+  ${W('e_allnull', 2, 'ra', A(hsE(U(), [null, null, null, null], { seen_n: 1 })))}
+  ${W('e_mix', 2, 'ra', A(hsE(U(), [40050, null, 20000, null], { seen_n: 1 })))}
+  ${W('e_str', 2, 'ra', A(hsE(U(), ['x', null, 20000, null], { seen_n: 1 })))}
+  ${W('e_sn_neg', 2, 'ra', A(hsE(U(), [40000, null, 20000, null], { seen_n: -1 })))}
+  ${W('e_sn_frac', 2, 'ra', A(hsE(U(), [40000, null, 20000, null], { seen_n: 1.5 })))}
+  ${W('e_sn_str', 2, 'ra', A(hsE(U(), [40000, null, 20000, null], { seen_n: '1' })))}
+  ${W('e_sc', 2, 'ra', A(hsE(U(), [40000, null, 20000, null], { seen_n: 1, ton_order: MA.slice(0, 4), seen_cells: [40000, 0, 20000, 0] })))}
+  ${W('e_bv1', 2, 'ra', A(csE(HE1, 3, 10000, 1)))}
+  ${W('e_bv0', 2, 'ra', A(csE(HE1, 1, 30000, 0)))}
+  ${ROW('e_bv0_nc', NCE(HE1))}
+  ${W('e_bv0b', 2, 'ra', A(csE(HE1, 1, 31000, 0)))}
+  ${W('e_bv0same', 2, 'ra', A(csE(HE1, 1, 30000, 0)))}
+  ${W('e_fill', 2, 'ra', A(csE(HE1, 3, 10000, 0)))}
+  ${ROW('e_fill_row', HR(HE1))}
+  ${ROW('e_fill_rd', RDE(HE1, false))}
+  ${W('e_new', 2, 'ra', A(hsE(HE2, [null, 50000, null, null], { seen_n: 0 })))}
+  ${W('e_h2', 2, 'ra', A(hsE(HE2, [null, 50000, null, null], { seen_n: 1 })))}
+  ${W('e_v2', 2, 'ra', A(O('hanchan_void', { hanchan_id: HE2 })))}
+  ${W('e_new_void', 2, 'ra', A(hsE(HE3, [10000, null, null, null], { seen_n: 1 })))}
+  ${W('e_h3', 2, 'ra', A(hsE(HE3, [10000, null, null, null], { seen_n: 2 })))}
+  ${W('e_unv', 2, 'ra', A(O('hanchan_unvoid', { hanchan_id: HE2 })))}
+  ${ROW('e_unv_row', HR(HE2))}
 
   /* ⑥ そろった後 */
   ${RS}
@@ -859,7 +900,7 @@ const body = `
       from mahjong.tables t, generate_series(1, 10 - (select count(*) from mahjong.tables where session_id = '${SA}')::int) k where t.id = '${TA}';
     ${W('ft', 2, 'ra', A(O('table_add', { table_id: U(), session_id: SA, label: '11卓目' })))}
     ${ROW('ft_n', `select count(*) from mahjong.tables where session_id = '${SA}'`)}`)}
-  ${undo('fh', `insert into mahjong.hanchans select (jsonb_populate_record(null::mahjong.hanchans, to_jsonb(h) || jsonb_build_object('id', gen_random_uuid()))).*
+  ${undo('fh', `insert into mahjong.hanchans select (jsonb_populate_record(null::mahjong.hanchans, to_jsonb(h) || jsonb_build_object('id', gen_random_uuid(), 'voided', true))).*
       from (select * from mahjong.hanchans where table_id = '${TA}' limit 1) h, generate_series(1, 60 - (select count(*) from mahjong.hanchans where table_id = '${TA}')::int) k;
     ${W('fh', 2, 'ra', A(O('hanchan_start', { hanchan_id: U(), table_id: TA, seats: MA.slice(0, 4), cells: C4 })))}
     ${ROW('fh_n', `select count(*) from mahjong.hanchans where table_id = '${TA}'`)}`)}
@@ -1345,6 +1386,29 @@ function check(out, lib, say) {
   ok("⑤' {r} の形は点を直して飛び直しても変えない（鍵消し無し・版そのまま）", isOk('tr_un') && isOk('tr_re') && J(out.tr_re_row?.tobi) === J({ r: [0, 2] }) && out.tr_re_row.tv === out.tr_row?.tv, J([R('tr_re'), out.tr_row, out.tr_re_row]));
   ok("⑤' {r} の小さい順でない・同じ席2回・players 外・負・小数・字・配列でない・r 以外の鍵 → bad at tobi_to", ['tr_unsorted', 'tr_dup', 'tr_out', 'tr_neg', 'tr_frac', 'tr_str', 'tr_notarr', 'tr_x'].every((k) => isErr(k, 'bad', { at: 'tobi_to' })), J(['tr_unsorted', 'tr_dup', 'tr_out', 'tr_neg', 'tr_frac', 'tr_str', 'tr_notarr', 'tr_x'].map(R)));
   ok("⑤' {r:[]}（誰も押していない）→ ok", isOk('tr_empty') && J(out.tr_empty_row?.tobi) === J({ r: [] }), J([R('tr_empty'), out.tr_empty_row]));
+  /* ⑤'' E2 */
+  const cfE = (k, at, cur) => isErr(k, 'conflict', { at }) && (cur === undefined ? !('cur' in R(k)) : J(R(k).cur) === J(cur));
+  ok("⑤'' E2 空いた席が null の始め → ok・行は半荘1＋数の席2・履歴+3", isOk('e1') && has('e1', { rc: 3, hc: 3, h: 3 }) && Number(out.e1_nc) === 2, J([R('e1'), d('e1'), out.e1_nc]));
+  ok("⑤'' E2 点がまだの回は state input・理由 cells", out.e1_row?.state === 'input' && out.e1_row.why === 'cells', J(out.e1_row));
+  ok("⑤'' E2 mj_read（素の room）の cells・cell_ver は席の数で空いた席は null", J(out.e1_rd) === J({ c: [40000, null, 20000, null], v: [1, null, 1, null] }), J(out.e1_rd));
+  ok("⑤'' E2 mj_read（v3）の cells・cell_ver も席の数で空いた席は null", J(out.e1_rd3) === J({ c: [40000, null, 20000, null], v: [1, null, 1, null] }), J(out.e1_rd3));
+  ok("⑤'' E2 開いている回が在る卓の始め → conflict at {what:open, hanchan_id}・cur 無し・何も書かない", cfE('e_open', { what: 'open', hanchan_id: HE1 }) && has('e_open', none), J([R('e_open'), d('e_open')]));
+  ok("⑤'' E2 seen_n の無い古い PWA の始めも open で止める", cfE('e_open_old', { what: 'open', hanchan_id: HE1 }) && has('e_open_old', none), J(R('e_open_old')));
+  ok("⑤'' E2 同じ hanchan_id の送り直しは門より先に ok（made 0）", isOk('e_resend') && has('e_resend', { rc: 0, h: 0 }), J([R('e_resend'), d('e_resend')]));
+  ok("⑤'' E2 全部 null・100点単位でない数 → range at cells／字 → bad at cells（門より先）", isErr('e_allnull', 'range', { at: 'cells' }) && isErr('e_mix', 'range', { at: 'cells' }) && isErr('e_str', 'bad', { at: 'cells' }),
+    J([R('e_allnull'), R('e_mix'), R('e_str')]));
+  ok("⑤'' E2 seen_n が負・小数・字 → bad at seen_n", ['e_sn_neg', 'e_sn_frac', 'e_sn_str'].every((k) => isErr(k, 'bad', { at: 'seen_n' })), J(['e_sn_neg', 'e_sn_frac', 'e_sn_str'].map(R)));
+  ok("⑤'' E2 空いた席のある始めの seen_cells（数だけ）→ bad at seen_cells（例外にしない）", isErr('e_sc', 'bad', { at: 'seen_cells' }), J(R('e_sc')));
+  ok("⑤'' E2 行の無い席に版1 → conflict cur {null, 0}", cfE('e_bv1', { seat: 3, what: 'cell', hanchan_id: HE1 }, { value: null, version: 0 }) && has('e_bv1', none), J(R('e_bv1')));
+  ok("⑤'' E2 行の無い席に版0 → ok・v1・行+1", isOk('e_bv0') && J(R('e_bv0').results) === J([{ i: 0, v: 1 }]) && Number(out.e_bv0_nc) === 3 && has('e_bv0', { rc: 1, h: 1 }), J([R('e_bv0'), d('e_bv0'), out.e_bv0_nc]));
+  ok("⑤'' E2 行が在る席に2回目の版0（違う数）→ conflict cur {value, version}", cfE('e_bv0b', { seat: 1, what: 'cell', hanchan_id: HE1 }, { value: 30000, version: 1 }), J(R('e_bv0b')));
+  ok("⑤'' E2 行が在る席に同じ数の版0 → ok（何もしない）", isOk('e_bv0same') && has('e_bv0same', { rc: 0, h: 0 }), J([R('e_bv0same'), d('e_bv0same')]));
+  ok("⑤'' E2 全員そろうと state ok・読みは [40000,30000,20000,10000]・版 [1,1,1,1]", isOk('e_fill') && out.e_fill_row?.state === 'ok' && J(out.e_fill_rd) === J({ c: [40000, 30000, 20000, 10000], v: [1, 1, 1, 1] }),
+    J([R('e_fill'), out.e_fill_row, out.e_fill_rd]));
+  ok("⑤'' E2 鎖の回の数＞seen_n → conflict at {what:new, hanchan_id: 一番新しい回}・何も書かない", cfE('e_new', { what: 'new', hanchan_id: HE1 }) && has('e_new', none), J([R('e_new'), d('e_new')]));
+  ok("⑤'' E2 取り消した回も鎖の回の数に入る（void の後 seen_n 1 の始め → conflict new・hanchan_id は取り消した一番新しい回・何も書かない）", cfE('e_new_void', { what: 'new', hanchan_id: HE2 }) && has('e_new_void', none), J([R('e_new_void'), d('e_new_void')]));
+  ok("⑤'' E2 取り消した回は開いていない・数には入る（void の後 seen_n 2 で始め ok）", isOk('e_h2') && isOk('e_v2') && isOk('e_h3'), J([R('e_h2'), R('e_v2'), R('e_h3')]));
+  ok("⑤'' E2 点がまだの回を戻す時に鎖に他の開いている回 → conflict open・戻さない", cfE('e_unv', { what: 'open', hanchan_id: HE3 }) && out.e_unv_row?.voided === true, J([R('e_unv'), out.e_unv_row]));
   ok("⑤' mj_tobi_ok：3人 [0,1,2] true・3人 [3] false・4人 [0,1,2,3] true", out.fr_3all === true && out.fr_3out === false && out.fr_4all === true, J([out.fr_3all, out.fr_3out, out.fr_4all]));
   ok('⑤ tobi_from all のルールでは鍵無しで ok', out.hc_all?.state === 'ok', J(out.hc_all));
   /* ⑥ */
@@ -1717,7 +1781,8 @@ function check(out, lib, say) {
 const SCHEMA = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8').replace(/\r\n/g, '\n');   // 作業木の CRLF（autocrlf）でも壊す字が当たるように
 /* --kari（作り write_2c2a2_tsukuri.md の 6）：khaw に当てる前は 2c-2a2 の列と変えた関数をここで当てる（塊の終わりの例外で全部戻る） */
 const KARI_FN = ['mahjong_private.mj_w_tf0', 'mahjong_private.mj_w_trate', 'mahjong_private.mj_w_tvoid', 'mahjong_private.mj_w_op', 'public.mj_write',
-  'mahjong_private.mj_tobi_ok', 'mahjong_private.mj_w_tobi_fix', 'mahjong_private.mj_w_tstate'];   // E1：当てる前は {r} の形・鍵消し・卓の tobi をここで当てる
+  'mahjong_private.mj_tobi_ok', 'mahjong_private.mj_w_tobi_fix', 'mahjong_private.mj_w_tstate',   // E1：当てる前は {r} の形・鍵消し・卓の tobi をここで当てる
+  'public.mj_read'];   // E2：当てる前は読みの cells・cell_ver を席の数（空いた席は null）でここで当てる
 function KARI() {
   if (!process.argv.includes('--kari')) return '';
   const a = SCHEMA.indexOf('alter table mahjong.hanchans add column if not exists seats_version');
@@ -1817,6 +1882,15 @@ const WAZA = [
   ["E1：{r} の同じ席2回を通す", "mahjong_private.mj_tobi_ok", "or x <= v_prev then", "or x < v_prev then", null, "⑤' {r} の小さい順でない"],
   ["E1：{r} に他の鍵が在っても通す", "mahjong_private.mj_tobi_ok", "jsonb_object_keys(p)) <> 1 then return false;", "jsonb_object_keys(p)) < 1 then return false;", null, "⑤' {r} の小さい順でない"],
   ["E1：{r} の形を通さない", "mahjong_private.mj_tobi_ok", "    return true;\n  end if;", "    return false;\n  end if;", null, "⑤' {r:[0,2]}"],
+  ["E2：始めの門 (a) open を外す", "mahjong_private.mj_w_op", "\n    if v_h2 is not null then", "\n    if false then", null, "⑤'' E2 開いている回が在る卓の始め"],
+  ["E2：始めの門 (b) new を外す", "mahjong_private.mj_w_op", "if v_sn is not null and (select", "if false and (select", null, "⑤'' E2 鎖の回の数＞seen_n"],
+  ["E2：(b) で取り消した回を数えない", "mahjong_private.mj_w_op", "(select pg_catalog.count(*) from mahjong.hanchans x where x.table_id = any(v_ch2)) > v_sn", "(select pg_catalog.count(*) from mahjong.hanchans x where x.table_id = any(v_ch2) and not x.voided) > v_sn", null, "⑤'' E2 取り消した回も鎖の回の数に入る"],
+  ["E2：全部 null の始めを通す", "mahjong_private.mj_w_op", "if v_nc = 0 then", "if false then", null, "⑤'' E2 全部 null"],
+  ["E2：空いた席にも行を作る（値 0）", "mahjong_private.mj_w_op", "if pg_catalog.jsonb_typeof(p_o -> 'cells' -> k) = 'null' then continue; end if;   -- E2 §1：空いた席は行を作らない\n      insert into mahjong.cells (hanchan_id, seat, value, updated_by_user) values (v_id, k, ((p_o -> 'cells' -> k)::numeric)::int, p_me);",
+    "insert into mahjong.cells (hanchan_id, seat, value, updated_by_user) values (v_id, k, coalesce(((p_o -> 'cells' -> k) #>> '{}')::int, 0), p_me);", null, "⑤'' E2 空いた席が null の始め"],
+  ["E2：行の無い席の版1 を入れてしまう", "mahjong_private.mj_w_op", "      if v_bv <> 0 then\n        perform", "      if false then\n        perform", null, "⑤'' E2 行の無い席に版1"],
+  ["E2：読みが空いた席を詰める", "public.mj_read", "left join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s", "join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s", null, "⑤'' E2 mj_read（素の room）"],
+  ["E2：戻す時の門を外す", "mahjong_private.mj_w_op", "\n      if v_h2 is not null then", "\n      if false then", null, "⑤'' E2 点がまだの回を戻す"],
   ["④を残す（飛んだら why tobi で待つ）", "mahjong_private.mj_w_hstate", "    v_st := 'ok'; v_why := null;", "    v_st := case when exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then 'input' else 'ok' end; v_why := case when v_st = 'input' then 'tobi' end;", null, "⑤ 飛んだ席の鍵が無くても ok"],
   ["段1 で tobi_set を捨てる", "mahjong_private.mj_w_op", "update mahjong.hanchans x set tobi_to = v_j, tobi_version = x.tobi_version + 1 where x.id = h.id;", "update mahjong.hanchans x set tobi_to = x.tobi_to where x.id = h.id;", null, "⑤ tobi_set で入れて ok"],
   /* ── ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）── */
