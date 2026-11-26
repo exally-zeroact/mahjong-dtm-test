@@ -1,6 +1,7 @@
 // 点を入れる画面の残り（gamen_nokori_sadame.md）＋アプリの数字鍵盤（gamen_kenban_sadame.md）の自己確認。node gamen_kenban-e2e.cjs <作業木> [--self] [--chromium]
+// ★A17 用（258afa1 の js/kenban.mjs）＝鍵盤の壊し9件を kenban.mjs へ。A17 を入れる push で gamen_kenban-e2e.cjs をこれに差し替える★
 const http = require('http'), fs = require('fs'), path = require('path');
-const pw = require('playwright');
+const pw = require(require.resolve('playwright', { paths: ['C:/Users/zeroa/Exally-test'] }));
 const ROOT = path.resolve(process.argv[2]);
 const SELF = process.argv.includes('--self');
 const MT = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -205,16 +206,16 @@ async function run(br, port) {
     ['多い少ないが逆', 'js/gamen-room.mjs', "(c.got > c.want ? ' 多い' : ' 少ない')", "(c.got > c.want ? ' 少ない' : ' 多い')"],
     ['供託の箱で変わらない', 'js/gamen-room.mjs', '    for (const inp of el.querySelectorAll("[data-c]")) inp.placeholder'.replace(/"/g, String.fromCharCode(39)), '    if (0) inp.placeholder'],
     ['端末の鍵盤を出す', 'js/gamen-room.mjs', '<input class="r-er-v" readonly inputmode="none"', '<input class="r-er-v" inputmode="numeric"'],
-    ['鍵盤を出さない', 'js/gamen-room.mjs', 'kpInp = inp; kpFresh = true; kp.hidden = false;', 'kpInp = inp; kpFresh = true;'],
-    ['最初の数で置き換えない', 'js/gamen-room.mjs', "          if (kpFresh) { if (digits) neg = false; digits = ''; }", ''],
-    ['− の鍵が効かない', 'js/gamen-room.mjs', "        else if (k === 'neg') neg = !neg;", ''],
-    ['⌫ が効かない', 'js/gamen-room.mjs', 'if (digits) digits = digits.slice(0, -1); else neg = false;', 'neg = neg;'],
-    ['↓ が次へ行かない', 'js/gamen-room.mjs', 'if (j >= 0 && j + 1 < bs.length) bs[j + 1].focus(); else kpClose();', 'kpClose();'],
-    ['鍵で focus が外れる', 'js/gamen-room.mjs', "kp.addEventListener('mousedown', (ev) => ev.preventDefault());", ''],
+    ['鍵盤を出さない', 'js/kenban.mjs', 'kp.hidden = false; if (sp)', 'if (sp)'],
+    ['最初の数で置き換えない', 'js/kenban.mjs', "if (fresh) { neg = fresh === 'neg'; ip = ''; fp = null; }", ''],
+    ['− の鍵が効かない', 'js/kenban.mjs', "} else if (key === 'neg') { if (spec.neg) neg = !neg; }", '}'],
+    ['⌫ が効かない', 'js/kenban.mjs', 'else if (ip) ip = ip.slice(0, -1);', 'else if (ip) ip = ip;'],
+    ['↓ が次へ行かない', 'js/kenban.mjs', 'if (j >= 0 && j + 1 < bs.length) bs[j + 1].focus(); else close();', 'close();'],
+    ['鍵で focus が外れる', 'js/kenban.mjs', "kp.addEventListener('mousedown', (ev) => ev.preventDefault());", ''],
     ['勧めの − を半角に戻す', 'js/gamen-room.mjs', "const sugText = (c, i) => (c.sug === i ? boxNum(c.rest)", "const sugText = (c, i) => (c.sug === i ? (c.rest < 0 ? '-' : '') + Math.abs(c.rest).toLocaleString('ja-JP')"],
-    ['鍵盤の − を半角に戻す', 'js/gamen-room.mjs', "kpInp.value = (neg ? '−'", "kpInp.value = (neg ? '-'"],
-    ['下の空きを作らない', 'js/gamen-room.mjs', "q('#eKpSp').hidden = false;", ''],
-    ['机の鍵盤が効かない', 'js/gamen-room.mjs', 'ev.preventDefault(); kpKey(k);', 'return;'],
+    ['鍵盤の − を半角に戻す', 'js/kenban.mjs', "return (neg ? '−' : '')", "return (neg ? '-' : '')"],
+    ['下の空きを作らない', 'js/kenban.mjs', 'kp.hidden = false; if (sp) sp.hidden = false;', 'kp.hidden = false;'],
+    ['机の鍵盤が効かない', 'js/kenban.mjs', 'ev.preventDefault(); press(k);', 'return;'],
     ['鍵の高さ 50', 'css/gamen.css', '.kp button { height: 60px;', '.kp button { height: 50px;'],
     ['対局の押しに＋を戻す', 'js/gamen-room.mjs', `'>' + v.nextNo + '回目の点を入れる</button>'`, `'>＋ ' + v.nextNo + '回目の点を入れる</button>'`],
     ['差に＋を付ける', 'js/gamen-room.mjs', "const diffText = (d) => Math.abs(d).toLocaleString('ja-JP')", 'const diffText = (d) => fmt(d)'],

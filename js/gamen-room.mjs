@@ -41,6 +41,7 @@ import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mj
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { rulesOk } from '../lib/rules.mjs';
 import { mulS } from '../lib/safe-int.mjs'; // A18 §2：画面で掛けない（safe の外は null）
+import { wireKeypad } from './kenban.mjs'; // A17：点の鍵盤も A8 の部品（−→1→0 で −10・入っている数は最初の数で置き換え・他の釦を押しても下の空きを残す）
 
 const WRITE_READY = true; // 2d：倉庫の mj_read が入った（送る所は sendOutbox・直に送るのは開催の始めの startShared だけ）
 const KEY = (uid, rid) => 'mj-room:' + uid + ':' + rid;
@@ -1203,10 +1204,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     el.innerHTML = h;
     wireEdit();
   }
-  // アプリの数字鍵盤（司さん 11-21 夜「iPhoneでもAndroidでもキーボードだしたらよかろが」・定め gamen_kenban_sadame.md）＝端末の鍵盤は出さない（箱は readonly＋inputmode none）
-  //   並び＝端末の大きな数字鍵盤の 1〜9・0・⌫ に − と 000・↓（次の人へ）・✓（閉じる）。字 24px・鍵 60px（2.5）
-  const KP_KEYS = [['1'], ['2'], ['3'], ['bs', '⌫', '1字消す'], ['4'], ['5'], ['6'], ['neg', '−', '＋−を替える'], ['7'], ['8'], ['9'], ['next', '↓', '次の人へ'], ['000'], ['0'], ['ok', '✓', '閉じる']];
-  const KP_HTML = '<div class="kp" id="eKp" role="group" aria-label="数字の鍵盤" hidden>' + KP_KEYS.map(([k, t, a]) => '<button type="button" data-kp="' + k + '"' + (a ? ' aria-label="' + a + '"' : '') + ' class="' + (k === 'next' || k === 'ok' ? 'kp-do' : '') + (k === 'ok' ? ' kp-ok' : '') + '">' + (t || k) + '</button>').join('') + '</div>';
+  // アプリの数字鍵盤（司さん 11-21 夜「iPhoneでもAndroidでもキーボードだしたらよかろが」）＝A17 から js/kenban.mjs（A8）の部品。鍵は箱に入った時に部品が描く
+  //   KP_SPEC＝−あり・小数なし・10桁（A18：±20億 CELL_MAX の外は保存の時に字で弾く）
+  const KP_SPEC = { neg: true, dec: false, max: 10 };
+  const KP_HTML = '<div class="kp" id="eKp" role="group" aria-label="数字の鍵盤" hidden></div>';
   function readCells() {
     for (const inp of el.querySelectorAll('[data-c]')) entry.cells[Number(inp.dataset.c)] = inp.value;
     const lost = el.querySelector('#eLost'); if (lost) entry.lost = lost.value;
@@ -1577,42 +1578,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       inp.addEventListener('blur', () => { const v = toInt(inp.value); if (!Number.isNaN(v)) { inp.value = boxNum(v); readCells(); } });
     }
     if (q('#eLost')) q('#eLost').addEventListener('input', liveUpdate);
-    // 数字鍵盤：今の箱（kpInp）に入った時の最初の数の鍵は中身を置き換える（勧めた残りも打ち直せる）
-    const kp = q('#eKp');
-    if (kp) {
-      let kpInp = null, kpFresh = false;
-      const boxes = () => [...el.querySelectorAll('[data-c]'), ...(q('#eLost') ? [q('#eLost')] : [])];
-      const kpClose = () => { const x = kpInp; kpInp = null; kp.hidden = true; q('#eKpSp').hidden = true; if (x) x.blur(); };
-      const kpKey = (k) => {
-        if (!kpInp) return;
-        if (k === 'ok') return kpClose();
-        if (k === 'next') { const bs = boxes(), j = bs.indexOf(kpInp); if (j >= 0 && j + 1 < bs.length) bs[j + 1].focus(); else kpClose(); return; }
-        const t = kpInp.value.trim();
-        let neg = /^[-−ー－]/.test(t), digits = (neg ? t.slice(1) : t).replace(/[^0-9]/g, '');
-        if (/^[0-9]+$/.test(k)) {
-          if (kpFresh) { if (digits) neg = false; digits = ''; }
-          const d = (digits + k).replace(/^0+(?=d)/, '');
-          if (d.length > 10) return; // A18：10桁まで（9,999,999,999）・±20億（CELL_MAX）の外は保存の時に字で弾く
-          digits = d;
-        } else if (k === 'bs') { if (digits) digits = digits.slice(0, -1); else neg = false; }
-        else if (k === 'neg') neg = !neg;
-        kpFresh = false;
-        kpInp.value = (neg ? '−' : '') + (digits === '' ? '' : Number(digits).toLocaleString('ja-JP'));
-        liveUpdate();
-      };
-      kp.addEventListener('mousedown', (ev) => ev.preventDefault()); // 鍵を押しても箱から focus を外さない
-      for (const b of kp.querySelectorAll('[data-kp]')) b.onclick = () => kpKey(b.dataset.kp);
-      for (const inp of boxes()) {
-        inp.addEventListener('focus', () => { kpInp = inp; kpFresh = true; kp.hidden = false; q('#eKpSp').hidden = false; inp.scrollIntoView({ block: 'nearest' }); });
-        inp.addEventListener('blur', (ev) => { if (kpInp === inp && !boxes().includes(ev.relatedTarget)) kpClose(); });
-        // 机の鍵盤（パソコン）も同じ動き
-        inp.addEventListener('keydown', (ev) => {
-          const k = /^[0-9]$/.test(ev.key) ? ev.key : { '-': 'neg', Backspace: 'bs', Enter: 'next', Escape: 'ok' }[ev.key];
-          if (!k || ev.isComposing) return;
-          ev.preventDefault(); kpKey(k);
-        });
-      }
-    }
+    // 数字鍵盤（A17＝kenban.mjs の wireKeypad）：箱に入った時の最初の数の鍵は中身を置き換える（勧めた残りも打ち直せる）・入ってすぐ − 1 0 は −10
+    if (q('#eKp')) wireKeypad(el, { boxes: () => [...el.querySelectorAll('[data-c]'), ...(q('#eLost') ? [q('#eLost')] : [])], spec: () => KP_SPEC, onChange: liveUpdate });
     if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); const t = tOf(entry.tid); picking = { seats: entry.seats.slice(), tid: entry.tid, n: t ? t.rules.players : n }; entry = null; page = 'pick'; render(); };
     if (q('#eVoid')) q('#eVoid').onclick = () => { const r = commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); if (r && r.msg) { el.querySelector('#eErr').textContent = r.msg; return; } toRoom(); }; // P6g §4：門で止めたら部屋へ戻らず字
     // A13［上家］：押せば印・もう1回で外す。鍵盤が開いていても箱から focus を外さない（鍵盤を閉じない＝頁がずれず押した手が逃げない）

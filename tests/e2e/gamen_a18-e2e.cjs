@@ -1,6 +1,7 @@
 // A18 画面の自己確認（a18_sadame v5 §2・§6）。node gamen_a18-e2e.cjs <作業木> [--chromium|--self]
+// ★A17 用（825acd2）＝鍵盤の桁の上限は KP_SPEC.max へ。A17 を入れる push で gamen_a18-e2e.cjs をこれに差し替える★
 const http = require('http'), fs = require('fs'), path = require('path');
-const pw = require('playwright');
+const pw = require(require.resolve('playwright', { paths: ['C:/Users/zeroa/Exally-test'] }));
 const ROOT = path.resolve(process.argv[2]);
 const SELF = process.argv.includes('--self'), CR = process.argv.includes('--chromium');
 const MT = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -112,7 +113,7 @@ async function run(br, port) {
     ['窓の帯を外す（null を fmt に渡す）', 'js/gamen-room.mjs', '    if (v.bigNg) return', '    if (false) return'],
     ['精算で big を内部の字で出す', 'js/gamen-room.mjs', "s.err === 'big' || d.bigNg ? BIG_TEXT", 'false ? BIG_TEXT'],
     ['精算の門で big を通す', 'js/gamen-room.mjs', 'if (!s.ok || d.bigNg) {', "if (!s.ok && s.err !== 'big') {"],
-    ['鍵盤を6桁に戻す', 'js/gamen-room.mjs', 'if (d.length > 10) return;', 'if (d.length > 6) return;'],
+    ['鍵盤を6桁に戻す', 'js/gamen-room.mjs', 'const KP_SPEC = { neg: true, dec: false, max: 10 };', 'const KP_SPEC = { neg: true, dec: false, max: 6 };'],
     ['rate の字を前に戻す', 'js/gamen-rules.mjs', "'レートは10以上の10の倍数か「なし」です。'", "'レートは10の倍数で 10〜100,000 か「なし」です。'"],
     ['持ち点の字を前に戻す', 'js/gamen-rules.mjs', "'持ち点は 1,000以上の100の倍数です。'", "'持ち点は 1,000〜200,000 の100の倍数です。'"],
   ];
