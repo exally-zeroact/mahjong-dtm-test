@@ -89,7 +89,8 @@ const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 function norm(st0) {
   const st = JSON.parse(J(st0));
   delete st.rules;
-  for (const t of st.tables || []) if (t.rate_mode === 'session') delete t.rate_mode;
+  for (const t of st.tables || []) { if (t.rate_mode === 'session') delete t.rate_mode; delete t.created_at; }   // A20：created_at は倉庫の読みだけ
+  for (const h of st.hanchans || []) delete h.created_at;
   st.extras = (st.extras || []).slice().sort((a, b) => cmp(a.table_id, b.table_id) || cmp(a.kind, b.kind) || cmp(a.member_id, b.member_id));
   for (const s of st.settles || []) delete s.at;
   return st;

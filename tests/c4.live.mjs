@@ -60,7 +60,8 @@ const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 function norm(st0) {
   const st = JSON.parse(J(st0));
   delete st.rules;
-  for (const t of st.tables || []) if (t.rate_mode === 'session') delete t.rate_mode;
+  for (const t of st.tables || []) { if (t.rate_mode === 'session') delete t.rate_mode; delete t.created_at; }   // A20：created_at は倉庫の読みだけ
+  for (const h of st.hanchans || []) delete h.created_at;
   st.extras = (st.extras || []).slice().sort((a, b) => cmp(a.table_id, b.table_id) || cmp(a.kind, b.kind) || cmp(a.member_id, b.member_id));
   for (const s of st.settles || []) delete s.at;
   return st;
@@ -133,9 +134,9 @@ const SCENES = [
     ['h1 を取り消す', [{ op: 'hanchan_void', hanchan_id: H1 }], 'ok'],
     ['区切り（鍵同じ）＝M4 の行も移る', [tr(R2)], 'ok'],
   ]],
+  ['S9 A20 人数違いも区切れる（3人の続きの卓・席は []）', [['players 違い', [tr(full({ players: 3, rate: 100 }))], 'ok']]],
   ['S8 弾き', [
     ['同じ rules は区切らずに ok', [tr(R1)], 'ok'],
-    ['players 違い', [tr(full({ players: 3, rate: 100 }))], 'bad@players'],
     ['new_table_id が UUID でない', [{ ...tr(R2), new_table_id: 'tx' }], 'bad@new_table_id'],
     ['取り消した卓', [{ op: 'table_edit', table_id: T1, voided: true }, tr(R2)], 'bad@table_id'],
   ]],
@@ -205,6 +206,7 @@ function check(o) {
       if (s.name.startsWith('S1') || s.name.startsWith('S7')) ok(`${s.name} mj_read の T1 に next_table_id・split_same true・T2 には無い`, t1 && t1.next_table_id === T2 && t1.split_same === true && t2 && !('next_table_id' in t2) && !('split_same' in t2), J([t1, t2]).slice(0, 400));
       if (s.name.startsWith('S3') || s.name.startsWith('S6')) ok(`${s.name} mj_read の T1 は split_same false`, t1 && t1.next_table_id === T2 && t1.split_same === false, J(t1).slice(0, 300));
       if (s.name.startsWith('S1')) ok('S1 h2 は T2（鎖の最後）・枚は T2 に在り T1 に無い', rd.st.hanchans.find((h) => h.hanchan_id === H2)?.table_id === T2 && !rd.st.extras.some((e) => e.table_id === T1) && rd.st.extras.some((e) => e.table_id === T2 && e.member_id === M[4]), J(rd.st.extras).slice(0, 400));
+      if (s.name.startsWith('S9')) ok('S9 A20 続きの卓は3人・席は []・T1 は4人のまま', t2 && t2.rules && t2.rules.players === 3 && J(t2.seats) === '[]' && t1 && t1.rules.players === 4, J([t1 && t1.rules && t1.rules.players, t2]).slice(0, 400));
       if (s.name.startsWith('S7')) ok('S7 取り消した半荘だけの M4 の行が T2 へ移った', rd.st.extras.some((e) => e.table_id === T2 && e.member_id === M[4] && e.value === 3), J(rd.st.extras).slice(0, 400));
     }
   });
@@ -227,7 +229,7 @@ const brk = (fn, pairs) => {
 };
 const TF = 'mahjong_private.mj_w_tfollow', OP = 'mahjong_private.mj_w_op';
 const WZ = [
-  ['Z1 follow の印を見ない', () => brk(TF, [["if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;", 'null;']]),
+  ['Z1 follow の印を見ない', () => brk(TF, [["and (p_o -> 'follow') is distinct from 'true'::jsonb then\n    perform mahjong_private.mj_w_bad(p_i, 'table_id');", "and false then\n    perform mahjong_private.mj_w_bad(p_i, 'table_id');"]]),
     ['S1 鍵同じ follow 無しの hanchan_start：倉庫']],
   ['Z2 鎖の最後へ運ばない', () => brk(TF, [['  return t;\nend $fn$;', '  return s;\nend $fn$;']]),   // P8 v4：最後でなく始めの卓を返す
     ['S1 鍵同じ 終わりの st', 'S1 h2 は T2']],

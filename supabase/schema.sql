@@ -2116,8 +2116,10 @@ begin
   if p_o ? 'follow' and pg_catalog.jsonb_typeof(p_o -> 'follow') <> 'boolean' then perform mahjong_private.mj_w_bad(p_i, 'follow'); end if;
   if t.next_table_id is null then return t; end if;
   -- A20 §6：follow:false と書いた hanchan_start だけ、区切られた卓にそのまま入れる（押した時に見えていた卓のルール・人数）。鍵が無い・他の op は今まで通り
-  if p_op = 'hanchan_start' and (p_o -> 'follow') = 'false'::jsonb then return t; end if;
-  if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
+  --   入れるのは S だが、最後の卓 L も follow:true と同じ順（S→L）で押さえる＝E2 §5 の open／new の門が同時の hanchan_start と並ぶ
+  if not (p_op = 'hanchan_start' and (p_o -> 'follow') is not distinct from 'false'::jsonb) and (p_o -> 'follow') is distinct from 'true'::jsonb then
+    perform mahjong_private.mj_w_bad(p_i, 'table_id');
+  end if;
   s := t;
   v_h := coalesce(s.chain_head, s.id);
   -- b：最後の卓（鎖の印で1行）を押さえる。押さえた後に next が在る間（同時の区切り）は続きへ進んで押さえ直す
@@ -2128,6 +2130,7 @@ begin
   end loop;
   -- 埋め漏れの守り（通さない側）：S と違う最後なのに段が S より大きくない＝印が壊れている
   if t.id <> s.id and t.chain_no <= s.chain_no then raise exception 'mj_write: 卓の鎖の印が壊れている'; end if;
+  if p_op = 'hanchan_start' and (p_o -> 'follow') is not distinct from 'false'::jsonb then return s; end if;   -- A20 §6：L は押さえた・入れるのは押した時の卓
   -- c：鍵違いは鎖が止まった後に見る（L を押さえた＝S〜L の間の next・split_same はもう変わらない）
   if p_op = 'extra_add' and exists (select 1 from mahjong.tables x where (x.id = v_h or x.chain_head = v_h)
        and x.chain_no >= s.chain_no and x.chain_no < t.chain_no and x.next_table_id is not null and x.split_same is not true) then

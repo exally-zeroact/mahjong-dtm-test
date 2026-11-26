@@ -146,7 +146,7 @@ const PSUM = (key, argsSql) => `
       i := i + 1;
     end loop;
     res := res || jsonb_build_object('${key}', pg);`;
-const BIG_P = 350, BIG_N = 3000;
+const BIG_P = 300, BIG_N = 3000;   // A20：回に created_at（約40字）が付いた＝350×3 は 512KB を越える（[4,1,1]）
 const BIGT = [U(), U(), U(), U()];   // 0..2＝350 半荘・3＝3000 半荘（1卓で天井を越える）
 const SOK_N = 500, SOK_H = 60;       // §3.3 3万半荘
 
