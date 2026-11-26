@@ -43,7 +43,9 @@
       reg.addEventListener('updatefound', function () {
         var w = reg.installing;
         if (w) w.addEventListener('statechange', check);
+        check(); // 知らせが遅れて届くと installing はもう null・waiting に移っている（11-26 3本並べ 600回で 31回）
       });
+      reg.update().then(check, function () {});
       check();
     });
   }
@@ -61,24 +63,28 @@
     };
     if (reg.waiting) { go(reg.waiting); return; }
     show('取り込み中', null);
-    reg.update().catch(function () {});
-    waitInstalled(reg, 30000).then(go);
+    waitInstalled(reg, 30000).then(go); // update は waitInstalled の中（返った後に waiting を見る）
   }
 
   function offerSwap() { show('新しい版があります', '入れ替える', swap); }
+  // 本当に待っている版の時だけ（前の版が動いていて、これがそれと別）。初めての取り込みは installed の知らせが claim の後に届く事がある（webkit）＝controller だけ見ると偽の帯
+  function maybeOffer(reg) {
+    if (reg.waiting && reg.active && reg.waiting !== reg.active && sw.controller && !swapping) offerSwap();
+  }
 
   function watch(reg) {
-    if (reg.waiting && sw.controller) offerSwap();
+    maybeOffer(reg);
     // 画面を開いた時の更新の確かめは register の前に始まる事がある＝もう取り込み中（installing）の物も見る（updatefound を取り逃がさない）
     function track(w) {
       if (!w) return;
       w.addEventListener('statechange', function () {
-        // 本当に待っている版の時だけ（前の版が動いていて、これがそれと別）。初めての取り込みは installed の知らせが claim の後に届く事がある（webkit）＝controller だけ見ると偽の帯
-        if (w.state === 'installed' && reg.active && reg.active !== w && sw.controller && !swapping) offerSwap();
+        // w を見る判じは残す（webkit は reg の欄を遅れて写す＝waiting より先に installed が来る事がある）・maybeOffer は足すだけ
+        if (w.state === 'installed' && reg.active && reg.active !== w && sw.controller && !swapping) offerSwap(); else maybeOffer(reg);
       });
     }
     track(reg.installing);
-    reg.addEventListener('updatefound', function () { track(reg.installing); });
+    // 知らせが遅れて届くと installing はもう null・waiting に移っている＝waiting も見る（11-26 3本並べ 600回で 31回 帯が出なかった）
+    reg.addEventListener('updatefound', function () { track(reg.installing); maybeOffer(reg); });
   }
 
   function verCheck(reg) {
@@ -87,7 +93,7 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
         if (!j || j.ver === PAGE_VER) return;
-        if (reg.waiting) offerSwap(); else reg.update().catch(function () {});
+        if (reg.waiting) maybeOffer(reg); else reg.update().then(function () { maybeOffer(reg); }, function () {});
       })
       .catch(function () {});
   }
@@ -105,7 +111,7 @@
     verCheck(reg);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState !== 'visible') return;
-      reg.update().catch(function () {});
+      reg.update().then(function () { maybeOffer(reg); }, function () {});
       verCheck(reg);
     });
   }).catch(function () {});

@@ -146,6 +146,13 @@ jobs:
         run: |
           node tests/sw.test.mjs --self-test | tee sw-self.out
           sh scripts/ci-yuka.sh sw-self.out 25
+      - name: 帯「新しい版があります」の取りこぼし（sw-reg.js・updatefound が来ないまま waiting が出来る形）
+        run: node tests/sw-reg.test.mjs
+      - name: 帯の取りこぼしの見張りの自己確認（sw-reg.js を6か所壊して全部赤になるか）
+        shell: bash
+        run: |
+          node tests/sw-reg.test.mjs --self-test | tee sw-reg-self.out
+          sh scripts/ci-yuka.sh sw-reg-self.out 6
 
       # ── 計算の道具の画面（早見表・待ち読み）を本物の WebKit で押す ──────
       #   playwright は package.json に入れない（Vercel が devDependencies を入れる）＝ここで --no-save で入れる
