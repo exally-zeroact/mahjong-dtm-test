@@ -50,6 +50,7 @@ async function kpPut(pg, sel, v) {
   await pg.click(sel);
   for (let j = 0; j < 8; j++) await K('bs');
   for (const ch of String(v)) await K(ch === '-' || ch === '−' ? 'neg' : ch === '.' ? 'dot' : ch);
+  await K('ok'); // 人と同じく ✓ で閉じる（開いたままだと下の［部屋を作る］が鍵盤の下に隠れる・CI 45811332647）
 }
 async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
