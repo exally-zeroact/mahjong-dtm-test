@@ -1611,7 +1611,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       }
       picking = null;
       if (only) { toRoom(); return; }
-      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: new Array(t.rules.players).fill(''), lost: '0', marks: [] };
+      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: new Array(t.rules.players).fill(''), lost: '0', marks: [], tobiR: [] }; // E1：［飛び賞］の印（1200 と同じ形・無いと描く所の e.tobiR.includes で落ちる＝CI 45891321404 d2 B4）
       page = 'edit'; render();
     };
   }
