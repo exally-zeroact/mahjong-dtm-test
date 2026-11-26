@@ -272,3 +272,8 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .r-tk-add:disabled { opacity: .5; }
 .lg-play { justify-content: flex-end; }
 .lg-play .btn-s { display: inline-flex; align-items: center; text-decoration: none; }
+/* C2-0 ［これは私］（c20_sadame v2.1） */
+.r-me-tag { margin-left: 4px; padding: 0 4px; font-size: 11px; font-weight: 700; border: 1px solid currentColor; border-radius: 4px; }
+.r-me { display: flex; align-items: center; gap: 8px; margin: 4px 4px 8px; font-size: 14px; }
+.r-me .btn-s { margin-left: auto; }
+.r-cand button:disabled { color: var(--c-ji-usui); }

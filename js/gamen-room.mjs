@@ -146,6 +146,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let ruleNote = null;    // C4 §3：開いていた卓が区切られて鎖の最後へ移った時の帯（次に書くまで出す）
   let ruleMsg = null;     // C4 §2：［次の回からこのルールにする］が通らなかった時の帯（ルールの頁）
   let ruleCtl = null;     // ルールの頁の打てる形（読み直しで描き直す時に打ちかけを残す）
+  let meBusy = false, meOp = null, meMsg = null; // C2-0（c20_sadame v2.1）［これは私］の直送（返りが切れた時は同じ組だけ同じ op_id）
   let ruleBusy = false, ruleOp = null, pendingRule = null; // table_rules の直送（返りが切れた時は同じ op_id）・並びを送り切ってから送る続き
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
@@ -687,6 +688,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (prefill && openPrefill()) return;
     if (page === 'edit') return renderEdit();
     if (page === 'pick') return renderPick();
+    if (page === 'me') return renderMe();
     if (page === 'seisan') return renderSeisan();
     if (page === 'rules') return renderRules();
     // ［点数］＝点数計算（記録しない道具・tensu.html）へ。卓のルールを ?r= に、戻り先を ?from= に渡す（tensu.js の頭の取り決め）
@@ -1107,14 +1109,109 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     return { count: hs.length, last };
   }
   function histNames() { return load(NAMES(uid), []).filter((nm) => !st.members.some((m) => m.name_key === nameKey(nm))); }
+  /* ── C2-0（c20_sadame v2.1）［これは私］＝部屋の名簿の1人を自分のアカウントにつなぐ（op member_link・直送・並びに積まない）──
+   * me・taken は倉庫の読み（mj_read の members）が付ける印。押せるのは終えていない部屋で、端末だけの写しでない時だけ */
+  const myMember = () => st.members.find((m) => m.me === true && m.active) || null;
+  const meOk = () => !room.closed && !st.needs_upload;
+  function meHtml() {
+    if (!meOk()) return '';
+    const me = myMember();
+    const msg = meMsg && page === 'pick' ? '<p class="err" id="pMeErr">' + esc(meMsg) + '</p>' : '';
+    if (!me) return '<div class="r-white" id="pMeBand"><b>この部屋のあなたの名前を選ぶと、あなたの戦績に入ります</b><button class="btn btn-line btn-s" id="pMeGo">あなたの名前を選ぶ</button></div>' + msg;
+    return '<p class="r-me" id="pMeLine">あなた＝<b>' + esc(me.name) + '</b><button class="btn btn-line btn-s" id="pMeGo">変える</button></p>' + msg;
+  }
+  function meBack() { meMsg = null; page = picking ? 'pick' : 'room'; render(); }
+  function renderMe() {
+    if (!meOk()) { meBack(); return; }
+    bar({ back: picking ? '人を選ぶ' : '対局', onBack: meBack, title: 'あなたの名前' });
+    const me = myMember();
+    const others = st.members.filter((m) => m.active && m !== me);
+    let h = '<p class="sec">' + (me ? 'あなた＝' + esc(me.name) + '・別の名前を押すと付け替える' : 'この部屋の名簿で、あなたの名前を押す') + '</p>';
+    if (others.length) {
+      h += '<div class="r-cand" id="meList">' + others.map((m) => {
+        const lock = m.taken === true && !!me; // S1：me が在る間は他の人の名前を押せない（押すと M が外れて名乗りだけになる）
+        const sub = m.taken === true ? (lock ? 'ほかの人がつないでいます。付け替えは部屋の管に頼んでください' : 'ほかの人がつないでいます（押すと名乗りが残ります）') : 'これは私';
+        return '<button data-me="' + esc(m.member_id) + '"' + (lock || meBusy ? ' disabled' : '') + '><span>' + esc(m.name) + '</span><small>' + sub + '</small></button>';
+      }).join('') + '</div>';
+      if (me) h += '<p class="r-hint" id="meWarn">' + esc(me.name) + 'の半荘はあなたの戦績から外れ、選んだ名前の半荘が入ります。</p>';
+    } else h += '<p class="r-hint">名簿にほかの名前がありません。</p>';
+    h += '<p class="sec">名簿にいない時</p><label class="r-in"><span>名前</span><input id="meNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
+    h += '<button class="btn btn-main" id="meNewGo"' + (meBusy ? ' disabled' : '') + '>足して、これは私</button>';
+    h += '<p class="err" id="meErr">' + esc(meMsg || '') + '</p>';
+    el.innerHTML = h;
+    for (const b of el.querySelectorAll('#meList [data-me]')) b.onclick = () => mePick(b.dataset.me);
+    el.querySelector('#meNewGo').onclick = () => meNew(el.querySelector('#meNew').value.trim());
+  }
+  function meDraw() { if (page === 'me') renderMe(); else if (page === 'pick') renderPick(); }
+  function mePick(mid) {
+    const x = st.members.find((m) => m.member_id === mid && m.active);
+    if (!x) return;
+    const me = myMember();
+    if (me && x.taken === true) return; // 押せない形（古い画面でも送らない）
+    sendMe((me ? [{ op: 'member_unlink', member_id: me.member_id }] : []).concat([{ op: 'member_link', member_id: mid }]), { mid, name: x.name });
+  }
+  function meNew(nm) {
+    const key = nameKey(nm || '');
+    if (!nm || [...nm].length > 20 || !key) { meMsg = '名前は1〜20字です。'; meDraw(); return; }
+    if (st.members.some((m) => m.active && m.name_key === key)) { meMsg = '同じ名前が名簿にいます。上の一覧から選んでください。'; meDraw(); return; }
+    const id = meOp && meOp.addKey === key ? meOp.addId : uuid(); // 返りが切れた後の押し直しは同じ id（同じ組＝同じ op_id）
+    const me = myMember();
+    sendMe((me ? [{ op: 'member_unlink', member_id: me.member_id }] : []).concat([{ op: 'member_add', member_id: id, name: nm }, { op: 'member_link', member_id: id }]), { mid: id, name: nm, addKey: key, add: true });
+  }
+  async function sendMe(ops, t) {
+    if (meBusy || dead) return;
+    const say = (m) => { meMsg = m; meDraw(); };
+    if (stopped) return say('今は書き込めません（上の帯を見てください）。');
+    if (writeBlocked()) return say('この部屋は終わりました（終えています）。名前は選べません。');
+    if (heldInfo(outbox)) return say('止まっている書き込みがあります。先にそちらを片付けてください。');
+    flushMerge(true, true);
+    if (outbox.length || merge.size) { kick(); return say('前に入れた点を送っています。送れたら、もう一度押してください。'); }
+    if (offline()) return say('電波がつながってから選べます。');
+    if (lane) return say('読み込み中です。少し待ってもう一度押してください。');
+    const key = JSON.stringify(ops);
+    if (!meOp || meOp.key !== key) meOp = { key, op_id: uuid(), addKey: t.addKey, addId: t.add ? t.mid : undefined };
+    const opId = meOp.op_id;
+    lane = true; meBusy = true; meMsg = null; meDraw();
+    let res;
+    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: opId, p_ops: ops }); }
+    catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
+    lane = false; meBusy = false;
+    if (dead) return;
+    const d = res && res.data;
+    const s = outboxStep(res);
+    if (s.kind !== 'retry') meOp = null;
+    if (s.kind === 'done') {
+      aizuOut(d);
+      const a = applyOps(st, ops, aopts({ direct: true, role: room.role }));
+      if (a.ok) { st = a.state; save(KEYR, st); }
+      const rs = d && Array.isArray(d.results) ? d.results : [];
+      const last = rs[rs.length - 1];
+      if (last && last.claimed === true) { meMsg = '『' + t.name + '』はほかの人がつないでいます。部屋の管に付け替えを頼んでください（名乗りを残しました）'; sync(); meDraw(); return; }
+      for (const m of st.members) { if (m.member_id === t.mid) { m.me = true; delete m.taken; } else if (m.me === true) delete m.me; }
+      save(KEYR, st);
+      if (picking && t.add && picking.seats.length < picking.n && !picking.seats.includes(t.mid)) picking.seats.push(t.mid); // 足した自分はこの半荘に入れる
+      meMsg = null; page = picking ? 'pick' : 'room'; sync(); render(); return;
+    }
+    if (s.kind === 'login') { loginStop(s.err); return; }
+    if (s.kind === 'reload') { goneStop(); return; }
+    if (s.kind === 'closed') { roomInfo({ closed: true }); render(); return; }
+    if (s.kind === 'retry') return say(s.err === 'busy' ? '混んでいます。1分待ってもう一度押してください。' : 'つながりませんでした。電波を確かめてもう一度押してください。');
+    const me = myMember();
+    if (s.err === 'taken') { sync(); return say('『' + t.name + '』は今ほかの人がつなぎました。' + (me ? 'あなたの名前は' + me.name + 'のままです。' : '')); }
+    if (s.err === 'linked') { sync(); return say('あなたは別の名前につながっていました。読み直しました。もう一度選んでください。'); }
+    if (s.err === 'dup') { sync(); return say('同じ名前が名簿にいます。上の一覧から選んでください。'); }
+    if (s.err === 'full' && typeof s.what === 'string' && s.what.startsWith('member_claims')) return say('名乗りがいっぱいです（管に付け替えを頼んでください）');
+    if (s.err === 'mj_role') sync();
+    return say(errText({ err: s.err, what: s.what, at: s.at }, 'write'));
+  }
   function renderPick() {
     bar({ back: '対局', onBack: toRoom, title: '人を選ぶ' });
     const p = picking;
     const n = p.n; // D2 止め2：開いた時の卓の人数（読み直しで今の卓が替わっても）
     const act = st.members.filter((m) => m.active);
     const hist = histNames();
-    let h = '<div id="pBase">';
-    if (act.length) h += '<p class="sec">この部屋の人（名簿）・この半荘の' + n + '人を押す　<b class="kon">' + p.seats.length + '／' + n + '</b></p><div class="chips">' + act.map((m) => '<button data-pick="' + esc(m.member_id) + '" aria-pressed="' + p.seats.includes(m.member_id) + '">' + esc(m.name) + '</button>').join('') + '</div>';
+    let h = meHtml() + '<div id="pBase">';
+    if (act.length) h += '<p class="sec">この部屋の人（名簿）・この半荘の' + n + '人を押す　<b class="kon">' + p.seats.length + '／' + n + '</b></p><div class="chips">' + act.map((m) => '<button data-pick="' + esc(m.member_id) + '" aria-pressed="' + p.seats.includes(m.member_id) + '">' + esc(m.name) + (m.me === true ? '<small class="r-me-tag">あなた</small>' : '') + '</button>').join('') + '</div>';
     if (hist.length) h += '<p class="sec">この端末で前に使った名前（ほかの部屋）</p><div class="chips">' + hist.map((nm) => '<button data-hist="' + esc(nm) + '">' + esc(nm) + '</button>').join('') + '</div>';
     if (act.length || hist.length) h += '<p class="r-hint">押すだけでこの半荘に入る。ほかの部屋の名前を押すと、この部屋の名簿にも足される。</p>';
     h += '</div><p class="sec">新しい人</p><label class="r-in"><span>名前</span><input id="pNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
@@ -1146,7 +1243,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       let h = '<p class="sec">候補（押すとその人がこの半荘に入る）</p><div class="r-cand">';
       h += fromRoom.map((m) => '<button data-pick="' + esc(m.member_id) + '"><span>' + esc(m.name) + '</span><small>この部屋の人・半荘 ' + memberStats(m.member_id).count + '回</small></button>').join('');
       h += fromHist.map((nm) => '<button data-hist="' + esc(nm) + '"><span>' + esc(nm) + '</span><small>この端末で前に使った</small></button>').join('');
-      h += '<button data-new="1"><span>' + esc(typed) + '</span><small>新しい人で足す</small></button></div>';
+      h += '<button data-new="1"><span>' + esc(typed) + '</span><small>新しい人で足す</small></button>';
+      if (meOk() && !myMember()) h += '<button data-newme="1"' + (meBusy ? ' disabled' : '') + '><span>' + esc(typed) + '</span><small>新しい人で足す（これは私）</small></button>';
+      h += '</div>';
       h += '<p class="r-hint">打った字の頭で探す。</p>';
       box.innerHTML = h;
     }
@@ -1596,6 +1695,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     inp.addEventListener('input', drawCand);
     inp.addEventListener('compositionend', drawCand);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { const b = q('[data-new]') || q('#pSame'); if (b) b.click(); } });
+    if (q('#pMeGo')) q('#pMeGo').onclick = () => { meMsg = null; page = 'me'; render(); };
     for (const b of q('#pBase').querySelectorAll('[data-pick]')) b.onclick = () => { if (seat(b.dataset.pick)) renderPick(); };
     for (const b of q('#pBase').querySelectorAll('[data-hist]')) b.onclick = () => { const r = addMember(b.dataset.hist); pickDone(r.mid || r.dup); };
     q('#pGo').onclick = () => {
@@ -1621,6 +1721,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     for (const b of box.querySelectorAll('[data-hist]')) b.onclick = () => { const r = addMember(b.dataset.hist); pickDone(r.mid || r.dup); };
     const nb = box.querySelector('[data-new]');
     if (nb) nb.onclick = () => { const r = addMember(q('#pNew').value.trim()); if (r.err) { q('#pErr').textContent = r.err; return; } pickDone(r.mid || r.dup); };
+    const nm = box.querySelector('[data-newme]');
+    if (nm) nm.onclick = () => meNew(q('#pNew').value.trim());
     if (q('#pSame')) q('#pSame').onclick = () => pickDone(q('#pSame').dataset.m);
     if (q('#pOther')) q('#pOther').onclick = () => { const i = q('#pNew'); i.value = q('#pOther').dataset.n + '2'; drawCand(); i.focus(); };
   }
