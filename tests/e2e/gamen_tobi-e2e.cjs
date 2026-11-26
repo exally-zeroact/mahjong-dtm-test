@@ -34,7 +34,7 @@ const srv = http.createServer((q, r) => {
   const f = path.join(ROOT, u.replace(/^\/+/, ''));
   if (!f.startsWith(ROOT) || !fs.existsSync(f)) { r.writeHead(404); r.end(); return; }
   let b = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
-  if (mutate && f.endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); }
+  for (const m of mutate || []) if (f.endsWith(m.file)) { if (!b.includes(m.from)) { console.log('✗ 壊しの字が無い ' + m.from); process.exit(2); } b = b.replace(m.from, m.to); }
   r.writeHead(200, { 'content-type': MT[path.extname(f)] || 'text/plain' }); r.end(b);
 });
 async function run(br, port) {
@@ -166,13 +166,14 @@ async function run(br, port) {
     ['並べずに保存', 'js/gamen-room.mjs', 'const tobiRSorted = (a) => [...new Set(a)].sort((x, y) => x - y);', 'const tobiRSorted = (a) => [...new Set(a)];'],
     ['直す時に tobi_set を送らない', 'js/gamen-room.mjs', 'if (tobiBtnOn() && canon(tobiRSorted(e.tobiR)) !== canon(tobiRSorted(h.tobiR))) ops.push(', 'if (false) ops.push('],
     ['直す頁で押した人を戻さない', 'js/gamen-room.mjs', 'const tobiROf = (t) => (t && Array.isArray(t.r) ? t.r.filter((x) => Number.isInteger(x)) : []);', 'const tobiROf = (t) => [];'],
-    // 窓に飛び賞の行を戻す は外した：画面の KINDS だけ戻しても lib の used.tobi=false と tobiPt10=null で行は出ない＝1か所の壊しでは見分けられない（CI 45900985090 で 0）。窓に無いことは G が見る
+    // 窓に飛び賞の行を戻す＝E1 を戻す形：画面の KINDS（js/gamen-room.mjs:835）だけでは lib の used.tobi=false・tobiPt10=null（lib/room-state.mjs:1049-1050）と画面の !v.used[kind]（js/gamen-room.mjs:852）で行が出ない＝3か所を一緒に戻す（CI 45900985090 で KINDS だけは緑のまま）
+    ['窓に飛び賞の行を戻す', 'js/gamen-room.mjs', "{ kind: 'yaki', label: 'やきとり' }];", "{ kind: 'yaki', label: 'やきとり' }, { kind: 'tobi', label: '飛び賞' }];", [['lib/room-state.mjs', 'yaki: yakiUsed(R), tobi: false };', 'yaki: yakiUsed(R), tobi: true };'], ['lib/room-state.mjs', 'const tobiPt10 = null;', 'const tobiPt10 = 10;']]],
     ['釦を出す所を消す', 'js/gamen-room.mjs', "'</span>' + (tb ? '<button type=\"button\" class=\"r-kam r-tobi\"", "'</span>' + (false ? '<button type=\"button\" class=\"r-kam r-tobi\""],
     ['pt の字を戻す', 'js/gamen-room.mjs', "'の素点\"></div>').join('') + '</div>';", "'の素点\"><span class=\"r-er-p\" data-p=\"' + i + '\">+0.0</span></div>').join('') + '</div>';"],
   ];
   let red = 0;
-  for (const [nm, file, from, to] of W) {
-    mutate = { file: file.replace(/\//g, path.sep), from, to };
+  for (const [nm, file, from, to, more] of W) {
+    mutate = [[file, from, to], ...(more || [])].map(([fl, fr, t]) => ({ file: fl.replace(/\//g, path.sep), from: fr, to: t }));
     const r = await run(br, port);
     console.log((r.fail ? '✓ 赤 ' : '✗ 緑のまま ') + nm + '（' + r.fail + '）');
     if (r.fail) red++;

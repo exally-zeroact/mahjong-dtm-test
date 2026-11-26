@@ -246,7 +246,7 @@ jobs:
           - { name: a15g, script: tests/e2e/gamen_a15g-e2e.cjs, yuka: 13 }
           - { name: a18, script: tests/e2e/gamen_a18-e2e.cjs, yuka: 6 }
           - { name: 32b_yaki, script: tests/e2e/gamen_32b_yaki-e2e.cjs, yuka: 8 }
-          - { name: tobi, script: tests/e2e/gamen_tobi-e2e.cjs, yuka: 9 }   # 窓の行の壊しは1か所では見分けられない＝外した（台本の注）
+          - { name: tobi, script: tests/e2e/gamen_tobi-e2e.cjs, yuka: 10 }
           - { name: b1, script: tests/e2e/gamen_b1-e2e.cjs, yuka: 10 }
           - { name: kenban, script: tests/e2e/gamen_kenban-e2e.cjs, yuka: 8 }
           - { name: c4, script: tests/e2e/gamen_c4-e2e.cjs, yuka: 16 }
