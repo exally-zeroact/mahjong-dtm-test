@@ -40,7 +40,7 @@ const srv = http.createServer((q, r) => {
 async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
   const ok = (name, c, info) => { if (c) pass++; else { fail++; bad.push(name + (info !== undefined ? '  ' + JSON.stringify(info) : '')); } };
-  const open = async (qs) => { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000); await pg.goto(`http://127.0.0.1:${port}/__h.html?${qs}`); await pg.waitForSelector('body[data-ready="1"]', { state: 'attached' }); return { pg, ctx }; };
+  const open = async (qs) => { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000); pg.on('pageerror', (e) => console.log('✗ 頁の例外 ' + String(e.message || e).slice(0, 300))); await pg.goto(`http://127.0.0.1:${port}/__h.html?${qs}`); await pg.waitForSelector('body[data-ready="1"]', { state: 'attached' }); return { pg, ctx }; };
   const all = (pg, s) => pg.evaluate((x) => [...document.querySelectorAll(x)].map((e) => e.textContent).join('|'), s);
   const toNum = (s) => Math.round(Number(String(s).replace('−', '-').replace(/[+,]/g, '')) * 10);
   const hs = (pg) => pg.evaluate(() => JSON.parse(localStorage.getItem('mj-room:u1:r1')).hanchans);

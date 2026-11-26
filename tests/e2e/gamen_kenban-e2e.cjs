@@ -48,7 +48,7 @@ async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
   const ok = (name, c, info) => { if (c) pass++; else { fail++; bad.push(name + (info !== undefined ? '  ' + JSON.stringify(info) : '')); } };
   const ctx = await br.newContext({ viewport: { width: 390, height: 844 } });
-  const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000);
+  const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000); pg.on('pageerror', (e) => console.log('✗ 頁の例外 ' + String(e.message || e).slice(0, 300)));
   const open = async (qs) => { await pg.goto(`http://127.0.0.1:${port}/__h.html?${qs}`); await pg.waitForSelector('body[data-ready="1"]'); const e = await pg.getAttribute('body', 'data-err'); if (e) throw new Error('台の op が弾かれた ' + e); };
   const heads = () => pg.$$eval('.r-hyou thead .r-nm', (xs) => xs.map((x) => x.textContent));
   try {
