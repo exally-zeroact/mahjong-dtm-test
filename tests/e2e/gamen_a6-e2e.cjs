@@ -593,7 +593,7 @@ async function run(br, port) {
       const h4 = await goHomePage(B.pg);
       ok('V9a 描き直した後（他の部屋を戻した）も v9 の行と字が残る・v9 のカード無し', m4.bands.some((x) => x.rid === 'v9' && /戻せませんでした/.test(x.e || '')) && !h4.cards.includes('v9') && h4.cards.includes('v9o'), [m3, m4, h4]);
       mkRoom('v9n'); mkRoom('v9m');
-      const C = await device('V9C', 'u1', seedOf('u1', [rowOf('v9m', 'u1', 8, { deleted_at: ago(60e3) }), rowOf('v9n', 'u1', 9, { deleted_at: ago(2 * 60e3) })]));
+      const C = await device('V9C', 'u1', seedOf('u1', [rowOf('v9n', 'u1', 9, { deleted_at: ago(2 * 60e3) }), rowOf('v9m', 'u1', 8, { deleted_at: ago(60e3) })]));
       DB.get('v9n').deleted_at = ago(2 * 60e3); DB.get('v9m').deleted_at = ago(60e3);
       ctl('V9C').by['mj_my_rooms:deleted'] = { force: [{ __http: 0 }, { __http: 0 }, { __http: 0 }] };
       const c1 = await modosu(C.pg);
