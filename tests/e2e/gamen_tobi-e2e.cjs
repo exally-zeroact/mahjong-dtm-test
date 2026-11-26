@@ -17,7 +17,8 @@ if (n === 3) { R.start_pts = 45000; R.return_pts = 50000; }
 const mem = ['m1', 'm2', 'm3', 'm4'].slice(0, n), nm = ['山田', '鈴木', '佐藤', '高橋'];
 let st = emptyState(); st.rules = R;
 const ops = [...mem.map((m, i) => ({ op: 'member_add', member_id: m, name: nm[i] })),
-  { op: 'session_add', session_id: 's1', date: '2026-11-26', rate: 50 }, { op: 'table_add', table_id: 't1', session_id: 's1', label: '卓1' }];
+  { op: 'session_add', session_id: 's1', date: '2026-11-26', rate: 50 }, { op: 'table_add', table_id: 't1', session_id: 's1', label: '卓1' },
+  { op: 'table_seats', table_id: 't1', seats: mem }]; // 卓の席は倉庫の t.seats（mj-seats は画面が始めに消す＝:164・半荘の無い台は席を選ぶ頁へ行って [data-c] が出ない＝CI 45891321404 tobi）
 if (p.get('ex') === '1') ops.push({ op: 'hanchan_start', hanchan_id: 'h0', table_id: 't1', seats: mem, cells: [50000, 30000, 25000, -5000] }, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'tobi', add: 1 }, { op: 'extra_add', table_id: 't1', member_id: 'm4', kind: 'tobi', add: -1 });
 const r = applyOps(st, ops, { roomRules: R, now: '2026-11-26T00:00:00Z' });
 if (!r.ok) document.body.dataset.err = JSON.stringify(r.res || r);
