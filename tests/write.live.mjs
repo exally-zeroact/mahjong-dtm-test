@@ -450,6 +450,24 @@ const body = `
   ${st8('d_ok', `update mahjong.hanchans set tobi_to = '{"3":"all"}'::jsonb where id = '${HA2}';`)}
   res := res || jsonb_build_object('fn_arr', mahjong_private.mj_tobi_ok('[]'::jsonb, 4::smallint), 'fn_null', mahjong_private.mj_tobi_ok('{"0":null}'::jsonb, 4::smallint),
     'fn_ok', mahjong_private.mj_tobi_ok('{"0":1,"2":"all"}'::jsonb, 4::smallint), 'fn_3p', mahjong_private.mj_tobi_ok('{"0":3}'::jsonb, 3::smallint));
+  /* ⑤' E1（e_sadame v2 §E1-6）押した人の形 {"r":[席…]}＝小さい順・同じ席1回・0〜players−1・鍵は r だけ・[] も可・点を直しても変えない */
+  ${W('tr', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [0, 2] }, base_version: tv(HA2) })))}
+  ${ROW('tr_row', HR(HA2))}
+  ${W('tr_un', 2, 'ra', A(cs(HA2, 3, 10000), cs(HA2, 0, 40000)))}
+  ${W('tr_re', 2, 'ra', A(cs(HA2, 3, -10000), cs(HA2, 0, 60000)))}
+  ${ROW('tr_re_row', HR(HA2))}
+  ${W('tr_unsorted', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [2, 0] }, base_version: tv(HA2) })))}
+  ${W('tr_dup', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [0, 0] }, base_version: tv(HA2) })))}
+  ${W('tr_out', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [4] }, base_version: tv(HA2) })))}
+  ${W('tr_neg', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [-1] }, base_version: tv(HA2) })))}
+  ${W('tr_frac', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [0.5] }, base_version: tv(HA2) })))}
+  ${W('tr_str', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: ['0'] }, base_version: tv(HA2) })))}
+  ${W('tr_notarr', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: 0 }, base_version: tv(HA2) })))}
+  ${W('tr_x', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [0], 3: 0 }, base_version: tv(HA2) })))}
+  ${W('tr_empty', 2, 'ra', A(O('tobi_set', { hanchan_id: HA2, tobi_to: { r: [] }, base_version: tv(HA2) })))}
+  ${ROW('tr_empty_row', HR(HA2))}
+  res := res || jsonb_build_object('fr_3all', mahjong_private.mj_tobi_ok('{"r":[0,1,2]}'::jsonb, 3::smallint), 'fr_3out', mahjong_private.mj_tobi_ok('{"r":[3]}'::jsonb, 3::smallint),
+    'fr_4all', mahjong_private.mj_tobi_ok('{"r":[0,1,2,3]}'::jsonb, 4::smallint));
 
   /* ⑥ そろった後 */
   ${RS}
@@ -1323,6 +1341,11 @@ function check(out, lib, say) {
   ok('⑤ 表へ直に配列・自分の席 → 23514・"all" は通る', out.d_arr === '23514' && out.d_self === '23514' && out.d_ok === 'none', J([out.d_arr, out.d_self, out.d_ok]));
   ok('⑤ mj_tobi_ok：配列 false・null false・{"0":1,"2":"all"} true・3人で受け取り3 false', out.fn_arr === false && out.fn_null === false && out.fn_ok === true && out.fn_3p === false,
     J([out.fn_arr, out.fn_null, out.fn_ok, out.fn_3p]));
+  ok("⑤' {r:[0,2]} → ok・tobi_to はそのまま・版+1", isOk('tr') && J(out.tr_row?.tobi) === J({ r: [0, 2] }) && out.tr_row.state === 'ok', J([R('tr'), out.tr_row]));
+  ok("⑤' {r} の形は点を直して飛び直しても変えない（鍵消し無し・版そのまま）", isOk('tr_un') && isOk('tr_re') && J(out.tr_re_row?.tobi) === J({ r: [0, 2] }) && out.tr_re_row.tv === out.tr_row?.tv, J([R('tr_re'), out.tr_row, out.tr_re_row]));
+  ok("⑤' {r} の小さい順でない・同じ席2回・players 外・負・小数・字・配列でない・r 以外の鍵 → bad at tobi_to", ['tr_unsorted', 'tr_dup', 'tr_out', 'tr_neg', 'tr_frac', 'tr_str', 'tr_notarr', 'tr_x'].every((k) => isErr(k, 'bad', { at: 'tobi_to' })), J(['tr_unsorted', 'tr_dup', 'tr_out', 'tr_neg', 'tr_frac', 'tr_str', 'tr_notarr', 'tr_x'].map(R)));
+  ok("⑤' {r:[]}（誰も押していない）→ ok", isOk('tr_empty') && J(out.tr_empty_row?.tobi) === J({ r: [] }), J([R('tr_empty'), out.tr_empty_row]));
+  ok("⑤' mj_tobi_ok：3人 [0,1,2] true・3人 [3] false・4人 [0,1,2,3] true", out.fr_3all === true && out.fr_3out === false && out.fr_4all === true, J([out.fr_3all, out.fr_3out, out.fr_4all]));
   ok('⑤ tobi_from all のルールでは鍵無しで ok', out.hc_all?.state === 'ok', J(out.hc_all));
   /* ⑥ */
   ok('⑥ ok の半荘を cell_set → changed_after_complete_at・changed_by_user', out.c1_row?.ch === true && out.c1_row.cb === u[1], J(out.c1_row));
@@ -1373,12 +1396,12 @@ function check(out, lib, say) {
   ok('⑬ yakitori false の卓：yaki → bad at kind', isOk('y7a') && isErr('y7b', 'bad', { at: 'kind' }), J([R('y7a'), R('y7b'), out.y7_err]));
   /* ⑯ B2 段1 飛び賞＝extras の種 'tobi'（倉庫だけ） */
   ok('⑯ 卓の用意（ルール tobi true・pt 10・yakitori true・tane_custom）→ ok', isOk('ob5a'), J([R('ob5a'), out.ob5_err]));
-  ok("⑯ tobi +3 → ok・卓は ng・理由 'tobi'・行の合計 3", isOk('ob5b') && tk('ob5b_t', 'ng', 'tobi', false) && Number(out.ob5b_x) === 3, J([R('ob5b'), out.ob5b_t, out.ob5b_x]));
-  ok('⑯ tobi −3 で合計0 → ok・理由 null・一度そろった', isOk('ob5c') && tk('ob5c_t', 'ok', null, true), J([R('ob5c'), out.ob5c_t]));
-  ok("⑯ yaki・tobi・c:ko が全部 ng → 理由は 'yaki'（順 yaki → tobi → c:）", isOk('ob5d') && tk('ob5d_t', 'ng', 'yaki', false), J([R('ob5d'), out.ob5d_t]));
-  ok("⑯ yaki がそろって tobi・c:ko が ng → 理由 'tobi'（tobi が c: より先）", isOk('ob5e') && tk('ob5e_t', 'ng', 'tobi', false), J([R('ob5e'), out.ob5e_t]));
+  ok("⑯ tobi +3 → ok・行の合計 3・E1：卓は ok（種 tobi の行は数えない）", isOk('ob5b') && tk('ob5b_t', 'ok', null, false) && Number(out.ob5b_x) === 3, J([R('ob5b'), out.ob5b_t, out.ob5b_x]));
+  ok('⑯ tobi −3 で合計0 → ok・理由 null・E1：tobi の行だけでは一度そろったにしない', isOk('ob5c') && tk('ob5c_t', 'ok', null, false), J([R('ob5c'), out.ob5c_t]));
+  ok("⑯ yaki・tobi・c:ko が全部 ng → 理由は 'yaki'", isOk('ob5d') && tk('ob5d_t', 'ng', 'yaki', false), J([R('ob5d'), out.ob5d_t]));
+  ok("⑯ yaki がそろって tobi・c:ko が残る → E1：理由 'c:ko'（tobi は数えない）", isOk('ob5e') && tk('ob5e_t', 'ng', 'c:ko', false), J([R('ob5e'), out.ob5e_t]));
   ok("⑯ tobi もそろって c:ko だけ ng → 理由 'c:ko'", isOk('ob5f') && tk('ob5f_t', 'ng', 'c:ko', false), J([R('ob5f'), out.ob5f_t]));
-  ok("⑯ extra_set の tobi 2 → ok・卓は ng 理由 'tobi'", isOk('ob5g') && tk('ob5g_t', 'ng', 'tobi', true), J([R('ob5g'), out.ob5g_t]));
+  ok("⑯ extra_set の tobi 2 → ok・E1：卓は ok のまま", isOk('ob5g') && tk('ob5g_t', 'ok', null, false), J([R('ob5g'), out.ob5g_t]));
   ok('⑯ pt 0 の卓（tobi true）：tobi の extra_add・extra_set → bad at kind・行0（黙って0円にしない）', isOk('ob6a') && isErr('ob6b', 'bad', { at: 'kind' }) && isErr('ob6c', 'bad', { at: 'kind' }) && Number(out.ob6_x) === 0, J([R('ob6a'), R('ob6b'), R('ob6c'), out.ob6_x, out.ob6_err]));
   ok('⑯ tobi false の卓：tobi → bad at kind', isOk('ob7a') && isErr('ob7b', 'bad', { at: 'kind' }), J([R('ob7a'), R('ob7b'), out.ob7_err]));
   /* ⑰ B1 卓の席 op table_seats */
@@ -1693,7 +1716,8 @@ function check(out, lib, say) {
  *   壊した回りは「狙った試験（want の字で始まる名）」が ✗ になった時だけ ✓（よその試験の赤では数えない＝狙いの外れを見逃さない）。 */
 const SCHEMA = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8').replace(/\r\n/g, '\n');   // 作業木の CRLF（autocrlf）でも壊す字が当たるように
 /* --kari（作り write_2c2a2_tsukuri.md の 6）：khaw に当てる前は 2c-2a2 の列と変えた関数をここで当てる（塊の終わりの例外で全部戻る） */
-const KARI_FN = ['mahjong_private.mj_w_tf0', 'mahjong_private.mj_w_trate', 'mahjong_private.mj_w_tvoid', 'mahjong_private.mj_w_op', 'public.mj_write'];
+const KARI_FN = ['mahjong_private.mj_w_tf0', 'mahjong_private.mj_w_trate', 'mahjong_private.mj_w_tvoid', 'mahjong_private.mj_w_op', 'public.mj_write',
+  'mahjong_private.mj_tobi_ok', 'mahjong_private.mj_w_tobi_fix', 'mahjong_private.mj_w_tstate'];   // E1：当てる前は {r} の形・鍵消し・卓の tobi をここで当てる
 function KARI() {
   if (!process.argv.includes('--kari')) return '';
   const a = SCHEMA.indexOf('alter table mahjong.hanchans add column if not exists seats_version');
@@ -1789,8 +1813,10 @@ const WAZA = [
   /* ── B2 段1 飛び賞＝extras の種 tobi（tobi_chip_v3.md）── */
   ["tobi の pt を見ない（pt 0 も使う）", "mahjong_private.mj_w_tobi_used", ">= 1 else false end", ">= 0 else false end", null, "⑯ pt 0 の卓"],
   ["tobi を使わない卓でも通す", "mahjong_private.mj_w_kind", "return case when mahjong_private.mj_w_tobi_used(p_rules) then 'sum0' end;", "return 'sum0';", null, "⑯ tobi false の卓"],
-  ["tstate が tobi を数えない", "mahjong_private.mj_w_tstate", "then v_sum0 := array['tobi'] || v_sum0;", "then v_sum0 := v_sum0;", null, "⑯ tobi +3"],
-  ["理由の順を c: → tobi に", "mahjong_private.mj_w_tstate", "array['tobi'] || v_sum0", "v_sum0 || array['tobi']", null, "⑯ yaki がそろって tobi・c:ko が ng"],
+  ["E1：tstate がまた tobi を数える", "mahjong_private.mj_w_tstate", "  -- E1（e_sadame v2 §E1-7）", "  if mahjong_private.mj_w_tobi_used(rs) then v_sum0 := array['tobi'] || v_sum0; end if;\n  --", null, "⑯ tobi +3"],
+  ["E1：{r} の同じ席2回を通す", "mahjong_private.mj_tobi_ok", "or x <= v_prev then", "or x < v_prev then", null, "⑤' {r} の小さい順でない"],
+  ["E1：{r} に他の鍵が在っても通す", "mahjong_private.mj_tobi_ok", "jsonb_object_keys(p)) <> 1 then return false;", "jsonb_object_keys(p)) < 1 then return false;", null, "⑤' {r} の小さい順でない"],
+  ["E1：{r} の形を通さない", "mahjong_private.mj_tobi_ok", "    return true;\n  end if;", "    return false;\n  end if;", null, "⑤' {r:[0,2]}"],
   ["④を残す（飛んだら why tobi で待つ）", "mahjong_private.mj_w_hstate", "    v_st := 'ok'; v_why := null;", "    v_st := case when exists (select 1 from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) where not (h.tobi_to ? (t.v::text))) then 'input' else 'ok' end; v_why := case when v_st = 'input' then 'tobi' end;", null, "⑤ 飛んだ席の鍵が無くても ok"],
   ["段1 で tobi_set を捨てる", "mahjong_private.mj_w_op", "update mahjong.hanchans x set tobi_to = v_j, tobi_version = x.tobi_version + 1 where x.id = h.id;", "update mahjong.hanchans x set tobi_to = x.tobi_to where x.id = h.id;", null, "⑤ tobi_set で入れて ok"],
   /* ── ⑰ B1 卓の席 op table_seats（b1_sadame_v2.md v2.1）── */

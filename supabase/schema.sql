@@ -1966,13 +1966,27 @@ update mahjong.tables t set chain_head = case when c.no = 0 then null else c.hea
 --   （その時 tests/db-checks.live.mjs:66-67・tests/sweep.live.mjs:79・mj_sweep の tobi の数えも一緒に直す）。
 
 -- 飛び賞の形（CHECK と mj_write が同じ物を呼ぶ）：object・鍵は '0'〜players−1・値は鍵と違う 0〜players−1 の整数か "all"
+--   E1（e_sadame v2 §E1-6）：新しい形 {"r":[席…]}＝鍵は r だけ・値は 0〜players−1 の整数の配列・小さい順・同じ席は1回（[] も可）＝押した人がもらう
+--   古い鍵の形（テスト線だけ）もそのまま通す（lib は押していないと読む）
 create or replace function mahjong_private.mj_tobi_ok(p jsonb, p_players smallint) returns boolean
 language plpgsql immutable set search_path = '' as $fn$
 declare
-  e record; k int; x numeric;
+  e record; k int; x numeric; v_prev int;
 begin
   if p is null or pg_catalog.jsonb_typeof(p) <> 'object' then return false; end if;
   if p_players is null or p_players not in (3, 4) then return false; end if;
+  if p ? 'r' then
+    if (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p)) <> 1 then return false; end if;
+    if pg_catalog.jsonb_typeof(p -> 'r') <> 'array' then return false; end if;
+    v_prev := -1;
+    for e in select t.value from pg_catalog.jsonb_array_elements(p -> 'r') with ordinality t(value, n) order by t.n loop
+      if pg_catalog.jsonb_typeof(e.value) <> 'number' then return false; end if;
+      x := e.value::numeric;
+      if x % 1 <> 0 or x < 0 or x >= p_players or x <= v_prev then return false; end if;
+      v_prev := x::int;
+    end loop;
+    return true;
+  end if;
   for e in select t.key, t.value from pg_catalog.jsonb_each(p) t loop
     if e.key !~ '^[0-3]$' then return false; end if;
     k := e.key::int;
@@ -2183,6 +2197,7 @@ begin
   select x.* into h from mahjong.hanchans x where x.id = p_hid for update;
   if not found then return 0; end if;
   if h.voided then return 0; end if;
+  if h.tobi_to ? 'r' then return 0; end if;  -- E1 §E1-6：押した人の形は点を直しても変えない
   v_new := h.tobi_to;
   for s in select t.v from pg_catalog.jsonb_array_elements(mahjong_private.mj_w_busted(p_hid)) t(v) loop
     if not (coalesce(p_b0, '[]'::jsonb) @> pg_catalog.jsonb_build_array(s)) and v_new ? (s::text) then
@@ -2307,8 +2322,7 @@ begin
                      case when pg_catalog.jsonb_typeof(rs -> 'tane_custom') = 'array' then rs -> 'tane_custom' else '[]'::jsonb end) with ordinality q(e, n)
                    where q.e -> 'sum0' is distinct from 'false'::jsonb order by q.n);
   -- 2c-3c'：使うやきとりは合計0の種の先頭（reason の順＝yaki → c:<id>）
-  -- B2 段1：使う飛び賞も合計0の種（reason の順＝yaki → tobi → c:<id>）
-  if mahjong_private.mj_w_tobi_used(rs) then v_sum0 := array['tobi'] || v_sum0; end if;
+  -- E1（e_sadame v2 §E1-7）：飛び賞は半荘の［飛び賞］釦（tobi_to {r}）＝種 'tobi' の行は受けるが数えない（ng にしない・そろったにも入れない）
   if mahjong_private.mj_w_yaki_used(rs) then v_sum0 := array['yaki'] || v_sum0; end if;
   select u.k into v_why from pg_catalog.unnest(v_sum0) with ordinality u(k, n)
    where coalesce((select pg_catalog.sum(e.value) from mahjong.extras e where e.table_id = p_tid and e.kind = u.k), 0) <> 0
@@ -2326,7 +2340,7 @@ end $fn$;
 revoke all on function mahjong_private.mj_w_tstate(uuid) from public, anon, authenticated;
 -- 流し込み（2c-2a1・何回流しても同じ）：既存の卓の state を出し直し、そろっていれば first_complete_at を入れる
 do $fl$ begin
-  perform mahjong_private.mj_w_tstate(t.id) from mahjong.tables t where t.first_complete_at is null;
+  perform mahjong_private.mj_w_tstate(t.id) from mahjong.tables t where t.first_complete_at is null or t.extra_reason = 'tobi';
 end $fl$;
 
 -- そろった後に変えた印（ok になった事のある半荘か、前の組で締めた開催日の半荘を変えた時）
