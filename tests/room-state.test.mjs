@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  emptyState, applyOp, applyOps, tableView, sessionSeisan, checkEntry, pickSession, sessionSig,
+  emptyState, applyOp, applyOps, tableView, hanchanView, tobiShapeOk, sessionSeisan, checkEntry, pickSession, sessionSig,
   migrateState, tobiSetOp, roomGate, tableRate, tenChanged, sessionBreakdown, canon, NEWER_TEXT, gateText, OP_NAMES, OPS_MAX, CELL_MAX, LOST_MAX, EXTRA_MAX,
   kindOf, yakiUsed, tobiUsed, readArgs, sessionOfRef, tableChain, followT, chainView, PERSON_OPS, LEAGUE_OPS, WHO, WHO_LEAGUE, ROLE_AT_GATE, RE, needOf, reauthOk, REAUTH_SEC, KEYS_OF,
 } from '../lib/room-state.mjs';
@@ -755,73 +755,61 @@ console.log('■ ③-2 やきとり（extras の yaki）・合計0の自由な�
   ok('レートの無い卓の場代＝outPt10NoRate（m1 30）・out は空', nrs.ok && J(nrs.outPt10NoRate) === J({ m1: 30 }) && J(nrs.out) === '{}', J(nrs));
 }
 
-console.log('■ B2 飛び賞＝extras の種 tobi（チップと同じ ±・合計0・tobi_chip_v3.md）');
+console.log('■ E1（A19）飛び賞＝半荘の pt に入る・押した人がもらう（tobi_to {r}・e_sadame v2 §E1・手で数えた値）');
 {
-  // 既定の rules＝tobi true・tobi_pt 10（1枚＝100 pt10）・開催のレート 100＝点は pt10×10
+  // 既定の rules＝tobi true・tobi_pt 10（1回＝100 pt10）・開催のレート 100＝点は pt10×10・CB の素の pt＝[600,100,−200,−500]
   const C0 = [40000, 30000, 20000, 10000], CB = [55000, 30000, 20000, -5000];
   const X = (m, kind, value) => ({ table_id: 't1', member_id: m, kind, value, version: 1 });
   const mk = (R, xs, cells = CB, extra = {}) => { const st = applyOps(base(R), [hs('h1', cells, extra)]).state; st.extras.push(...xs); return st; };
   const W = (v, m) => v.windows.find((w) => w.member_id === m);
-  const p0 = tableView(mk(rules, []), 't1'), s0 = sessionSeisan(mk(rules, []), 's1');
-  ok('前：飛んだ半荘も ok で why null・行が無いと半荘の pt だけ（hanchanPt と同じ＝m1 600・m2 100・m3 −200・m4 −500）', p0.rows[0].ok && p0.rows[0].why === null && W(p0, 'm1').pt10 === W(p0, 'm1').hanPt10 && J(SEATS.map((m) => p0.rows[0].by[m].pt10)) === J([600, 100, -200, -500]) && J(hanchanPt(rules, CB, { order: [0, 1, 2, 3] }).pt10) === J([600, 100, -200, -500]), J(p0.rows[0]));
-  const st = mk(rules, [X('m1', 'tobi', 1), X('m4', 'tobi', -1), X('m2', 'chip', 2), X('m3', 'chip', -2), X('m6', 'tobi', 0)]);
-  const v = tableView(st, 't1');
-  ok('窓：tobi 枚・pt10・点（m1 1枚＝100・点 1000／m4 −100）・半荘の pt は同じ', W(v, 'm1').tobi === 1 && W(v, 'm1').tobiPt10 === 100 && W(v, 'm1').tobiBig === 1000 && W(v, 'm4').tobiPt10 === -100 && W(v, 'm1').hanPt10 === W(p0, 'm1').hanPt10, J(W(v, 'm1')));
-  ok('窓：pt10＝半荘＋チップ＋飛び賞（m1 +100・m2 +40・m3 −40・m4 −100）・0 の行の m6 は出ない', W(v, 'm1').pt10 === W(p0, 'm1').pt10 + 100 && W(v, 'm2').pt10 === W(p0, 'm2').pt10 + 40 && W(v, 'm3').pt10 === W(p0, 'm3').pt10 - 40 && W(v, 'm4').pt10 === W(p0, 'm4').pt10 - 100 && !W(v, 'm6'));
-  ok('used.tobi・tobiSum 0・tobiHint なし・tableForSeisan に tobi_pt10 100 と tobis', v.used.tobi && v.tobiSum === 0 && v.tobiHint === false && v.tableForSeisan.tobi_pt10 === 100 && J(v.tableForSeisan.tobis) === J({ m1: 1, m4: -1, m6: 0 }) && v.tableForSeisan.hanchans.every((h) => !('tobi10' in h)));
-  const s = sessionSeisan(st, 's1');
-  ok('開催の精算：ten＝半荘＋チップ＋飛び賞の点（m1 +1000・m4 −1000）・合計0', s.ok && s.ten.m1 === s0.ten.m1 + 1000 && s.ten.m2 === s0.ten.m2 + 400 && s.ten.m4 === s0.ten.m4 - 1000 && Object.values(s.ten).reduce((a, b) => a + b, 0) === 0, J(s.ten));
-  const bd = sessionBreakdown(st, 's1');
-  ok('内訳：m1 tobi 1・tobi10 100／m4 −1・−100・used.tobi', bd.by.m1.tobi === 1 && bd.by.m1.tobi10 === 100 && bd.by.m4.tobi === -1 && bd.by.m4.tobi10 === -100 && bd.used.tobi === true, J(bd.by.m1));
-  ok('内訳：Σkei×r/10 ＝ 精算の ten（飛び賞込み）', Object.keys(s.ten).every((m) => Object.entries(bd.by[m].kei).reduce((a, [r, k]) => a + k * (Number(r) / 10), 0) === s.ten[m]), J(bd.by));
-  // ★壊し★：tobi_to の受け取りが在っても行と二重に数えない（お金は行だけ）
-  const two = mk(rules, [X('m1', 'tobi', 1), X('m4', 'tobi', -1)], CB, { tobi_to: { 3: 0 } });
-  ok('壊し：tobi_to と行を二重に数えない（tobi_to が在っても無くても同じ pt）', ['m1', 'm2', 'm3', 'm4'].every((m) => W(tableView(two, 't1'), m).pt10 === W(v, m).pt10 - (W(v, m).chipPt10 || 0)), J(tableView(two, 't1').windows));
-  ok('壊し：tobi_to だけ在って行が無い＝飛び賞は入らない（半荘の pt に足さない）', W(tableView(mk(rules, [], CB, { tobi_to: { 3: 0 } }), 't1'), 'm1').pt10 === W(p0, 'm1').pt10);
-  // 合計≠0＝ng
-  const ng = tableView(mk(rules, [X('m1', 'tobi', 2), X('m4', 'tobi', -1)]), 't1');
-  ok('合計が 0 でない＝extrasOk false・missing {what tobi, diff 1}・額を足さない・dim', !ng.extrasOk && J(ng.missing.filter((m) => m.what)) === J([{ what: 'tobi', diff: 1 }]) && W(ng, 'm1').pt10 === W(p0, 'm1').pt10 && ng.windows.every((w) => w.dim) && ng.tableForSeisan.tobis === undefined, J(ng.missing));
-  const ng2 = tableView(mk({ ...rules, yakitori: true, yakitori_pt: 1, tane_custom: [{ id: 'ko', name: 'コイン', pt10: 5, sum0: true }] }, [X('m1', 'chip', 1), X('m1', 'yaki', 1), X('m1', 'tobi', 1), X('m1', 'c:ko', 1), X('m1', 'shugi', 1)]), 't1');
-  ok('missing の並び＝chip → shugi → yaki → tobi → c:', J(ng2.missing.filter((m) => m.what).map((m) => m.what)) === J(['chip', 'shugi', 'yaki', 'tobi', 'c:ko']), J(ng2.missing));
-  // 使わない卓（tobi false・pt 0）
-  for (const [nm, R] of [['tobi false', { ...rules, tobi: false }], ['tobi_pt 0', { ...rules, tobi_pt: 0 }]]) {
-    const off = tableView(mk(R, [X('m1', 'tobi', 2), X('m5', 'tobi', 1)]), 't1');
-    const pOff = tableView(mk(R, []), 't1');
-    ok('壊し：' + nm + ' の卓の tobi 行は数えない（missing 無し・pt 同じ・tobi 0・tobi_pt10 null）が 0 でない行の人は出す（m5）', !off.used.tobi && off.extrasOk && !off.missing.some((m) => m.what) && W(off, 'm1').pt10 === W(pOff, 'm1').pt10 && W(off, 'm1').tobi === 0 && off.tableForSeisan.tobi_pt10 === null && off.tableForSeisan.tobis === undefined && !!W(off, 'm5') && off.tobiHint === false);
-  }
-  // 壊し：tobi を yakitori_pt で数えない
-  const yk = tableView(mk({ ...rules, yakitori: true, yakitori_pt: 3, tobi_pt: 7 }, [X('m1', 'tobi', 1), X('m4', 'tobi', -1)]), 't1');
-  ok('壊し：tobi は tobi_pt で数える（yakitori_pt 3 でなく 7＝70）・yaki は 0', W(yk, 'm1').tobiPt10 === 70 && W(yk, 'm1').yakiPt10 === 0, J(W(yk, 'm1')));
-  // kindOf・tobiUsed
-  const kt = [
-    [{ tobi: true, tobi_pt: 10 }, 'sum0'], [{ tobi: true, tobi_pt: 1 }, 'sum0'], [{ tobi: true, tobi_pt: 0 }, null], [{ tobi: false, tobi_pt: 10 }, null],
-    [{ tobi: 'true', tobi_pt: 10 }, null], [{ tobi: true, tobi_pt: '10' }, null], [{ tobi: true, tobi_pt: 1.5 }, null], [{ tobi: true }, null], [{}, null], [null, null], [undefined, null],
-  ];
-  ok('kindOf の tobi＝tobi true かつ pt ≥1 の整数だけ sum0（' + kt.length + ' 通り）・tobiUsed と同じ', kt.every(([r, w]) => kindOf(r, 'tobi') === w && tobiUsed(r) === (w === 'sum0')), J(kt.map(([r, w], i) => (kindOf(r, 'tobi') === w ? null : i)).filter((x) => x !== null)));
-  const ea = (R, add) => applyOp(applyOps(base(R), [hs('h1', C0)]).state, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'tobi', add });
-  ok('extra_add tobi：使う卓は入る・pt 0／false の卓は bad at kind', ea(rules, 1).ok && [ea({ ...rules, tobi_pt: 0 }, 1), ea({ ...rules, tobi: false }, 1)].every((r) => r.err === 'bad' && r.at === 'kind'));
-  ok('門：extras に tobi の行が在っても newer にならない（EXTRA_KINDS に tobi）', roomGate(st, rules).mode !== 'newer', J(roomGate(st, rules)));
-  // tobiHint
-  ok('tobiHint：飛んだ半荘が在り tobi の行が無い＝true（止めない＝extrasOk true・missing 無し）', p0.tobiHint === true && p0.extrasOk && !p0.missing.length);
-  ok('tobiHint：行が全部0でも true', tableView(mk(rules, [X('m1', 'tobi', 0)]), 't1').tobiHint === true);
-  ok('tobiHint：飛んでいない卓は false', tableView(mk(rules, [], C0), 't1').tobiHint === false);
-  ok('tobiHint：tobi_zero なら 0 ちょうども飛び（bustedSeats と同じ）', tableView(mk({ ...rules, tobi_zero: true }, [], [60000, 30000, 10000, 0]), 't1').tobiHint === true && tableView(mk({ ...rules, tobi_zero: false }, [], [60000, 30000, 10000, 0]), 't1').tobiHint === false);
-  ok('tobiHint：tobi_from all の卓も出す', tableView(mk({ ...rules, tobi_from: 'all' }, []), 't1').tobiHint === true);
-  ok('tobiHint：取り消した半荘だけなら false', (() => { const x = applyOps(mk(rules, []), [{ op: 'hanchan_void', hanchan_id: 'h1' }]).state; return tableView(x, 't1').tobiHint === false; })());
-  // 写しが tobi_set を受けて★お金に★何もしない（版+1 は今のまま）
-  const ts = mk(rules, [X('m1', 'tobi', 1), X('m4', 'tobi', -1)]);
-  const before = J(sessionSeisan(ts, 's1'));
-  const tr = applyOp(ts, { op: 'tobi_set', hanchan_id: 'h1', tobi_to: { 3: 'all' }, base_version: 1 });
-  ok('tobi_set を受ける＝ok・tobi_version+1・精算は1字も変わらない', tr.ok && H(ts, 'h1').tobi_version === 2 && J(sessionSeisan(ts, 's1')) === before);
-  // 乱数の卓：tobi 込みで合計0・Σkei＝ten
-  let bad = 0;
+  const P = (v) => SEATS.map((m) => v.rows[0].by[m].pt10);
+  const v0 = tableView(mk(rules, []), 't1');
+  ok('押していない＝素の pt のまま（hanchanPt と同じ）・待たない・ok', v0.rows[0].ok && J(P(v0)) === J([600, 100, -200, -500]) && v0.missing.length === 0);
+  const v1 = tableView(mk(rules, [], CB, { tobi_to: { r: [0] } }), 't1');
+  ok('席0を押す＝半荘の pt [700,100,−200,−600]・basePt10・tobiPt10 も行に', J(P(v1)) === J([700, 100, -200, -600]) && v1.rows[0].by.m1.basePt10 === 600 && v1.rows[0].by.m1.tobiPt10 === 100 && v1.rows[0].by.m4.tobiPt10 === -100, J(P(v1)));
+  ok('窓：m1 pt10 700・点 7000・hanPt10 700（飛び賞は半荘に入る）・tobi 0', W(v1, 'm1').pt10 === 700 && W(v1, 'm1').big === 7000 && W(v1, 'm1').hanPt10 === 700 && W(v1, 'm1').tobi === 0 && W(v1, 'm1').tobiPt10 === 0);
+  const s1 = sessionSeisan(mk(rules, [], CB, { tobi_to: { r: [0] } }), 's1');
+  ok('開催の精算：ten m1 7000・m4 −6000・合計0', s1.ok && s1.ten.m1 === 7000 && s1.ten.m4 === -6000 && Object.values(s1.ten).reduce((x, y) => x + y, 0) === 0, J(s1.ten));
+  const b1 = sessionBreakdown(mk(rules, [], CB, { tobi_to: { r: [0] } }), 's1');
+  ok('内訳：m1 han 700（飛び賞込み）・tobi10 0・used.tobi false（二重にしない）', b1.by.m1.han === 700 && b1.by.m1.tobi10 === 0 && b1.used.tobi === false);
+  const v2 = tableView(mk(rules, [], CB, { tobi_to: { r: [0, 1] } }), 't1');
+  ok('席0,1を押す＝[700,200,−200,−700]（2人目にも払う）', J(P(v2)) === J([700, 200, -200, -700]), J(P(v2)));
+  ok('古い鍵の形 {3:0}＝押していない＝素の pt', J(P(tableView(mk(rules, [], CB, { tobi_to: { 3: 0 } }), 't1'))) === J([600, 100, -200, -500]));
+  ok('tobi_from all＝押さなくても全員から [700,200,−100,−800]', J(P(tableView(mk({ ...rules, tobi_from: 'all' }, []), 't1'))) === J([700, 200, -100, -800]));
+  ok('飛んでいない半荘で押す＝0（C0 の素の pt）', J(P(tableView(mk(rules, [], C0, { tobi_to: { r: [0] } }), 't1'))) === J(P(tableView(mk(rules, [], C0), 't1'))));
+  ok('tobi false の卓は押しても 0', J(P(tableView(mk({ ...rules, tobi: false }, [], CB, { tobi_to: { r: [0] } }), 't1'))) === J(P(tableView(mk({ ...rules, tobi: false }, []), 't1'))));
+  // 古い種 tobi の行（テスト線だけ）＝数えない・門で弾かない
+  const old = mk(rules, [X('m1', 'tobi', 2), X('m4', 'tobi', -1), X('m6', 'tobi', 3)]);
+  const vo = tableView(old, 't1');
+  ok('古い種 tobi の行は数えない＝精算は行が無い時と同じ・extrasOk・missing 無し・m6 を人に足さない', J(sessionSeisan(old, 's1')) === J(sessionSeisan(mk(rules, []), 's1')) && vo.extrasOk && vo.missing.length === 0 && !vo.people.some((p) => p.member_id === 'm6') && W(vo, 'm1').tobi === 0);
+  ok('tableForSeisan に tobi_pt10・tobis が無い・used.tobi false・tobiHint・tobiSum が無い', !('tobis' in vo.tableForSeisan) && !('tobi_pt10' in vo.tableForSeisan) && vo.used.tobi === false && !('tobiHint' in vo) && !('tobiSum' in vo));
+  ok('門：古い種 tobi の行が在っても newer にならない', roomGate(old, rules).mode !== 'newer');
+  // 形と op
+  for (const [nm, t, want] of [['{r:[0]}', { r: [0] }, true], ['{r:[]}', { r: [] }, true], ['{r:[1,3]}', { r: [1, 3] }, true], ['r と鍵を混ぜる', { r: [0], 3: 0 }, false], ['昇順でない', { r: [1, 0] }, false], ['重なり', { r: [2, 2] }, false], ['席の外', { r: [4] }, false], ['字', { r: ['0'] }, false], ['配列でない', { r: 1 }, false], ['古い鍵の形', { 3: 0 }, true], ['{}', {}, true]]) ok('tobiShapeOk ' + nm + ' ＝' + want, tobiShapeOk(t, 4) === want);
+  const st = mk(rules, []);
+  const r1 = applyOp(st, { op: 'tobi_set', hanchan_id: 'h1', tobi_to: { r: [0, 2] }, base_version: 1 });
+  ok('tobi_set {r} を受ける＝版+1・pt に入る', r1.ok && H(st, 'h1').tobi_version === 2 && J(P(tableView(st, 't1'))) === J([700, 100, -100, -700]), J(r1));
+  ok('tobi_set の形が違う＝bad at tobi_to', applyOp(mk(rules, []), { op: 'tobi_set', hanchan_id: 'h1', tobi_to: { r: [2, 0] }, base_version: 1 }).at === 'tobi_to');
+  ok('hanchan_start の tobi_to {r} の形が違う＝bad', applyOps(base(), [hs('h1', CB, { tobi_to: { r: [9] } })]).res.at === 'tobi_to');
+  // 点を直しても {r} は変えない（倉庫の mj_w_tobi_fix と同じ・鍵消しは古い形だけ）
+  const k0 = applyOps(base(), [hs('h1', C0, { tobi_to: { r: [0] } })]).state;
+  const k1 = applyOps(k0, [{ op: 'cell_set', hanchan_id: 'h1', seat: 3, value: -5000, base_version: 1 }, { op: 'cell_set', hanchan_id: 'h1', seat: 0, value: 55000, base_version: 1 }]);
+  ok('点を直して飛んでも {r} はそのまま・版も上げない・pt に入る', k1.ok && J(H(k1.state, 'h1').tobi_to) === J({ r: [0] }) && H(k1.state, 'h1').tobi_version === 1 && J(P(tableView(k1.state, 't1'))) === J([700, 100, -200, -600]), J(k1.res));
+  // 倉庫に違う形が置かれた時＝その半荘は why tobi_to（お金に入れない）
+  const bad = mk(rules, []); H(bad, 'h1').tobi_to = { r: [3, 1] };
+  const vb = tableView(bad, 't1');
+  ok('置かれた形が違う＝ok でない・why tobi_to・missing に出る', !vb.rows[0].ok && vb.rows[0].why === 'tobi_to' && vb.missing.some((m) => m.why === 'tobi_to'));
+  // 乱数の卓：押した組み合わせで合計0・Σkei×r/10＝ten
+  let badN = 0;
   for (let i = 0; i < 300; i++) {
-    const a = ((i * 7919) % 9) - 4, b = ((i * 104729) % 7) - 3;
-    const r = mk({ ...rules, tobi_pt: 1 + (i % 30) }, [X('m1', 'tobi', a), X('m2', 'tobi', b), X('m3', 'tobi', -a - b), X('m4', 'chip', i % 5), X('m1', 'chip', -(i % 5))], i % 2 ? CB : C0);
-    const sr = sessionSeisan(r, 's1'), br = sessionBreakdown(r, 's1');
-    if (!sr.ok || Object.values(sr.ten).reduce((x, y) => x + y, 0) !== 0 || !Object.keys(sr.ten).every((m) => Object.entries(br.by[m].kei).reduce((x, [rt, k]) => x + k * (Number(rt) / 10), 0) === sr.ten[m])) bad++;
+    const rr = [0, 1, 2, 3].filter((s) => (i >> s) & 1);
+    const cells = i % 3 === 0 ? C0 : i % 3 === 1 ? CB : [70000, 50000, -5000, -15000];
+    const R = { ...rules, tobi_pt: 1 + (i % 30), hakoshita: true, tobi_zero: i % 2 === 0 };
+    const r = mk(R, [X('m4', 'chip', i % 5), X('m1', 'chip', -(i % 5))], cells, { tobi_to: { r: rr } });
+    const sr = sessionSeisan(r, 's1'), br = sessionBreakdown(r, 's1'), hv = hanchanView(R, H(r, 'h1'));
+    if (!sr.ok || !hv.ok || hv.pt10.reduce((x, y) => x + y, 0) !== 0 || Object.values(sr.ten).reduce((x, y) => x + y, 0) !== 0 || !Object.keys(sr.ten).every((m) => Object.entries(br.by[m].kei).reduce((x, [rt, k]) => x + k * (Number(rt) / 10), 0) === sr.ten[m])) badN++;
   }
-  ok('300 の卓で合計0・Σkei×r/10＝ten（外れ ' + bad + '）', bad === 0);
+  ok('300 の卓で合計0・Σkei×r/10＝ten（外れ ' + badN + '）', badN === 0);
 }
 
 console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本＝schema.sql の mj_write ①・③ダッシュ・③ダッシュ2・mj_w_op 末尾・紙 write4_utsushi.md v1.1）');
