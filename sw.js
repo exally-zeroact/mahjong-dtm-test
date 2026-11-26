@@ -8,10 +8,10 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'c4221acb6e99';
+const VER = '5f97e2bd7bdd';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
-  ['/css/gamen.css', '2333a31cf42ffb37998f9105741ff07b5894abfee2a3fd3dcc16a8dde1c6e117'],
+  ['/css/gamen.css', '9f64c91331245c370b4e478a7670dd7c597a77be0a703098f87f9f770d7db26c'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
@@ -22,7 +22,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-core.mjs', 'fbe7f7c79396341df6839d6886cc449236b11c6d63927cb405c5c9e238703bb8'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
   ['/js/gamen-league.mjs', '86f2babd576ea697ab64c975be5325bdb4ddf29aca8759ccab87c0f8df10f86b'],
-  ['/js/gamen-room.mjs', 'fd3cd914f9812ae104c3506b6cb75d267975ae03b474f670af40d456bac6ce67'],
+  ['/js/gamen-room.mjs', '56a297e713f54d59771df80dc85d6c7d8da227f7b22d56029bab2d4f6bbb7a34'],
   ['/js/gamen-rules.mjs', 'cb30b4f4be5e34150f863b85ba29fc47e654a89a8338b626e73461e31b9a60f8'],
   ['/js/gamen-taikyoku.mjs', 'b722639d7f84545aff9121236222bcd7d106f25776825eff9cc6f23b72b727d8'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],

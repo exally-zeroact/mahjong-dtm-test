@@ -146,7 +146,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let ruleNote = null;    // C4 §3：開いていた卓が区切られて鎖の最後へ移った時の帯（次に書くまで出す）
   let ruleMsg = null;     // C4 §2：［次の回からこのルールにする］が通らなかった時の帯（ルールの頁）
   let ruleCtl = null;     // ルールの頁の打てる形（読み直しで描き直す時に打ちかけを残す）
-  let meBusy = false, meOp = null, meMsg = null; // C2-0（c20_sadame v2.1）［これは私］の直送（返りが切れた時は同じ組だけ同じ op_id）
+  let meBusy = false, meOp = null, meMsg = null, meRead = false; // C2-0（c20_sadame v2.1）［これは私］の直送（返りが切れた時は同じ組だけ同じ op_id）
   let ruleBusy = false, ruleOp = null, pendingRule = null; // table_rules の直送（返りが切れた時は同じ op_id）・並びを送り切ってから送る続き
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
@@ -476,6 +476,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const ln = loadNote;
     const k = takeRead(res);
     if (k === 'ok' || ln !== loadNote) rerender(); else refreshTag(); // P5：「読み込み中」の帯が立った・消えた時も描き直す
+    if (meRead) { meRead = false; if (page === 'me') renderMe(); } // C2-0：taken・linked・dup の後の読み直しで名前の頁を描き直す（打ちかけの名前は残す）
     kick();
   }
 
@@ -1124,6 +1125,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function renderMe() {
     if (!meOk()) { meBack(); return; }
     bar({ back: picking ? '人を選ぶ' : '対局', onBack: meBack, title: 'あなたの名前' });
+    const typed = el.querySelector('#meNew') ? el.querySelector('#meNew').value : '';
     const me = myMember();
     const others = st.members.filter((m) => m.active && m !== me);
     let h = '<p class="sec">' + (me ? 'あなた＝' + esc(me.name) + '・別の名前を押すと付け替える' : 'この部屋の名簿で、あなたの名前を押す') + '</p>';
@@ -1139,6 +1141,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     h += '<button class="btn btn-main" id="meNewGo"' + (meBusy ? ' disabled' : '') + '>足して、これは私</button>';
     h += '<p class="err" id="meErr">' + esc(meMsg || '') + '</p>';
     el.innerHTML = h;
+    el.querySelector('#meNew').value = typed;
     for (const b of el.querySelectorAll('#meList [data-me]')) b.onclick = () => mePick(b.dataset.me);
     el.querySelector('#meNewGo').onclick = () => meNew(el.querySelector('#meNew').value.trim());
   }
@@ -1197,9 +1200,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (s.kind === 'closed') { roomInfo({ closed: true }); render(); return; }
     if (s.kind === 'retry') return say(s.err === 'busy' ? '混んでいます。1分待ってもう一度押してください。' : 'つながりませんでした。電波を確かめてもう一度押してください。');
     const me = myMember();
-    if (s.err === 'taken') { sync(); return say('『' + t.name + '』は今ほかの人がつなぎました。' + (me ? 'あなたの名前は' + me.name + 'のままです。' : '')); }
-    if (s.err === 'linked') { sync(); return say('あなたは別の名前につながっていました。読み直しました。もう一度選んでください。'); }
-    if (s.err === 'dup') { sync(); return say('同じ名前が名簿にいます。上の一覧から選んでください。'); }
+    if (s.err === 'taken') { meRead = true; sync(); return say('『' + t.name + '』は今ほかの人がつなぎました。' + (me ? 'あなたの名前は' + me.name + 'のままです。' : '')); }
+    if (s.err === 'linked') { meRead = true; sync(); return say('あなたは別の名前につながっていました。読み直しました。もう一度選んでください。'); }
+    if (s.err === 'dup') { meRead = true; sync(); return say('同じ名前が名簿にいます。上の一覧から選んでください。'); }
     if (s.err === 'full' && typeof s.what === 'string' && s.what.startsWith('member_claims')) return say('名乗りがいっぱいです（管に付け替えを頼んでください）');
     if (s.err === 'mj_role') sync();
     return say(errText({ err: s.err, what: s.what, at: s.at }, 'write'));
