@@ -2,13 +2,25 @@
  * =============================================================================
  * mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) → { read() }
  *   labels＝{ sec, players }（リーグを作る頁＝「打ち方とレート」「主の打ち方」・絵 mahjong_league_v157 ①）・onPlayers(n)＝人数を替えた時（リーグのもう一方の打ち方を替える）
- *   lockPlayers＝人数は見せるだけ（C4 対局の［ルール］で次の回から変える時＝人数は変えられない・倉庫は bad at players）
+ *   lockPlayers＝人数は見せるだけ（リーグの日など）
+ *   midGame＝対局の途中で変える時（A20 a20_sadame v4 §1-7）＝人数を押すと「人数で既定が違う鍵」（PLAYERS_KEYS）だけ替える・他の鍵は今の卓のまま
  *   部屋を作る時（打てる）と、対局の右上［ルール］から見る時（readOnly＝見るだけ）の両方で使う。
  *   並び＝人数とレート（人数 4人/3人・1pt＝[ ]点・なし/50/100/200/500）→ 点（持ち点／返し・ウマ・オカ・飛び賞＝行の右に値 ›）
  *        → チップ・祝儀（1枚＝[ ]pt＋入切）（A9＝詳しいルールの節は無い・箱下と0点ちょうどは飛び賞の下）
  *   対局にリーグ戦の入切は置かない（司さん 11-20「ごちゃごちゃになる」）。
  */
-import { defaultRules } from '../lib/rules.mjs';
+import { defaultRules, RULE_KEYS } from '../lib/rules.mjs';
+
+/* A20 §1-7：人数で既定が違う鍵（players を除く）＝rules.mjs の def3≠def4 から作る（手で並べない） */
+export const PLAYERS_KEYS = Object.freeze(RULE_KEYS.filter((k) => k.key !== 'players' && JSON.stringify(k.def3) !== JSON.stringify(k.def4)).map((k) => k.key));
+/* 途中の人数替え：m＝その人数の覚え（object）／'bad'（読めない）／null（無し）→ 覚えか defaultRules(n) から PLAYERS_KEYS だけ写す。返しは新しい rules（r は変えない） */
+export function swapPlayers(r, n, m) {
+  const src = m && typeof m === 'object' ? m : defaultRules(n);
+  const out = JSON.parse(JSON.stringify(r));
+  out.players = n;
+  for (const k of PLAYERS_KEYS) out[k] = JSON.parse(JSON.stringify(src[k]));
+  return out;
+}
 import { keypadHtml, wireKeypad } from './kenban.mjs';
 import { esc } from './gamen-core.mjs';
 
@@ -51,7 +63,7 @@ export function umaText(uma) {
 
 // memory＝A14g（tataki/a14g_sadame_v1_1.md）新しい対局だけ：{3,4}＝rules-memory.mjs の fromMemory の返し（覚えの形／null＝無し／'bad'＝崩れ）。
 //   人数を押した時、覚えが在ればそれを全部出す・'bad' は既定（rate 100）＋onBad(n)・null は今の動き（4鍵だけ既定）。途中の変え・リーグは渡さない
-export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad }) {
+export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad, midGame }) {
   const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
   const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi）
@@ -140,7 +152,8 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
         const n = JSON.parse(b.dataset.players);
         if (n !== r.players) {
           const m = memory ? memory[n] : null;
-          if (m && typeof m === 'object') { for (const k of Object.keys(r)) delete r[k]; Object.assign(r, JSON.parse(JSON.stringify(m))); }
+          if (midGame) { const x = swapPlayers(r, n, m); for (const k of Object.keys(r)) delete r[k]; Object.assign(r, x); if (m === 'bad' && onBad) onBad(n); }
+          else if (m && typeof m === 'object') { for (const k of Object.keys(r)) delete r[k]; Object.assign(r, JSON.parse(JSON.stringify(m))); }
           else if (m === 'bad') { for (const k of Object.keys(r)) delete r[k]; Object.assign(r, { ...defaultRules(n), rate: 100 }); if (onBad) onBad(n); }
           else { const d = defaultRules(n); Object.assign(r, { players: n, start_pts: d.start_pts, return_pts: d.return_pts, uma: d.uma, tobi_pt: d.tobi_pt }); }
           if (onPlayers) onPlayers(n);

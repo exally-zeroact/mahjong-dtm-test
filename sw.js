@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '13a681072120';
+const VER = '234354525f85';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0d4295e649b8963f2aae104ada337e8e0562876477847b1bf96f3db1652fdaa3'],
@@ -22,7 +22,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-home.mjs', '23289b2e1c368a39d95127f80fc84430355348f3ff63d348d0fb46a5f146ae2c'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
   ['/js/gamen-room.mjs', '2c1305286372c286a9661dbb9bce8e18c47d27446352552914a10c8dd0cd4737'],
-  ['/js/gamen-rules.mjs', 'f6e2462ba0ac9c2858e3d7eba8497a425ba112630036925af0c528f6efaf851c'],
+  ['/js/gamen-rules.mjs', 'c308a3d32850af57c063b586d4c6e23089fa3dc27ec7272f92d6f2b9ec7978fb'],
   ['/js/gamen-taikyoku.mjs', '5a64e8fca6419bf0b2de5fe0124670b823f03a63313b1d2f0c3251e05216a1fa'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/kenban.mjs', '926ee5cd4d86a47b865d0faae7e5916a47fc695d31411c2bf5d4848e4828076c'],
@@ -37,7 +37,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
   ['/lib/outbox.mjs', 'f35b2ec198a083e9aa5362ba5f035b97f959bf6bb54bfd178a5f512ceeb26bb9'],
-  ['/lib/room-state.mjs', 'c3d47394d6b3cc8c1017661a5e24cfee0f5acbfc225b245791e705cce98c4759'],
+  ['/lib/room-state.mjs', 'bc5223c730107a0edcc24c7005171e7189e6adc8cdddb7989efc45312e4b7141'],
   ['/lib/rules.mjs', 'e389644031b87167e7f9f5fec6b20d997e6d93fee5862e4ba66677856d034f36'],
   ['/lib/safe-int.mjs', 'c3d97c57acb9e2308a2e0e827a715a18b39659985877044b8c5b8d4379fb6b83'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],
