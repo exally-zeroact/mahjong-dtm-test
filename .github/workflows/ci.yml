@@ -1,214 +1,28 @@
 name: CI
-
-# 麻雀〜do the math〜（mahjong-dtm）
-#
-# ★1本ずつ並べる★ … 赤くなった時に どれで落ちたか一目で分かるように。
-# ★足した試験は ここに並べるまで1本も走らない★（scripts/tests-registered.mjs が赤にする）
-# ★--self-test（わざと壊して赤になるか）も並べる★ … 空振りしている見張りは、無いのと同じ。
-
+# diag-swb only (never merge): loop sw e2e to catch Pattern B ('c 2nd page band')
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-
 jobs:
   test:
-    runs-on: ubuntu-24.04  # ubuntu-latest は 26.04 を指し playwright 1.60.0 が WebKit を入れられない（11-20 CI 44711741411 赤）・他の repo と同じに固定
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      # ── 試験の登録（正本＝rakually-test・1文字も書き直さない） ──────
-      - name: ★試験がCIに登録されているか (登録するまで1本も走らない)
-        run: node scripts/tests-registered.mjs
-      - name: ★その見張りの自己確認 (わざと外して赤になるか)
-        run: node scripts/tests-registered.mjs --self-test
-      - name: CI の段を 測った/読めない に割る道具（tools/_bunrui.mjs）が正解表の通りか（自己確認 a/b の行と KEKKA の読み方）
-        run: node tests/bunrui.test.mjs
-      - name: 割る道具の見張りの自己確認（読む式を5か所壊して全部赤になるか）
-        shell: bash
-        run: |
-          node tests/bunrui.test.mjs --self-test | tee bunrui-self.out
-          sh scripts/ci-yuka.sh bunrui-self.out 5
-
-      # ── どちらの線か（テスト倉庫を本番が読む事故を防ぐ） ──────
-      - name: テスト環境の帯（本番では出さない・全画面が読み込む）
-        run: node tests/env-badge.test.mjs
-      - name: テスト環境の帯の自己確認
-        run: node tests/env-badge.test.mjs --self-test
-      - name: 倉庫の向き先を js/supa-config.js 以外に書いていないか
-        run: node tests/no-hardcoded-supa.test.mjs
-      - name: 向き先の直書きの見張りの自己確認
-        run: node tests/no-hardcoded-supa.test.mjs --self-test
-      - name: repoの素性と倉庫の向き先が合っているか
-        run: node tests/supa-config-matches-repo.test.mjs
-      - name: 向き先の見張りの自己確認
-        run: node tests/supa-config-matches-repo.test.mjs --self-test
-      - name: 本番へ運ぶ道具（scripts/hakobu.mjs）の自己確認（網を呼ばない・使い捨ての repo だけ・止まる組と11の壊しが全部赤になるか）
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          node scripts/hakobu.mjs --self-test | tee hakobu-self.out
-          sh scripts/ci-yuka.sh hakobu-self.out 52
-
-      # ── 倉庫の設計図（部屋 mahjong）＝当てる前の門番と操作の表 ──────
-      #   倉庫に本当に当てて CHECK が弾くかは tests/db-checks.live.mjs（鍵が要る＝手元・tests-no-ci.json）
-      - name: 倉庫の設計図が門番を通るか（消す系・他の部屋・客に開ける・裸の書き換え）
-        run: node scripts/sql-guard.mjs supabase/schema.sql
-      - name: 門番の自己確認（わざと危ない物を食わせて止まるか）
-        shell: bash
-        run: |
-          node scripts/sql-guard.mjs --self-test | tee guard-self.out
-          sh scripts/ci-yuka.sh guard-self.out 27
-      - name: 操作の表 mj_ops が設計図の通りか（K-1 の34行×7列＝押せる人〔リーグでない日・リーグの日〕・消した部屋・履歴・戻し方・版つき・入り直し）
-        run: node tests/mj-ops.test.mjs
-      - name: 操作の表の見張りの自己確認
-        shell: bash
-        run: |
-          node tests/mj-ops.test.mjs --self-test | tee ops-self.out
-          sh scripts/ci-yuka.sh ops-self.out 15
-      - name: 名前のそろえた字（lib/name-key.mjs）が手で決めた答えを出すか（倉庫の関数と同じかは name-key.live.mjs＝手元）
-        run: node tests/name-key.test.mjs
-      - name: ルールの鍵の表（schema.sql の種）と lib/rules.mjs が同じか・鍵41の名を字で固定・確かめの答え（倉庫と同じかは rules.live.mjs＝手元）
-        run: node tests/rules.test.mjs
-      - name: 起家からの順が要る半荘か（lib/needs-order.mjs が手で決めた答えを出すか・倉庫と同じかは needs-order.live.mjs＝手元）
-        run: node tests/needs-order.test.mjs
-      - name: 部屋の URL の token の形と hash の式（lib/url-token.mjs＝端末と試験が使う1本・倉庫と同じかは room-join.live.mjs＝手元）
-        run: node tests/url-token.test.mjs
-      - name: 半荘の pt（lib/hanchan-pt.mjs）＝§5 の正解表（丸め・同点・箱下・3人・飛び賞）＋素点の全部の形 7,049,112 通りを別の作りの式と突き合わせ
-        run: node tests/hanchan-pt.test.mjs
-      - name: 点の行の［上家］の印→起家からの並び（lib/kamicha.mjs）＝正解表＋4人・3人 × 印の押し方 全部で、同じ点の組の順位が印の順・他の人の位置は効かない（A13）
-        run: node tests/kamicha.test.mjs
-      - name: 精算（lib/seisan.mjs）＝正解表（チップ・祝儀・飛び賞・レートの無い卓）＋乱数の卓で合計0と払う回数
-        run: node tests/seisan.test.mjs
-      - name: 部屋の中の状態（lib/room-state.mjs）＝op を当てる・版の conflict・組ごと当てる・半荘の表・人ごとの窓・チップ祝儀・精算
-        run: node tests/room-state.test.mjs
-      - name: 続きの部屋のカードの数と終えた判じ（lib cardCounts・roomEnded）＝倉庫と同じ表 tests/fixtures/card-counts.json（a15_sadame §1.3）
-        run: node tests/card-counts.test.mjs
-      - name: 送り口（lib/outbox.mjs）＝倉庫の返りの振り分け（done・retry・conflict・reload・login・stop）と止めた並びの held（取り決め §6-11・12・14・14'）
-        run: node tests/outbox.test.mjs
-      - name: 送り口の見張りの自己確認（振り分けをわざと壊して赤になるか）
-        run: node tests/outbox.test.mjs --self-test
-      - name: 返しの字の full（js/gamen-core.mjs errText）＝H2 の後に close と league で「記録がいっぱい」を出さない・入る／作るの字は残す（fullji_sadame v1.1）
-        run: node tests/fullji.test.mjs
-      - name: full の字の見張りの自己確認（字を前に戻す・league の枝を消すと赤になるか）
-        run: node tests/fullji.test.mjs --self-test
-
-      # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
-      - name: 早見表（lib/score-table.mjs）が正解表の 605 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）
-        run: node tests/score-table.test.mjs
-      - name: 早見表の見張りの自己確認（正解表を1マスずつ壊した 176 回と3人折半の式を壊した 2 回が全部赤になるか）
-        shell: bash
-        run: |
-          node tests/score-table.test.mjs --self-test | tee score-self.out
-          sh scripts/ci-yuka.sh score-self.out 179
-
-      # ── 計算の道具（点数計算）＝lib/score.mjs の役・符・翻・払いを手で書いた正解表と突き合わせる ──────
-      - name: 点数計算（lib/score.mjs）の役・符・翻・払いが手で書いた正解表 238 行と同じか（包・3人・赤・ドラ・flags の行つき）
-        run: node tests/score.test.mjs
-      - name: 点数計算の見張りの自己確認（平和・符の切り上げ・高点法・ドラ・包・赤の上限・包の R・役満・本場・三色同刻・三槓子・混老頭・純全帯・供託 など式を25か所壊して全部赤になるか）
-        shell: bash
-        run: |
-          node tests/score.test.mjs --self-test | tee score-calc-self.out
-          sh scripts/ci-yuka.sh score-calc-self.out 25
-      - name: 外の点数計算器（PyPI mahjong・版と hash を固定）を試験の時だけ使い捨ての箱に入れる（アプリには入れない）
-        shell: bash
-        run: |
-          python3 -m venv "$RUNNER_TEMP/score-py"
-          "$RUNNER_TEMP/score-py/bin/python" -m pip install --require-hashes --only-binary=:all: -r tests/score-gaibu.req.txt
-          echo "SCORE_PY=$RUNNER_TEMP/score-py/bin/python" >> "$GITHUB_ENV"
-      - name: 点数計算（lib/score.mjs）を外の計算器と乱数1,000手で突き合わせる（翻・符・点が全部同じか・版・免状 MIT）
-        run: node tests/score-gaibu.test.mjs
-      - name: 外の計算器との突き合わせの自己確認（lib/score.mjs の式を4か所壊して全部赤になるか）
-        shell: bash
-        run: |
-          node tests/score-gaibu.test.mjs --self-test | tee score-gaibu-self.out
-          sh scripts/ci-yuka.sh score-gaibu-self.out 4
-
-      # ── 計算の道具（待ち読み）＝画面と同じ lib/shanten.mjs を手で決めた答えと突き合わせる ──────
-      - name: 待ち読み（lib/shanten.mjs）のシャンテン・待ち・受け入れが手で決めた答えと同じか（清一色の全通り・七対子・国士・純空・3人）
-        run: node tests/shanten.test.mjs
-      - name: 待ち読みの見張りの自己確認（七対子の式・和了の判定・純空をわざと壊して3つとも赤になるか）
-        shell: bash
-        run: |
-          node tests/shanten.test.mjs --self-test | tee shanten-self.out
-          sh scripts/ci-yuka.sh shanten-self.out 3
-
-      # ── 端末に控える（sw.js・js/sw-reg.js・scripts/sw-assets.mjs）
-      - name: 端末の控え（sw.js）＝名簿の道と sha が今の中身と同じ・VER と version.json・全画面に sw-reg の1行・/v/ と素の道・install の失敗で控えを残さない・取り直しは1本・supa-config の3秒
-        run: node tests/sw.test.mjs
-      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json を25か所壊して全部赤になるか）
-        shell: bash
-        run: |
-          node tests/sw.test.mjs --self-test | tee sw-self.out
-          sh scripts/ci-yuka.sh sw-self.out 25
-
-      # ── 計算の道具の画面（早見表・待ち読み）を本物の WebKit で押す ──────
-      #   playwright は package.json に入れない（Vercel が devDependencies を入れる）＝ここで --no-save で入れる
-      - name: 画面の試験の道具を入れる（playwright 1.60.0 と WebKit）
-        run: |
+      - run: |
           npm i --no-save playwright@1.60.0
           npx playwright install --with-deps webkit
-      - name: 早見表・待ち読み・点数計算の画面（webkit 390×844・切り替え・3人折半・切り上げ・九蓮・中切り・見えている牌・3人・読み直し・壊れた端末の値）
-        timeout-minutes: 10
-        run: node tests/e2e/keisan.e2e.mjs
-      - name: 画面の試験の自己確認（配る中身を1か所ずつ壊して 35 回とも赤になるか・作業木は触らない）
-        timeout-minutes: 20
+      - name: loop
         shell: bash
         run: |
-          node tests/e2e/keisan.e2e.mjs --self-test | tee e2e-self.out
-          sh scripts/ci-yuka.sh e2e-self.out 35
-      - name: 端末の控えを本物の SW で（webkit・初めての claim・ネット無しで開く・/r/・版上げの帯・押した1枚だけ読み直す・入れ替えた直後に進んでも1つの版・start_url は素の道）
-        timeout-minutes: 10
-        run: node tests/e2e/sw.e2e.mjs
-      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を8か所壊して全部赤になるか・作業木は触らない）
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
-          sh scripts/ci-yuka.sh sw-e2e-self.out 8
-
-      # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
-      #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
-      #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。fork の PR には secret が 渡らない＝飛ばして 緑に しない。
-      - name: 実在の字が戻っていないか（一覧は secret）
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          node tests/kinshi-ji.test.mjs | tee kinshi.out
-          grep -q "^✓ 実在の 字 0 件" kinshi.out
-        env:
-          KINSHI_JI: ${{ secrets.KINSHI_JI }}
-          KINSHI_JI_FINGER: ${{ vars.KINSHI_JI_FINGER }}
-      - name: 実在の字の見張りの自己確認
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
-          sh scripts/ci-yuka.sh kinshi-self.out 29 239
-
-      # ── 押す前の門の自己確認（門は手元の push で走る・ここでは門自身が壊れていないかを見る） ──────
-      - name: commit のメールの門の自己確認
-        shell: bash
-        run: |
-          node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
-          sh scripts/ci-yuka.sh mail-self.out 7
-      - name: 押す commit の 中身の 門の自己確認
-        shell: bash
-        run: |
-          node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
-          sh scripts/ci-yuka.sh push-self.out 16 43
-      - name: commit の 文の 門の自己確認
-        shell: bash
-        run: |
-          node scripts/kinshi-commit-msg.mjs --self-test | tee msg-self.out
-          sh scripts/ci-yuka.sh msg-self.out 76
-      - name: 床の物差しの自己確認
-        shell: bash
-        run: |
-          sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
-          sh scripts/ci-yuka.sh yuka-self.out 20
+          set +e
+          red=0
+          for i in $(seq 1 60); do
+            if [ $i -le 2 ]; then export DIAG_ALL=1; else unset DIAG_ALL; fi
+            node tests/e2e/sw.e2e.mjs > o.txt 2>&1; c=$?
+            if [ $c -ne 0 ] || [ $i -le 2 ]; then echo "=== run $i exit=$c"; cat o.txt; fi
+            [ $c -ne 0 ] && red=$((red+1))
+          done
+          echo "TOTAL red=$red / 60"

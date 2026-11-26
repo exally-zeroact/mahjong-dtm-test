@@ -56,7 +56,7 @@ function serve(d) {
   const socks = new Set();
   const srv = http.createServer((q, r) => {
     const u = decodeURIComponent(q.url.split('?')[0]);
-    st.log.push(u);
+    st.log.push((Date.now() % 100000) + " " + u);
     if (st.offline) { q.socket.destroy(); return; }
     let rel = u.replace(/^\/+/, '') || 'index.html';
     if (/^r\/[0-9a-f]{32}\/?$/.test(rel)) rel = 'taikyoku.html';   // vercel.json の rewrites と同じ
@@ -158,11 +158,19 @@ async function run(d) {
     ok('b 画面の err 0', eOff.length === 0, eOff.join(' / '));
 
     // c 版を上げる・2枚
+    const logAt = st.log.length; const tb = Date.now() % 100000;
     const V1 = bump(d);
     const p2 = await ctx.newPage();
     const e2 = errsOf(p2);
     await p2.goto(base + 'machi.html');
-    ok('c 版上げの後に開いた2枚目は帯「新しい版があります」', await bandHas(p2, '新しい版があります'));
+    const hasB = await bandHas(p2, '新しい版があります');
+    if (!hasB || process.env.DIAG_ALL) {
+      console.log("DIAG " + (hasB ? "green" : "RED") + " bumpAt=" + tb + " V0=" + V0 + " V1=" + V1);
+      console.log("DIAG p2log " + JSON.stringify(await p2.evaluate(() => window.__mjlog)));
+      console.log("DIAG p2reg " + JSON.stringify(await p2.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); return r && [r.installing && r.installing.state, r.waiting && r.waiting.state, r.active && r.active.state, !!navigator.serviceWorker.controller]; })));
+      console.log("DIAG srv " + JSON.stringify(st.log.slice(logAt)));
+    }
+    ok('c 版上げの後に開いた2枚目は帯「新しい版があります」', hasB);
     await p1.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     ok('c 開いていた1枚目にも帯「新しい版があります」', await bandHas(p1, '新しい版があります'));
     L = await look(p2);
