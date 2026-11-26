@@ -16,6 +16,8 @@
   var meta = document.querySelector('meta[name="mj-ver"]');
   var PAGE_VER = meta ? meta.getAttribute('content') : null;
 
+  var T0 = Date.now(); window.__mjlog = []; function D(x) { window.__mjlog.push((Date.now() - T0) + " " + x); }
+  function st(reg) { return "i=" + (reg.installing && reg.installing.state) + " w=" + (reg.waiting && reg.waiting.state) + " a=" + (reg.active && reg.active.state) + " same=" + (!!reg.waiting && reg.waiting === reg.active) + " ctl=" + !!sw.controller + " swp=" + swapping; }
   var band = null, msg = null, btn = null;
   function show(text, label, onTap) {
     if (!band) {
@@ -66,9 +68,10 @@
     waitInstalled(reg, 30000).then(go); // update は waitInstalled の中（返った後に waiting を見る）
   }
 
-  function offerSwap() { show('新しい版があります', '入れ替える', swap); }
+  function offerSwap() { D('offerSwap'); show('新しい版があります', '入れ替える', swap); }
   // 本当に待っている版の時だけ（前の版が動いていて、これがそれと別）。初めての取り込みは installed の知らせが claim の後に届く事がある（webkit）＝controller だけ見ると偽の帯
   function maybeOffer(reg) {
+    D("maybeOffer " + st(reg));
     if (reg.waiting && reg.active && reg.waiting !== reg.active && sw.controller && !swapping) offerSwap();
   }
 
@@ -92,6 +95,7 @@
     fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
+        D("verCheck got=" + (j && j.ver) + " page=" + PAGE_VER + " " + st(reg));
         if (!j || j.ver === PAGE_VER) return;
         if (reg.waiting) maybeOffer(reg); else reg.update().then(function () { maybeOffer(reg); }, function () {});
       })
@@ -106,7 +110,7 @@
   });
 
   sw.register('/sw.js', { scope: '/' }).then(function (reg) {
-    regRef = reg;
+    regRef = reg; D("registered " + st(reg) + " pagever=" + PAGE_VER);
     watch(reg);
     verCheck(reg);
     document.addEventListener('visibilitychange', function () {

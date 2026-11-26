@@ -215,7 +215,14 @@ async function run(d) {
     const V3 = bump(d);
     const f1 = await ctxE.newPage();
     await f1.goto(base + 'index.html');
-    ok('f 版を上げると帯', await bandHas(f1, '新しい版があります'));
+    const hasF = await bandHas(f1, '新しい版があります');
+    if (!hasF) {
+      console.log('DIAG f RED V3=' + V3);
+      console.log('DIAG f log ' + JSON.stringify(await f1.evaluate(() => window.__mjlog)));
+      console.log('DIAG f reg ' + JSON.stringify(await f1.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); return r && [r.installing && r.installing.state, r.waiting && r.waiting.state, r.active && r.active.state, !!navigator.serviceWorker.controller, !!r.waiting && r.waiting === r.active]; })));
+      console.log('DIAG f q1log ' + JSON.stringify(await q1.evaluate(() => window.__mjlog).catch((x) => String(x))));
+    }
+    ok('f 版を上げると帯', hasF);
     await f1.click('.mj-swband-btn');
     await waitFor(f1, (v) => { const m = document.querySelector('meta[name="mj-ver"]'); return !!m && m.getAttribute('content') === v; }, V3);
     const f2 = await ctxE.newPage();
