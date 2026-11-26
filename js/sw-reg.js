@@ -94,7 +94,7 @@
         if (!j || j.ver === PAGE_VER) return;
         if (reg.waiting) offerSwap(); else reg.update().then(function () { D("update resolved " + st(reg)); }, function (e) { D("update rejected " + e); });
       })
-      .catch(function () {});
+      .catch(function (e) { D("verCheck err " + e); });
   }
 
   sw.addEventListener('controllerchange', function () {
@@ -110,6 +110,7 @@
     watch(reg);
     verCheck(reg);
     document.addEventListener('visibilitychange', function () {
+      D("visible " + document.visibilityState + " " + st(reg));
       if (document.visibilityState !== 'visible') return;
       reg.update().catch(function () {});
       verCheck(reg);

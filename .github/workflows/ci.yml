@@ -1,5 +1,5 @@
 name: CI
-# diag-swb only (never merge): loop sw e2e to catch Pattern B ('c 2nd page band')
+# diag-swb only (never merge): loop sw e2e to catch Pattern B ('c 2nd page band') — 3 parallel workers = load
 on:
   workflow_dispatch:
 jobs:
@@ -18,11 +18,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          red=0
-          for i in $(seq 1 60); do
-            if [ $i -le 2 ]; then export DIAG_ALL=1; else unset DIAG_ALL; fi
-            node tests/e2e/sw.e2e.mjs > o.txt 2>&1; c=$?
-            if [ $c -ne 0 ] || [ $i -le 2 ]; then echo "=== run $i exit=$c"; cat o.txt; fi
-            [ $c -ne 0 ] && red=$((red+1))
-          done
-          echo "TOTAL red=$red / 60"
+          work() {
+            local w=$1 red=0
+            for i in $(seq 1 200); do
+              node tests/e2e/sw.e2e.mjs > o$w.txt 2>&1; c=$?
+              if [ $c -ne 0 ]; then red=$((red+1)); { echo "=== worker $w run $i exit=$c"; cat o$w.txt; } >> red$w.txt; fi
+            done
+            echo "worker $w red=$red / 200" >> red$w.txt
+          }
+          work 1 & work 2 & work 3 & wait
+          cat red1.txt red2.txt red3.txt
