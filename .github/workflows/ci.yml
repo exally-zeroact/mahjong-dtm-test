@@ -181,100 +181,6 @@ jobs:
           node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
           sh scripts/ci-yuka.sh sw-e2e-self.out 8
 
-      # ── 画面の試験（gamen_*-e2e.cjs・本物の WebKit・自分の http で配る＝倉庫に触らない）──────
-      #   ★本番前の WebKit の画面の数はここで取る★（手元は WebKit の残りが消せない＝回さない・11-26）
-      #   自己確認は「壊し n/n 赤」「self: n/n 赤」の行の n が床以上で、赤が全部の時だけ緑
-      - name: 画面 a6（部屋を消す・7日の間は元に戻す・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_a6-e2e.cjs .
-      - name: 画面 a6 の自己確認（26 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_a6-e2e.cjs . --self | tee g-a6-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-a6-self.out | tail -n 1 | awk -v g=26 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 a6 の壊しが 26 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 a11（A11・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_a11-e2e.cjs .
-      - name: 画面 a11 の自己確認（16 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_a11-e2e.cjs . --self | tee g-a11-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-a11-self.out | tail -n 1 | awk -v g=16 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 a11 の壊しが 16 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 a15g（続きの部屋を倉庫から・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_a15g-e2e.cjs .
-      - name: 画面 a15g の自己確認（13 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_a15g-e2e.cjs . --self | tee g-a15g-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-a15g-self.out | tail -n 1 | awk -v g=13 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 a15g の壊しが 13 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 a18（大きすぎる額は帯だけ・鍵盤10桁・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_a18-e2e.cjs .
-      - name: 画面 a18 の自己確認（6 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_a18-e2e.cjs . --self | tee g-a18-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-a18-self.out | tail -n 1 | awk -v g=6 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 a18 の壊しが 6 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 32b_yaki（やきとり・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_32b_yaki-e2e.cjs .
-      - name: 画面 32b_yaki の自己確認（8 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_32b_yaki-e2e.cjs . --self | tee g-32b_yaki-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-32b_yaki-self.out | tail -n 1 | awk -v g=8 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 32b_yaki の壊しが 8 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 tobi（飛び賞・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_tobi-e2e.cjs .
-      - name: 画面 tobi の自己確認（10 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_tobi-e2e.cjs . --self | tee g-tobi-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-tobi-self.out | tail -n 1 | awk -v g=10 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 tobi の壊しが 10 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 b1（B1・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_b1-e2e.cjs .
-      - name: 画面 b1 の自己確認（10 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_b1-e2e.cjs . --self | tee g-b1-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-b1-self.out | tail -n 1 | awk -v g=10 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 b1 の壊しが 10 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 kenban（数字鍵盤・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_kenban-e2e.cjs .
-      - name: 画面 kenban の自己確認（8 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_kenban-e2e.cjs . --self | tee g-kenban-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-kenban-self.out | tail -n 1 | awk -v g=8 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 kenban の壊しが 8 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 c4（C4・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_c4-e2e.cjs .
-      - name: 画面 c4 の自己確認（16 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_c4-e2e.cjs . --self | tee g-c4-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-c4-self.out | tail -n 1 | awk -v g=16 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 c4 の壊しが 16 に届かない・全部赤でない"; exit 1; }
-      - name: 画面 d2（D2・webkit）
-        timeout-minutes: 15
-        run: node tests/e2e/gamen_d2-e2e.cjs .
-      - name: 画面 d2 の自己確認（25 か所壊して全部赤になるか）
-        timeout-minutes: 40
-        shell: bash
-        run: |
-          node tests/e2e/gamen_d2-e2e.cjs . --self | tee g-d2-self.out
-          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-d2-self.out | tail -n 1 | awk -v g=25 '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 d2 の壊しが 25 に届かない・全部赤でない"; exit 1; }
-
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
       #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。fork の PR には secret が 渡らない＝飛ばして 緑に しない。
@@ -315,3 +221,44 @@ jobs:
         run: |
           sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
           sh scripts/ci-yuka.sh yuka-self.out 20
+
+  # ── 画面の試験（gamen_*-e2e.cjs・本物の WebKit・自分の http で配る＝倉庫に触らない）──────
+  #   ★本番前の WebKit の画面の数はここで取る★（手元は WebKit の残りが消せない＝回さない・11-26）
+  #   ★test の job と分けて1本ずつ並べて回す★（1本の job に入れたら 20 分の枠に当たり1本も走らなかった＝CI 45795056271）
+  #   自己確認は「壊し n/n 赤」「self: n/n 赤」の行の n が床以上で、赤が全部の時だけ緑
+  gamen:
+    runs-on: ubuntu-24.04  # test の job と同じ（playwright 1.60.0 の WebKit）
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: a6, script: tests/e2e/gamen_a6-e2e.cjs, yuka: 26 }
+          - { name: a11, script: tests/e2e/gamen_a11-e2e.cjs, yuka: 16 }
+          - { name: a15g, script: tests/e2e/gamen_a15g-e2e.cjs, yuka: 13 }
+          - { name: a18, script: tests/e2e/gamen_a18-e2e.cjs, yuka: 6 }
+          - { name: 32b_yaki, script: tests/e2e/gamen_32b_yaki-e2e.cjs, yuka: 8 }
+          - { name: tobi, script: tests/e2e/gamen_tobi-e2e.cjs, yuka: 10 }
+          - { name: b1, script: tests/e2e/gamen_b1-e2e.cjs, yuka: 10 }
+          - { name: kenban, script: tests/e2e/gamen_kenban-e2e.cjs, yuka: 8 }
+          - { name: c4, script: tests/e2e/gamen_c4-e2e.cjs, yuka: 16 }
+          - { name: d2, script: tests/e2e/gamen_d2-e2e.cjs, yuka: 25 }
+    name: 画面 ${{ matrix.name }}（webkit）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 画面の試験の道具を入れる（playwright 1.60.0 と WebKit）
+        run: |
+          npm i --no-save playwright@1.60.0
+          npx playwright install --with-deps webkit
+      - name: 画面の試験（webkit）
+        timeout-minutes: 15
+        run: node ${{ matrix.script }} .
+      - name: 画面の試験の自己確認（床の数だけ壊して全部赤になるか）
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          node ${{ matrix.script }} . --self | tee g-self.out
+          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-self.out | tail -n 1 | awk -v g=${{ matrix.yuka }} '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 ${{ matrix.name }} の壊しが ${{ matrix.yuka }} に届かない・全部赤でない"; exit 1; }
