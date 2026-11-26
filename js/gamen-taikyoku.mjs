@@ -187,14 +187,15 @@ async function openRoom(roomId, note, lid) {
   leaveRoom(); // 前の部屋の読み・送り・時計・合図を止める（ルールを読む道でも・2c-2f）
   let room = myRooms(me.id).find((x) => x.room_id === roomId);
   if (!room && lid) room = { room_id: roomId, kind: 'shared', name: '', role: null };
-  if (!room) { show('vChoose'); obi('この端末ではまだその部屋に入っていません。部屋名とパスか URL で入ってください。', 'warn'); return; }
+  // A15g §3.1：控えに無い部屋（ホームの倉庫の行・別の端末で入った）も断らない＝入っているかは mj_read が決める（ok なら控えに足す・gone なら足さない）
+  if (!room) room = { room_id: roomId, kind: 'shared', name: '', role: null, fromDb: true };
   history.replaceState(null, '', '/taikyoku.html?room=' + encodeURIComponent(roomId) + (lid ? '&league=' + encodeURIComponent(lid) : ''));
   obi('');
   // 終えた部屋の帯は mountRoom の前（ルールが届いていない端末・gateOnly の道でも出る・B3b-1 §3 止め2）。足し①の帯が出る時は mountRoom が外す（帯は1枚）
   if (room.closed === true) obi(CLOSED_OBI, 'warn');
   show('vRoom');
   // 部屋なしは URL で入れない（倉庫が潰す）＝［部屋名と URL］を出さない（B3b で［みんなで見る部屋にする］に替わる）
-  const share = room.kind !== 'solo' ? () => showMade(room, null) : null;
+  const share = room.kind !== 'solo' && !room.fromDb ? () => showMade(room, null) : null; // 倉庫から開く部屋は kind が分かってから（§3.2）
   const seq = ++openSeq;
   if (!room.rules || (lid && !hasLeagueInfo(me.id, lid))) { readRules(roomId, share, seq, lid, room); return; }
   mountRoom($('vRoom'), roomOpts(room, share, note, lid));
@@ -209,7 +210,8 @@ function roomOpts(room, share, note, lid) {
 /* rules の無い端末（join・一覧から入った）＝mountRoom の前に mj_read（2d §3・B3b-1 約束④）。
  * 読めるまで「部屋のルールを読んでいます」＋［もう一度］・10秒ごと（頁が見えている間・mountRoom の外で回す）。
  * rules と closed は控えの行だけを書き換える（ホームの並びと at を変えない＝rememberRoom を通さない・約束⑦） */
-function readRules(roomId, share, seq, lid, room0) {
+function readRules(roomId, share0, seq, lid, room0) {
+  let share = share0;
   bar({ back: 'ホーム', title: '対局' });
   $('vRoom').innerHTML = '<p class="setsumei" id="rReading">部屋のルールを読んでいます</p><p class="err" id="rReadErr"></p><button class="btn btn-line" id="rReadAgain">もう一度</button>' +
     (share ? '<button class="btn" id="rShare">部屋名と URL</button>' : '');
@@ -231,6 +233,12 @@ function readRules(roomId, share, seq, lid, room0) {
       let room = patchRoom(me.id, roomId, patch);
       if (!room && lid && room0) { // 控えに無い部屋（リーグの一覧から）＝控えに足さずに今だけの形
         room = Object.assign(room0, patch, { name: d.room.name || '', role: d.room.role ?? null, owner: d.room.owner === true, ...(typeof d.room.channel_key === 'string' ? { channel_key: d.room.channel_key } : {}) });
+      }
+      if (!room && room0 && room0.fromDb) { // A15g §3.2：倉庫から開いた部屋＝読めたので控えに足す（token は無い）
+        rememberRoom(me.id, { room_id: roomId, kind: d.room.kind === 'solo' ? 'solo' : 'shared', name: d.room.name || '', role: d.room.role ?? null, owner: d.room.owner === true,
+          ...(typeof d.room.channel_key === 'string' ? { channel_key: d.room.channel_key } : {}), ...patch });
+        room = myRooms(me.id).find((x) => x.room_id === roomId) || null;
+        if (room) share = room.kind !== 'solo' ? () => showMade(room, null) : null;
       }
       if (!room) { openRoom(roomId); return; }
       if (lid) saveLeagueInfo(me.id, lid, d);

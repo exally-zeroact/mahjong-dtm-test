@@ -192,7 +192,7 @@ export function rememberRoom(uid, room) {
   const a = myRooms(uid).filter((x) => x.room_id !== room.room_id);
   const old = myRooms(uid).find((x) => x.room_id === room.room_id) || {};
   a.unshift({ ...old, ...room, at: Date.now() });
-  localStorage.setItem(ROOMS_KEY(uid), JSON.stringify(a.slice(0, 30)));
+  localStorage.setItem(ROOMS_KEY(uid), JSON.stringify(a)); // A15g §3.2b：切らない（token・A6 の消した印・送りの残りを落とさない・履歴に上限を作らない）
 }
 /* 控えの行だけを書き換える（★並びと at を変えない＝rememberRoom の unshift を通さない★・2d §3／B3b-1 約束④⑦）。
  * 部屋の rules・closed を足す時に使う。控えに無い部屋は何もしない（null）。返し＝書き換えた後の行 */

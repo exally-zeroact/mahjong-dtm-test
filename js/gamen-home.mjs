@@ -3,9 +3,12 @@
  * 日・回・人は端末の写し（mj-room:<uid>:<room_id>）の一番新しい卓から出す＝無ければその行は出さない。
  * A11（司さん 11-23「前のが残るのが原因やろ」）：終えた対局は出さない＝控えの並びで終えていない一番新しい部屋を出す（無ければカードを出さない）。
  *   終えた＝部屋を終えた（closed）か、写しの開催が在って pickSession が null（部屋を開いた時に新しい開催を作る判じと同じ）。
+ * A15g（a15g_sadame v1.1・司さん 11-23「なんのためのアドレスとパスワードで管理しとんど」）：続きの部屋は倉庫の mj_my_rooms(p_open:true) を全部（上限なし）・新しく動いた順に縦に並べる。
+ *   頭にはこの端末で送っていない部屋（倉庫の行に無い物）を足す。読めない・8秒で返らない時だけ端末の控え（A11 の判じ）＋帯。
+ *   消した部屋（A6＝控えの行に deleted_at か gone:true）は頭足しと控えでは出さない。倉庫が返した行は出して印を外す（印が古い）。
  */
-import { currentUser, showLogin, logout, myRooms, esc, $, sb } from './gamen-core.mjs';
-import { chainView, migrateState, gateText, pickSession } from '../lib/room-state.mjs';
+import { currentUser, showLogin, logout, myRooms, patchRoom, rpc, esc, $, sb } from './gamen-core.mjs';
+import { cardCounts, migrateState, gateText, roomEnded } from '../lib/room-state.mjs';
 
 const md = (d) => (d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
 
@@ -27,8 +30,7 @@ function finished(uid, r) {
   if (unsent(uid, r.room_id, m)) return false;
   if (r.closed === true) return true;
   if (!m || m.gate.mode !== 'ok') return false;
-  const ss = (m.st.sessions || []).filter((x) => !x.voided);
-  return ss.length > 0 && pickSession(m.st) === null;
+  return roomEnded(m.st);
 }
 function lastTable(uid, rid) {
   let st = null;
@@ -36,31 +38,80 @@ function lastTable(uid, rid) {
   if (!st || !Array.isArray(st.tables) || !st.tables.length) return null;
   const m = migrateState(st); // 古い形の写しも読む（★ここでは保存しない＝直して保存するのは部屋を開いた時だけ・並びと一緒に★）
   if (m.gate.mode !== 'ok') return { gate: m.gate }; // ③-0 の門：ok でない部屋は表を出さず帯だけ
-  st = m.st;
-  return chainView(st, st.tables[st.tables.length - 1].table_id); // C4 §5a：区切った卓の鎖は1つ（「n回目まで」は鎖の通し番号）
+  return cardCounts(m.st); // A15g §2＝a15_sadame §1.3 そのまま（倉庫の行と同じ数）
 }
 
+const PAGE = 50;
+const WAIT_MS = 8000; // 1頁の返しをこれだけ待って来なければ控えで出す（後から全部読めたら替える）
+const delRow = (x) => !!x.deleted_at || x.gone === true; // A6 の門
+const nameOf = (r) => r.name || (r.kind === 'solo' ? '対局' : '部屋');
+const card = (rid, name, m, gate) => '<a class="h-cont" href="/taikyoku.html?room=' + encodeURIComponent(rid) + '" data-rid="' + esc(rid) + '"><span class="h-l">続きの部屋</span><span class="h-r">' + esc(name) + '</span>' +
+  (m ? '<span class="h-m">' + esc(m) + '</span>' : '') + (gate ? '<span class="h-m h-gate">' + esc(gateText(gate)) + '</span>' : '') + '<span class="h-go">対局に戻る ›</span></a>';
+/* 端末の写しから（倉庫の行が無いカード）＝今までの字のまま */
+function localCard(uid, r) {
+  const lt = lastTable(uid, r.room_id);
+  const v = lt && !lt.gate ? lt : null;
+  return card(r.room_id, nameOf(r), v ? countsText(v) : '', lt && lt.gate);
+}
+/* 倉庫の行から（a15_sadame §1.3 の last_date・hanchan_n・member_n） */
+const countsText = (r) => [md(typeof r.last_date === 'string' ? r.last_date : ''), r.hanchan_n > 0 ? '半荘' + r.hanchan_n + '回目まで' : '', r.member_n > 0 ? r.member_n + '人' : ''].filter(Boolean).join(' ・ ');
+function dbCard(r) {
+  return card(r.room_id, nameOf(r), countsText(r), null);
+}
+/* 並べるカードの html の列。rows＝倉庫の行（null＝読めない＝控えで出す） */
+function cardsOf(uid, rows) {
+  const local = myRooms(uid).filter((x) => x && x.room_id && !delRow(x));
+  if (!rows) return local.filter((x) => !finished(uid, x)).map((x) => localCard(uid, x)); // A11 の判じのまま
+  const ids = new Set(rows.map((r) => r.room_id));
+  for (const x of myRooms(uid)) if (x && delRow(x) && ids.has(x.room_id)) patchRoom(uid, x.room_id, { gone: false, deleted_at: null }); // 倉庫が返す＝消した印は古い（§1.2）
+  const head = local.filter((x) => !ids.has(x.room_id) && unsent(uid, x.room_id, copyOf(uid, x.room_id))); // 送っていない部屋（送れば倉庫の並びになる）
+  return [...head.map((x) => localCard(uid, x)), ...rows.map(dbCard)];
+}
+/* 倉庫を before で最後まで。返し＝{ok:true, rows}｜{ok:false, err}｜null（古い読み）。onPage＝頁を頼む前に呼ぶ（時間切れの時計を回し直す） */
+async function readAll(seq, onPage) {
+  const rows = []; let before = null;
+  for (;;) {
+    onPage();
+    const res = await rpc('mj_my_rooms', { p_before_at: before ? before.at : null, p_before_id: before ? before.id : null, p_limit: PAGE, p_open: true });
+    if (seq !== drawSeq) return null;
+    if (!res || res.ok !== true || !Array.isArray(res.rooms)) return { ok: false, err: (res && res.err) || 'net' }; // 途中の頁で読めない＝倉庫の行は捨てる（半分だけ出さない）
+    for (const r of res.rooms) if (r && typeof r.room_id === 'string') rows.push(r);
+    if (res.rooms.length < PAGE) return { ok: true, rows };
+    const last = res.rooms[res.rooms.length - 1];
+    before = { at: last.last_write_at || last.created_at, id: last.room_id };
+  }
+}
+function paint(list, band) {
+  const box = $('tsuzuki'), b = $('hBand');
+  box.innerHTML = list.join('');
+  box.hidden = !list.length;
+  b.hidden = !band;
+}
+
+let drawSeq = 0;
 async function draw() {
+  const seq = ++drawSeq;
   const u = await currentUser();
+  if (seq !== drawSeq) return;
   const acct = $('acct');
-  const box = $('tsuzuki');
   if (!u) {
     acct.innerHTML = '<button class="btn-s" type="button" id="btnIn">ログイン</button>';
     $('btnIn').onclick = () => showLogin(() => draw());
-    box.hidden = true;
+    paint([], false);
     return;
   }
   acct.innerHTML = '<button class="btn-s" type="button" id="btnOut" title="' + esc(u.email) + '">ログアウト</button>';
   $('btnOut').onclick = async () => { await logout(); draw(); };
-  const r = myRooms(u.id).find((x) => !finished(u.id, x)); // A11：終えた対局は続きの部屋に出さない
-  box.hidden = !r;
-  if (!r) return;
-  const lt = lastTable(u.id, r.room_id);
-  const v = lt && !lt.gate ? lt : null;
-  const m = v ? [md(v.date), v.nextNo > 1 ? '半荘' + (v.nextNo - 1) + '回目まで' : '', v.people.length ? v.people.length + '人' : ''].filter(Boolean).join(' ・ ') : '';
-  box.href = '/taikyoku.html?room=' + encodeURIComponent(r.room_id);
-  box.innerHTML = '<span class="h-l">続きの部屋</span><span class="h-r">' + esc(r.name || (r.kind === 'solo' ? '対局' : '部屋')) + '</span>' + // 終えた部屋は出さない（A11・前の「終わりました」の印は外した）
-    (m ? '<span class="h-m">' + esc(m) + '</span>' : '') + (lt && lt.gate ? '<span class="h-m" id="hGate">' + esc(gateText(lt.gate)) + '</span>' : '') + '<span class="h-go">対局に戻る ›</span>';
+  $('hBandAgain').onclick = () => draw();
+  // 読み直しの間は今のカードを残す（初めは空＝控えを出して後で入れ替えない）
+  let timer = null, fell = false;
+  const fallback = () => { if (seq !== drawSeq || fell) return; fell = true; paint(cardsOf(u.id, null), true); };
+  const res = await readAll(seq, () => { clearTimeout(timer); timer = setTimeout(fallback, WAIT_MS); });
+  clearTimeout(timer);
+  if (!res || seq !== drawSeq) return;
+  if (res.ok) { paint(cardsOf(u.id, res.rows), false); return; }
+  if (res.err === 'mj_session') showLogin(() => draw());
+  fell = false; fallback();
 }
 
 sb().auth.onAuthStateChange(() => { draw(); });

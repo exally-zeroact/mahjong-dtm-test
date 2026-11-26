@@ -7,23 +7,23 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '05185c620af9';
+const VER = '7687565677f8';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
-  ['/css/gamen.css', 'ed499394d34a2e0ce517d168d2a753a16ab2853362e565574d23cdd2ed72debf'],
+  ['/css/gamen.css', '0d58530e789f31f302cf0515a40f7d9214e462c583a23e97fe476c626e1c9b4b'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
   ['/icons/icon-512.png', 'ff686a73f1bc0a7fb0c475cee7f023fa12b92b1f5d3796b5b66c8f9231f794f3'],
-  ['/index.html', 'd0b4695ce15c8db59365ca3ffde43e62c7ed98648d90ba246fad971a17711d99'],
+  ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', 'd0ad592f34b2f674c0988c908fcbb1e63ac1b3b6c766eca83f4e734c3803606b'],
-  ['/js/gamen-home.mjs', '7071789fc6114aefa47a1ceb3d44d13b64d159c17b8f7d2f358afee01576fe17'],
+  ['/js/gamen-core.mjs', '6b7de943726d8249d806b9428e78d98b4f0c29879b175384b7520fe8ebce3735'],
+  ['/js/gamen-home.mjs', '5e75738a9d456331aa315c9b2662aaf8545380f9a3f76b3557cbe88a3ac749b3'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
   ['/js/gamen-room.mjs', '9c8196bc8d0b208dca4ee543696765b7a545bba943bcc7fcd79de129af7bdfd2'],
   ['/js/gamen-rules.mjs', 'e3f4b38e2e232e1b8ba352da21d61952d9ab9725145af1bf9600cb4b69d62304'],
-  ['/js/gamen-taikyoku.mjs', 'c37d92df8882e73a37c6fc3661b7a71288549792340025e5db9de20a13e28c6b'],
+  ['/js/gamen-taikyoku.mjs', '840cca8f2029a50e67d0dc7be942a310b6e3101073d03871c004adf09a1026f5'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/sw-reg.js', '3dbafecd87029e9eb4f3165e7b2f01011ca3f289030a25c92a7a530109bf2c85'],
@@ -35,7 +35,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
   ['/lib/outbox.mjs', 'f35b2ec198a083e9aa5362ba5f035b97f959bf6bb54bfd178a5f512ceeb26bb9'],
-  ['/lib/room-state.mjs', '60e6ac80c8814cc7301ccd5f26a76ac08accb8f552dc61317899bfa069b617bc'],
+  ['/lib/room-state.mjs', 'feb41cde7786124c12d4d7556ca92f5d01cc4e621892a596f007e804f717cc54'],
   ['/lib/rules.mjs', '060d48a267043999ffae45b50bdb6e7883587cf281d5442bafc4557f23626c01'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],
   ['/lib/score.mjs', '8bb312dcb210b70cf618df8f3b8bf30a40260f21a3943443cefe0fddb118d824'],

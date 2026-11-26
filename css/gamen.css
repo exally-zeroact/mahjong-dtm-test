@@ -196,6 +196,11 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .h-n1 { font-size: 30px; font-weight: 800; letter-spacing: .02em; }
 .h-n2 { margin-top: 2px; font-size: 15px; font-weight: 700; color: var(--c-kin); }
 .h-cont { display: flex; flex-direction: column; margin: 0 0 12px; padding: 14px 16px; border-radius: 16px; background: var(--c-kon); color: var(--c-kon-ji); text-decoration: none; }
+/* A15g：続きの部屋は縦に並ぶ（カードの間 8px）・読めない時の帯の［もう一度］は14px の字→高さ36 */
+.h-conts { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.h-conts > .h-cont { margin: 0; }
+.h-band { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.h-band-b { min-height: 36px; }
 .h-l, .h-m { font-size: 13px; opacity: .85; }
 .h-r { margin-top: 2px; font-size: 18px; font-weight: 700; }
 .h-m { margin-top: 4px; }
