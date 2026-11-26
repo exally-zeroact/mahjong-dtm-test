@@ -328,7 +328,7 @@ async function run(br, port) {
 
 const G = 'js/gamen-room.mjs', L = 'lib/room-state.mjs';
 const MUT = [
-  { file: G, from: "cells: e.num, lost: e.lostNum, follow: true };", to: 'cells: e.num, lost: e.lostNum };', name: 'hanchan_start に follow を付けない（C1・C2）', only: 'C1,C2' },
+  { file: G, from: "cells: e.num, lost: e.lostNum, follow: true, seen_n:", to: 'cells: e.num, lost: e.lostNum, seen_n:', name: 'hanchan_start に follow を付けない（C1・C2）', only: 'C1,C2' },
   { file: G, from: "ops.push({ op: 'extra_add', table_id: tid, member_id: mid, kind, add, follow: true }); }", to: "ops.push({ op: 'extra_add', table_id: tid, member_id: mid, kind, add }); }", name: '± のまとめに follow を付けない（C1）', only: 'C1' },
   { file: L, from: "rows.push({ ...r, no: rows.length + 1, tno: r.no, table_id: p.table_id, late: at > cut });", to: 'rows.push({ ...r, tno: r.no, table_id: p.table_id, late: at > cut });', name: '通し番号をやめる（卓の中の no）（C2）', only: 'C2' },
   { file: G, from: "const v = table ? chainView(st, table.table_id) :", to: 'const v = table ? tableView(st, table.table_id) :', name: '対局の頁を鎖でなく自分の卓だけ（C2）', only: 'C2' },
