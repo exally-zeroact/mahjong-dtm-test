@@ -11,6 +11,7 @@ import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs';
 import { newToken, tokenHash } from '../lib/url-token.mjs';
+import { mountModosu } from './heya-modosu.mjs'; // A27：消した部屋を戻す所（ホームから移した）
 import { mountRoom, readRoom, readLeague, saveLeagueInfo, hasLeagueInfo, markSynced, leaveRoom } from './gamen-room.mjs'; // 静的 import（sw が先に持てる形・麻雀-計算 の相談 11-20）
 
 const VIEWS = ['vLogin', 'vChoose', 'vRules', 'vMade', 'vUrlJoin', 'vRoom'];
@@ -323,6 +324,7 @@ function start(user) {
   const q = new URLSearchParams(location.search);
   if (q.get('room')) { openRoom(q.get('room'), undefined, q.get('league') || undefined); return; }
   show('vChoose');
+  mountModosu($('tModosu'), user, relogin); // A27 §4
 }
 
 $('chSeg').addEventListener('click', (e) => {

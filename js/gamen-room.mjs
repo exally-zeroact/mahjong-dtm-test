@@ -12,7 +12,7 @@
  *   送りと読みは1つの部屋で1本ずつ（lane）。置き換えは倉庫の st→migrateState→roomGate→並びを先頭から当て直す。
  *   置き換えない時＝st.needs_upload（端末だけの写し・2e まで）／控えが closed で並びが在る（約束③）／先頭に sent_at（送った印）が在り決まっていない。
  *   開催は倉庫で決める（shared は開いた時に作らない・最初の点で mj_read→無ければ [session_add, table_add] を直に送る）。
- * A6（a6_sadame v1.3・司さん 11-23「部屋を消せない」）：部屋の頁の下に［部屋を消す］（owner だけ・リーグの対局は外す）。印 mj-pending-delete:<uid>:<rid>＝同じ op_id で送り直す。
+ * A6（a6_sadame v1.3・司さん 11-23「部屋を消せない」）＋A27（a27_sadame v1.1）：［ルール］の頁の［部屋を終える］の下に［部屋を消す］（owner だけ・リーグの対局は外す）。印 mj-pending-delete:<uid>:<rid>＝同じ op_id で送り直す。
  *   通った（か印が在る時の gone）＝この端末の並び・終える印を消し、控えの行に deleted_at→ホーム（7日の間はホームの帯から戻せる）。印の無い gone＝控えに gone:true（ホームのカードに出さない・次の ok の読みで外す）。
  * B3b-1（gamen_b3b_sadame.md v4.1）：［ルール］の頁に［部屋を終える］（kan か owner・shared で終えていない部屋だけ）。
  *   送る前に必ず flushMerge(true)→未送信0 の門（頁を出す時・窓を開く時・窓の［部屋を終える］の3回）。印 mj-pending-close:<uid>:<rid>＝同じ op_id で送り直す。
@@ -137,6 +137,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let picking = null;
   let viewSnap = false;
   let confirming = false; // 入っていない物があるまま終える時の確かめ（開いている画面の間だけ）
+  let endAsk = false;     // A27 §1：部屋の頁の［対局終了］を押した印＝精算の頁を描いた1回だけ使う（頭で必ず下ろす・精算の頁を離れたら下ろす）
   let closeErr = null;    // 対局終了を残せなかった時の err
   let goHome = false;     // A11：［対局終了］の後、並びを送り切ったらホームへ（端末に残さない・送れずに止まったら精算に残る）
   let pmErr = null;       // チップ等の［−］［＋］が弾かれた時の字（黙らない・v1.1）
@@ -149,7 +150,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
   let fixing = null;      // C4 §3b：精算の内訳で［直す］を開いている前の卓の枚 { t, m, kind }
-  const toRoom = () => { page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; render(); };
+  const toRoom = () => { endAsk = false; page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; render(); };
 
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
@@ -638,6 +639,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
 
   function render() {
+    if (page !== 'seisan') endAsk = false; // A27 §1：押した印は精算の頁の外へ持ち越さない
     if (goHome && page !== 'seisan') goHome = false; // A11 止め2：精算を離れた（打ちかけ・別の頁）＝ホームへ飛ばない
     // 終えた部屋の頁は room・seisan・rules だけ（他に居たら room へ・B3b-1 §3）
     if (room.closed && !['room', 'seisan', 'rules'].includes(page)) { page = 'room'; entry = null; picking = null; }
@@ -657,7 +659,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // 卓がまだ無い（shared で開催を倉庫で決める前）＝部屋のルールで空の表だけ出す（最初の点で startShared）
     const noteHtml = note ? '<p class="r-check bad" id="rCloseNote">' + esc(note) + '</p>' : '';
     // 終えた部屋に開催が1つも無い＝中身の字だけ（卓を触らない・B3b-1 §3 止め1）
-    if (room.closed && !table) { shownTag = tagKey(); el.innerHTML = bandsHtml() + noteHtml + '<p class="setsumei" id="rEmpty">この部屋は終わりました。中身はありません。</p>' + delHtml(); wireBands(); wireDel(); return; }
+    if (room.closed && !table) { shownTag = tagKey(); el.innerHTML = bandsHtml() + noteHtml + '<p class="setsumei" id="rEmpty">この部屋は終わりました。中身はありません。</p>'; wireBands(); return; } // A27：［部屋を消す］はルールの頁
     const v = table ? chainView(st, table.table_id) : { date: today(), rate: baseRules().rate ?? null, rows: [], nextNo: 1, windows: [], seatPeople: [], parts: [] }; // C4 §5a：鎖で1つ
     shownTag = tagKey();
     const tkLeft = el.querySelector('#rTaku') ? el.querySelector('#rTaku').scrollLeft : 0; // 描き直しても横の位置を残す
@@ -671,12 +673,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (v.windows.length || v.seatPeople.length) h += renderWindows(v);
     if (v.windows.length) h += renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
     else if (pmErr) h += '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>';
-    h += delHtml(); // A6：頁の一番下
+    // A27 §1（司さん 11-26「ここに出すなら対局終了ボタンやろが」）：頁の一番下は［対局終了］＝精算の頁の［対局終了］と同じ道（出す条件も同じ・押したら精算の頁で押す）
+    if (table && v.windows.length && !room.closed && !st.settles.some((x) => x.session_id === table.session_id)) h += '<button class="btn btn-main" id="rEnd"' + (closingOn() || goHome ? ' disabled' : '') + '>対局終了</button>';
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
     takuScroll(tkLeft);
-    wireRoom(); wireBands(); wireDel();
+    wireRoom(); wireBands();
   }
   /* ── D2：［卓1］［卓2］…（何卓でも横に流す）・L にだけ［＋卓］ ── */
   function takuHtml() {
@@ -853,7 +856,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const draft = edit && ruleCtl ? { ...cur, ...ruleCtl.read() } : cur; // 読み直しで描き直しても打ちかけを残す
     el.innerHTML = (ruleMsg ? '<div class="r-red" id="rRuleMsg"><b>' + esc(ruleMsg) + '</b></div>' : '') + '<div id="rRules"></div>' +
       (edit ? '<p class="err" id="rRuleErr"></p><button class="btn btn-main" id="rRuleGo"' + (ruleBusy || closingOn() ? ' disabled' : '') + ' aria-busy="' + (ruleBusy ? 'true' : 'false') + '">次の回からこのルールにする</button>' : '') +
-      (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '') + close;
+      (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '') + close + delHtml(); // A27 §2：［部屋を消す］は［部屋を終える］の下
     ruleCtl = mountRules(el.querySelector('#rRules'), { rules: draft, readOnly: !edit, lockPlayers: true });
     if (!edit) ruleCtl = null;
     if (showShare) el.querySelector('#rShare').onclick = showShare;
@@ -866,7 +869,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       ruleMsg = null;
       sendRules(chk.rules);
     };
-    wireClose();
+    wireClose(); wireDel();
   }
   /* C4 §2 table_rules＝並びに積まず直に送る（direct）。送る前に ± のまとめと並びを空にする（startShared と同じ・送り切ってから続き）。
    * ok＝写しに当てて鎖の最後へ移り帯／同じ rules＝何も変わらない／bad at extras＝帯だけ（変えない）／conflict at next＝読み直して鎖の最後で開き直す */
@@ -1003,7 +1006,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (!delUi.open) h += '<button class="btn btn-aka-line" id="rDelRoom">部屋を消す</button>';
     else {
       const n = unsentN();
-      h += '<p class="setsumei" id="rDelQ">部屋を消すと、入っていた人も誰も開けなくなります。7日の間はホームから戻せます。</p>' +
+      h += '<p class="setsumei" id="rDelQ">部屋を消すと、入っていた人も誰も開けなくなります。7日の間は、ホームの［対局］（部屋を作る・入る）の一番下から戻せます。</p>' +
         (n ? '<p class="setsumei" id="rDelUnsent">この端末のまだ送れていない点 ' + n + '組も消えます。</p>' : '') +
         '<button class="btn btn-aka" id="rDelGo"' + (delBusy ? ' disabled' : '') + ' aria-busy="' + (delBusy ? 'true' : 'false') + '">部屋を消す</button>';
       if (!delOn()) h += '<button class="btn btn-line" id="rDelNo">やめる</button>'; // 送った後（印が在る間）はやめられない＝倉庫で通ったか分からない
@@ -1307,6 +1310,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   // ①［対局終了］（shuuryou_v1.md v4〜v4.3・司さん 11-21「対局終了にしろ」）
   // ★入っていない物が1件でもある間（今か、終えた時の控えに）は、お金の数を1つも出さない（止めて警告）★＝partial の1つの判じを下の全部が見る
   function renderSeisan() {
+    const ask = endAsk; endAsk = false; // A27 §1（止め1）：早い return（読み込み中・出せない・足し①）の前に必ず下ろす＝後の［精算を見る］で締めない
     bar({ back: '対局', onBack: toRoom, title: '精算' });
     const d = seisanData(), s = d.s;
     shownTag = tagKey();
@@ -1394,6 +1398,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     }
     el.innerHTML = h;
     wireSeisanAll(d, settles.length);
+    // A27 §1：部屋の頁の［対局終了］＝この頁の［対局終了］を押したのと同じ（入っていない物があれば確かめ・無ければ締めてホーム）。次の手で、その時の頁の釦を引き直して押す（古い d で配線を続けない）
+    if (ask) setTimeout(() => { if (dead || page !== 'seisan') return; const b = el.querySelector('#sClose'); if (b && !b.disabled) b.click(); }, 0);
   }
   function wireSeisanAll(d, revs) { wireSeisan(d, revs); wireFix(); wireBands(); }
   // C4 §5：開催の取り消していない卓の鎖の頭（区切っていない卓は自分）
@@ -1530,6 +1536,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (q('#rTakuMain')) q('#rTakuMain').onclick = () => addTaku(false);
     if (q('#rTakuAlt')) q('#rTakuAlt').onclick = () => addTaku(true);
     if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; render(); };
+    if (q('#rEnd')) q('#rEnd').onclick = () => { if (closingOn() || goHome) return; page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; endAsk = true; render(); };
     for (const b of el.querySelectorAll('.r-no')) b.onclick = () => { if (!room.closed) startEntry(b.dataset.h); };
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
   }

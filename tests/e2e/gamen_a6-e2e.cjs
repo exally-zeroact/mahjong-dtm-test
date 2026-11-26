@@ -1,4 +1,7 @@
-// A6「［部屋を消す］と、ホームの［元に戻す］」の画面の台（a6_sadame.md v1.4.3 §3・v1.3 の段 D1-D14 は A15g の並びのカードに合わせた）。
+// A6＋A27「［部屋を消す］はルールの頁の［部屋を終える］の下・［元に戻す］は taikyoku.html（部屋を作る・入る）の一番下 #tModosu・ホームに帯を出さない・対局の頁の一番下は［対局終了］#rEnd」の画面の台
+// （a6_sadame.md v1.4.3 §3 の段を a27_sadame.md v1.1 §5 の置き場に書き直した＝gamen_a6-e2e.cjs の A27 版。A27 が入る push で tests/e2e/gamen_a6-e2e.cjs をこれで置き換える）。
+// 帯（bands）＝taikyoku.html の #tModosu の行。ホーム（home()）はカードだけ＋ homeBand（ホームに帯が在るか＝いつも false が正）。
+// E1-E4＝A27 §1 の［対局終了］#rEnd（E3＝押した印が読み込み中の頁で落ちる＝後の［精算を見る］で締めない／E4＝読み込みの後に同じ頁で描き直しても締めない）。
 // v1.4.3：偽の倉庫に mj_my_rooms（p_open＝入った部屋で消していない・閉じていない・締めていない／p_deleted＝持ち主で消して7日の内・deleted_at の新しい順・(deleted_at, room_id) の頁）。
 //   ctl(dev).by['mj_my_rooms:open:1'|'mj_my_rooms:deleted:2'…] = { force:[…], delayMs, hold:Promise }＝読み1つ・頁1つだけ切る・遅らせる（N1）。
 // node gamen_a6-e2e.cjs <作業木> [--self] [--chromium]（既定 WebKit）・ONLY=D1,D3 で段を選ぶ
@@ -21,7 +24,7 @@
 //     D14 closed の返し（roomInfo({closed:true})）を通っても持ち主の箱は残る
 // 壊し（--self）は配る中身の字を1か所ずつ書き換える（作業木は触らない）・壊しごとに効く段だけ回す（only）。
 const http = require('http'), fs = require('fs'), path = require('path'), { pathToFileURL } = require('url');
-const pw = require('playwright');
+const pw = require(require.resolve('playwright', { paths: ['C:/Users/zeroa/Exally-test'] }));
 const ROOT = path.resolve(process.argv[2]);
 const SELF = process.argv.includes('--self');
 const CHROMIUM = process.argv.includes('--chromium');
@@ -149,7 +152,7 @@ const srv = http.createServer(async (q, r) => {
       if (k.force && k.force.length) { const x = k.force.shift(); if (x && x.__http !== undefined) { send({ data: null, error: { message: 'upstream' } }, x.__http); return; } send(x); return; }
       send(myRoomsOf(uid, args, list)); return;
     }
-    if (fn === 'mj_read') { LOG.push({ dev, fn, t: Date.now() }); send(mjRead(uid, args)); return; }
+    if (fn === 'mj_read') { LOG.push({ dev, fn, t: Date.now() }); if (c.readHold) await c.readHold; send(mjRead(uid, args)); return; }
     if (fn === 'mj_write') {
       const e = { dev, fn, op_id: args.p_op_id, ops: args.p_ops.map((o) => o.op), t: Date.now() }; LOG.push(e);
       if (c.delayOp && e.ops.includes(c.delayOp.op)) await sleep(c.delayOp.ms);
@@ -169,7 +172,7 @@ const srv = http.createServer(async (q, r) => {
   const ext = path.extname(f);
   if (ext === '.png') { r.writeHead(200, { 'content-type': MT[ext] }); r.end(fs.readFileSync(f)); return; }
   let b = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
-  if (mutate && mutate.file && f.replace(/\\/g, '/').endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); if (mutate.also) { if (!b.includes(mutate.also[0])) { console.log('✗ 壊しの字が無い ' + mutate.also[0]); process.exit(2); } b = b.replace(mutate.also[0], mutate.also[1]); } }
+  if (mutate && mutate.file && f.replace(/\\/g, '/').endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); if (mutate.also) { for (const [x, y] of (Array.isArray(mutate.also[0]) ? mutate.also : [mutate.also])) { if (!b.includes(x)) { console.log('✗ 壊しの字が無い ' + x); process.exit(2); } b = b.replace(x, y); } } }
   r.writeHead(200, { 'content-type': MT[ext] || 'text/plain' }); r.end(b);
 });
 
@@ -201,66 +204,77 @@ async function run(br, port) {
   const path_ = (pg) => new URL(pg.url()).pathname;
   const atHome = (pg) => ['/', '/index.html'].includes(path_(pg));
   const waitHome = (pg) => pg.waitForURL((u) => ['/', '/index.html'].includes(u.pathname), { timeout: SELF ? 5000 : 10000 }).catch(() => {});
-  const home = async (pg) => { await pg.waitForSelector('#btnOut'); await sleep(400); return pg.evaluate(() => { const b = document.getElementById('tsuzuki'); const d = document.getElementById('hDel'); const cs = [...b.querySelectorAll('.h-cont')]; return { hidden: b.hidden || !cs.length, cards: cs.map((c) => c.dataset.rid), href: cs[0] ? cs[0].getAttribute('href') : null, name: cs[0] ? (cs[0].querySelector('.h-r') || {}).textContent : null, fb: !document.getElementById('hBand').hidden, bands: d && !d.hidden ? [...d.querySelectorAll('.h-del')].map((x) => ({ rid: x.dataset.rid, t: (x.querySelector('.h-del-t') || {}).textContent, e: (x.querySelector('.h-del-e') || {}).textContent || null })) : [] }; }); };
+  const home = async (pg) => { await pg.waitForSelector('#btnOut'); await sleep(400); return pg.evaluate(() => { const b = document.getElementById('tsuzuki'); const cs = [...b.querySelectorAll('.h-cont')]; return { hidden: b.hidden || !cs.length, cards: cs.map((c) => c.dataset.rid), href: cs[0] ? cs[0].getAttribute('href') : null, name: cs[0] ? (cs[0].querySelector('.h-r') || {}).textContent : null, fb: !document.getElementById('hBand').hidden, homeBand: !!document.querySelector('#hDel, .h-del, [data-undo]') }; }); };
+  // A27 §4：消した部屋の行＝taikyoku.html（部屋を作る・入る）の一番下 #tModosu
+  const modosuNow = (pg) => pg.evaluate(() => { const d = document.getElementById('tModosu'); const sec = d ? d.querySelector('.sec') : null; return { shown: !!d && !d.hidden, sec: sec ? sec.textContent : null, bands: d && !d.hidden ? [...d.querySelectorAll('.h-del')].map((x) => ({ rid: x.dataset.rid, t: (x.querySelector('.h-del-t') || {}).textContent, e: (x.querySelector('.h-del-e') || {}).textContent || null })) : [] }; });
+  const modosu = async (pg) => { await pg.goto(`http://127.0.0.1:${port}/taikyoku.html`); await pg.waitForFunction(() => { const v = document.getElementById('vChoose'); return v && !v.hidden; }); await sleep(500); return modosuNow(pg); };
+  const onModosu = (pg) => path_(pg) === '/taikyoku.html' && !new URL(pg.url()).searchParams.get('room');
+  const rulesPage = async (pg) => { await pg.waitForFunction(() => { const r = document.getElementById('barR'); return r && !r.hidden && r.textContent === 'ルール'; }); await pg.click('#barR'); await pg.waitForSelector('#rRules'); await sleep(200); };
   const goHomePage = async (pg) => { await pg.goto(`http://127.0.0.1:${port}/index.html`); return home(pg); };
   const roomReady = async (pg) => { await pg.waitForSelector('#vRoom .r-top'); await sleep(400); };
-  const delNow = async (pg) => { await pg.click('#rDelRoom'); await pg.waitForSelector('#rDelGo'); await pg.click('#rDelGo'); };
-  const undoAt = async (pg, rid) => { await pg.click('#hDel [data-undo="' + rid + '"]'); await sleep(400); return home(pg); };
+  const delNow = async (pg) => { if (!(await has(pg, '#rRules'))) await rulesPage(pg); await pg.click('#rDelRoom'); await pg.waitForSelector('#rDelGo'); await pg.click('#rDelGo'); };
+  const undoAt = async (pg, rid) => { if (!onModosu(pg)) await modosu(pg); await pg.click('#tModosu [data-undo="' + rid + '"]'); await sleep(400); return modosuNow(pg); };
   const PM = (m, a = 1) => '#vRoom .r-pm[data-m="' + m + '"][data-k="chip"][data-a="' + a + '"]';
   const only = process.env.ONLY || '';
   const want = (k) => !only || only.split(',').includes(k);
   const step = async (k, f) => { if (!want(k)) return; DB.clear(); LW = 1; for (const x of Object.keys(CTL)) delete CTL[x]; try { await f(); } catch (e) { fail++; let pv = ''; if (process.env.DBG && lastPg) pv = '  頁=' + (await lastPg.evaluate(() => location.pathname + ' ' + document.body.innerText.slice(0, 400)).catch(() => '?')); bad.push('止まった(' + k + '): ' + String(e.message || e).split('\n')[0].slice(0, 300) + pv); } };
   try {
+    const DELQ = '部屋を消すと、入っていた人も誰も開けなくなります。7日の間は、ホームの［対局］（部屋を作る・入る）の一番下から戻せます。'; // a27_sadame §2（止め2）
+    const isLast = (pg, sel) => pg.evaluate((s) => { const b = document.querySelector(s); return !!b && b.parentElement.lastElementChild === b; }, sel);
     await step('D1', async () => {
       mkRoom('d1');
       const A = await device('A1', 'u1', seedOf('u1', [rowOf('d1', 'u1', 9)]));
       await openR(A.pg, 'd1'); await roomReady(A.pg);
-      ok('D1 持ち主に #rDelBox が在る', await has(A.pg, '#rDelBox #rDelRoom'));
+      ok('D1 部屋の頁に［部屋を消す］が無い（A27 §2）', !(await has(A.pg, '#rDelBox')) && !(await has(A.pg, '#rDelRoom')));
+      ok('D1 部屋の頁の一番下は［対局終了］#rEnd（A27 §1）', (await isLast(A.pg, '#rEnd')) && (await txt(A.pg, '#rEnd')) === '対局終了', await A.pg.evaluate(() => { const b = document.getElementById('rEnd'); return b ? b.parentElement.lastElementChild.id : null; }));
+      await rulesPage(A.pg);
+      ok('D1 持ち主にルールの頁の #rDelBox が在る（頁の一番下）', (await has(A.pg, '#rDelBox #rDelRoom')) && (await isLast(A.pg, '#rDelBox')));
       await A.pg.click('#rDelRoom'); await A.pg.waitForSelector('#rDelQ');
-      if (process.env.SHOT) { const el = await A.pg.$("#rDelBox"); if (el) await el.scrollIntoViewIfNeeded(); await A.pg.screenshot({ path: require("path").join(process.env.SHOT, "a6_kesu_" + (CHROMIUM ? "cr" : "wk") + ".png") }); }
-      ok('D1 2段目の字・［やめる］が在る', /7日の間はホームから戻せます/.test(await txt(A.pg, '#rDelQ')) && !/この端末のホームから/.test(await txt(A.pg, '#rDelQ')) && (await has(A.pg, '#rDelNo')) && !(await has(A.pg, '#rDelUnsent')));
+      if (process.env.SHOT) { const el = await A.pg.$("#rDelBox"); if (el) await el.scrollIntoViewIfNeeded(); await A.pg.screenshot({ path: require("path").join(process.env.SHOT, "a27_kesu_" + (CHROMIUM ? "cr" : "wk") + ".png") }); }
+      ok('D1 2段目の字（§2 の字のまま）・［やめる］が在る', (await txt(A.pg, '#rDelQ')) === DELQ && (await has(A.pg, '#rDelNo')) && !(await has(A.pg, '#rDelUnsent')), await txt(A.pg, '#rDelQ'));
       await A.pg.click('#rDelNo'); await sleep(100);
       ok('D1 ［やめる］で1段目に戻る', (await has(A.pg, '#rDelRoom')) && !(await has(A.pg, '#rDelQ')));
       await delNow(A.pg); await waitHome(A.pg);
       ok('D1 消すと URL が /', atHome(A.pg), A.pg.url());
       ok('D1 倉庫の deleted_at が在る', !!DB.get('d1').deleted_at);
       const h = await home(A.pg);
-      ok('D1 カードが無い・帯が1つ「「対局」を消しました」', h.hidden === true && h.bands.length === 1 && h.bands[0].t === '「対局」を消しました', h);
+      ok('D1 ホーム＝カードが無い・帯を出さない（A27 §3）', h.hidden === true && h.homeBand === false, h);
       ok('D1 消す印が残っていない', (await lsRaw(A.pg, PDEL('u1', 'd1'))) === null);
-      const h2 = await undoAt(A.pg, 'd1');
-      ok('D1 戻す→倉庫の deleted_at が空', DB.get('d1').deleted_at === null);
-      ok('D1 戻す→カードが戻る・帯が消える', !h2.hidden && (h2.href || '').includes('room=d1') && h2.bands.length === 0, h2);
+      const m = await modosu(A.pg);
+      ok('D1 対局の頁の一番下に見出しと行1つ「「対局」を消しました」', m.shown && m.sec === '消した部屋（7日の間は戻せます）' && m.bands.length === 1 && m.bands[0].t === '「対局」を消しました' && (await isLast(A.pg, '#tModosu')), m);
+      const m2 = await undoAt(A.pg, 'd1');
+      ok('D1 戻す→倉庫の deleted_at が空・行が消えて見出しごと出ない', DB.get('d1').deleted_at === null && m2.bands.length === 0 && m2.shown === false, m2);
+      const h2 = await goHomePage(A.pg);
+      ok('D1 戻す→ホームにカードが戻る', !h2.hidden && (h2.href || '').includes('room=d1'), h2);
     });
 
     await step('D2', async () => {
       mkRoom('d2', { kind: 'shared', owner: 'u9' });
       const A = await device('A2', 'u1', seedOf('u1', [rowOf('d2', 'u1', 9)]));
-      await openR(A.pg, 'd2'); await roomReady(A.pg); await sleep(300);
-      ok('D2 持ち主でない（owner:false）＝箱が無い', !(await has(A.pg, '#rDelBox')));
-      // 控えに owner:true が残っていても mj_read の false で外れる
+      await openR(A.pg, 'd2'); await roomReady(A.pg); await sleep(300); await rulesPage(A.pg);
+      ok('D2 持ち主でない（owner:false）＝ルールの頁に箱が無い', (await has(A.pg, '#rRules')) && !(await has(A.pg, '#rDelBox')));
       mkRoom('d2b', { kind: 'shared', owner: 'u9' });
       const B = await device('B2', 'u1', seedOf('u1', [{ ...rowOf('d2b', 'u1', 9), owner: true }]));
-      await openR(B.pg, 'd2b'); await roomReady(B.pg); await sleep(300);
-      ok('D2 控えの owner:true も読んだ false で外れる', !(await has(B.pg, '#rDelBox')), await ls(B.pg, 'mj-rooms:u1'));
-      // リーグの対局
+      await openR(B.pg, 'd2b'); await roomReady(B.pg); await sleep(300); await rulesPage(B.pg);
+      ok('D2 控えの owner:true も読んだ false で外れる', (await has(B.pg, '#rRules')) && !(await has(B.pg, '#rDelBox')), await ls(B.pg, 'mj-rooms:u1'));
       mkRoom('d2l', { kind: 'shared', owner: 'u1' });
       const C = await device('C2', 'u1', seedOf('u1', [rowOf('d2l', 'u1', 9)]));
-      await openR(C.pg, 'd2l', '&league=L1'); await roomReady(C.pg); await sleep(300);
-      ok('D2 リーグの対局＝箱が無い', !(await has(C.pg, '#rDelBox')));
+      await openR(C.pg, 'd2l', '&league=L1'); await roomReady(C.pg); await sleep(300); await rulesPage(C.pg);
+      ok('D2 リーグの対局＝ルールの頁に箱が無い', (await has(C.pg, '#rRules')) && !(await has(C.pg, '#rDelBox')));
     });
 
     await step('D3', async () => {
       mkRoom('d3');
       const out = [{ op_id: 'held-1', ops: [{ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'chip', add: 1, follow: true }], held: { err: 'conflict' } }];
       const A = await device('A3', 'u1', seedOf('u1', [rowOf('d3', 'u1', 9)], { [OUT('u1', 'd3')]: out }));
-      await openR(A.pg, 'd3'); await roomReady(A.pg);
+      await openR(A.pg, 'd3'); await roomReady(A.pg); await rulesPage(A.pg);
       await A.pg.click('#rDelRoom'); await A.pg.waitForSelector('#rDelQ');
       ok('D3 2段目に「1組も消えます」', /まだ送れていない点 1組も消えます/.test((await txt(A.pg, '#rDelUnsent')) || ''), await txt(A.pg, '#rDelBox'));
       await A.pg.click('#rDelGo'); await waitHome(A.pg);
       ok('D3 消すと /', atHome(A.pg), A.pg.url());
       ok('D3 並びの鍵が無い', (await lsRaw(A.pg, OUT('u1', 'd3'))) === null, await lsRaw(A.pg, OUT('u1', 'd3')));
       const h = await home(A.pg);
-      ok('D3 ホームにカードが無い（未送信のカードも出ない）', h.hidden === true, h);
+      ok('D3 ホームにカードが無い（未送信のカードも出ない）・帯も無い', h.hidden === true && h.homeBand === false, h);
     });
 
     await step('D4', async () => {
@@ -295,7 +309,9 @@ async function run(br, port) {
       mkRoom('d6');
       const A = await device('A6', 'u1', seedOf('u1', [rowOf('d6', 'u1', 9)], { [PDEL('u1', 'd6')]: 'op-d6-held' }));
       await openR(A.pg, 'd6'); await roomReady(A.pg); await sleep(600);
-      ok('D6 印が在る＝2段目が開いて［もう一度］・［やめる］無し', (await has(A.pg, '#rDelQ')) && (await has(A.pg, '#rDelRetry')) && !(await has(A.pg, '#rDelNo')), await txt(A.pg, '#rDelBox'));
+      ok('D6 印が在っても部屋の頁には箱を出さない', !(await has(A.pg, '#rDelBox')));
+      await rulesPage(A.pg);
+      ok('D6 印が在る＝ルールの頁で2段目が開いて［もう一度］・［やめる］無し', (await has(A.pg, '#rDelQ')) && (await has(A.pg, '#rDelRetry')) && !(await has(A.pg, '#rDelNo')), await txt(A.pg, '#rDelBox'));
       ok('D6 自動では送らない', delW('A6').length === 0);
       await A.pg.click('#rDelRetry'); await waitHome(A.pg);
       const w = delW('A6');
@@ -311,8 +327,10 @@ async function run(br, port) {
       ok('D7 他の人＝帯 #rGone・控えに gone:true・deleted_at 無し', row && row.gone === true && !row.deleted_at, row);
       ok('D7 他の人には箱が無い', !(await has(B.pg, '#rDelBox')));
       const h = await goHomePage(B.pg);
-      ok('D7 ホームにカードも帯も無い', h.hidden === true && h.bands.length === 0, h);
-      ctl('B7').by['mj_my_rooms:open'] = { force: [{ __http: 0 }] }; // 11-26 --self：カードの読みを切った控えでも gone の部屋は出ない（倉庫の一覧だけだと delRow の gone を見ない壊しが緑）
+      ok('D7 ホームにカードも帯も無い', h.hidden === true && h.homeBand === false, h);
+      const mb = await modosu(B.pg);
+      ok('D7 他の人の対局の頁に戻す行は無い', mb.bands.length === 0 && mb.shown === false, mb);
+      ctl('B7').by['mj_my_rooms:open'] = { force: [{ __http: 0 }] }; // 11-26 --self：カードの読みを切った控えでも gone の部屋は出ない
       const hf = await goHomePage(B.pg);
       ok('D7 控え（読めない）でも gone の部屋のカードは出ない', hf.fb === true && !hf.cards.includes('d7'), hf);
     });
@@ -321,9 +339,9 @@ async function run(br, port) {
       mkRoom('d8', { kind: 'shared', owner: 'u1' });
       const row = { ...rowOf('d8', 'u1', 9) }; delete row.owner;
       const A = await device('A8', 'u1', seedOf('u1', [row]));
-      await openR(A.pg, 'd8'); await roomReady(A.pg);
+      await openR(A.pg, 'd8'); await roomReady(A.pg); await rulesPage(A.pg);
       await waitFor(() => has(A.pg, '#rDelRoom'), 3000);
-      ok('D8 持ち主の2台目（控えに owner 無し）＝読んだ後に箱が出る', await has(A.pg, '#rDelRoom'));
+      ok('D8 持ち主の2台目（控えに owner 無し）＝読んだ後にルールの頁に箱が出る', await has(A.pg, '#rDelRoom'));
       const r2 = ((await ls(A.pg, 'mj-rooms:u1')) || [])[0];
       ok('D8 控えに owner:true', r2 && r2.owner === true, r2);
     });
@@ -340,33 +358,41 @@ async function run(br, port) {
       ok('D9 開き直す→gone→印が在る＝片付けて /', atHome(A.pg), A.pg.url());
       ok('D9 印が消えた', (await lsRaw(A.pg, PDEL('u1', 'd9'))) === null);
       const h = await home(A.pg);
-      ok('D9 帯が1つ・カード無し', h.hidden === true && h.bands.length === 1 && h.bands[0].rid === 'd9', h);
+      ok('D9 カード無し・ホームに帯無し', h.hidden === true && h.homeBand === false, h);
+      const m = await modosu(A.pg);
+      ok('D9 対局の頁に行が1つ', m.bands.length === 1 && m.bands[0].rid === 'd9', m);
     });
 
     await step('D9', async () => {
       mkRoom('d9b');
       const A = await device('A9b', 'u1', seedOf('u1', [rowOf('d9b', 'u1', 9)]));
-      await openR(A.pg, 'd9b'); await roomReady(A.pg);
-      DB.get('d9b').deleted_at = NOW(); // 持ち主の別の端末で先に消した（同じ op_id の送り直しは倉庫が前の ok を返す＝gone はこの道）
+      await openR(A.pg, 'd9b'); await roomReady(A.pg); await rulesPage(A.pg);
+      DB.get('d9b').deleted_at = NOW(); // 持ち主の別の端末で先に消した
       await delNow(A.pg); await waitHome(A.pg);
       ok('D9 消す返しが gone＝もう消えている＝通ったと見て /', atHome(A.pg) && delW('A9b').length === 1, [A.pg.url(), await txt(A.pg, '#rDelBox')]);
-      if (atHome(A.pg)) { const h = await home(A.pg); ok('D9 ［もう一度］の後も帯が1つ', h.bands.length === 1 && h.bands[0].rid === 'd9b', h); }
+      if (atHome(A.pg)) { const m = await modosu(A.pg); ok('D9 gone の後も対局の頁に行が1つ', m.bands.length === 1 && m.bands[0].rid === 'd9b', m); }
     });
 
     await step('D10', async () => {
       mkRoom('d10a', { kind: 'shared', name: '前の会' }); mkRoom('d10b', { kind: 'shared', name: '後の会' });
       const A = await device('A10', 'u1', seedOf('u1', [rowOf('d10a', 'u1', 9), rowOf('d10b', 'u1', 8)]));
-      await openR(A.pg, 'd10a'); await roomReady(A.pg); await delNow(A.pg); await waitHome(A.pg);
+      await openR(A.pg, 'd10a'); await roomReady(A.pg); await rulesPage(A.pg);
+      ok('D10 shared＝［部屋を消す］は［部屋を終える］の下（頁の一番下）', (await A.pg.evaluate(() => { const c = document.getElementById('rCloseBox'); const d = document.getElementById('rDelBox'); return !!c && !!d && !!(c.compareDocumentPosition(d) & Node.DOCUMENT_POSITION_FOLLOWING); })) && (await isLast(A.pg, '#rDelBox')));
+      await delNow(A.pg); await waitHome(A.pg);
       await sleep(30);
       await openR(A.pg, 'd10b'); await roomReady(A.pg); await delNow(A.pg); await waitHome(A.pg);
       const h = await home(A.pg);
-      if (process.env.SHOT) { const el = await A.pg.$("#hDel"); if (el) await el.scrollIntoViewIfNeeded(); await A.pg.screenshot({ path: require("path").join(process.env.SHOT, "a6_home_" + (CHROMIUM ? "cr" : "wk") + ".png") }); }
-      ok('D10 帯2つ・新しい順（後に消した方が上）', h.bands.length === 2 && h.bands[0].rid === 'd10b' && h.bands[1].rid === 'd10a' && h.hidden === true, h);
-      ctl('A10').by['mj_my_rooms:open'] = { force: [{ __http: 0 }] }; ctl('A10').by['mj_my_rooms:deleted'] = { force: [{ __http: 0 }] }; // 11-26 --self：戻した後の読みを2つとも切る＝控えの印を戻す時に外していなければカードが出ない（倉庫の一覧が印を外す :68 と消した一覧の揃え §3 9c に頼らない）
-      const h2 = await undoAt(A.pg, 'd10a');
+      ok('D10 ホームにカード無し・帯無し', h.hidden === true && h.homeBand === false, h);
+      const m = await modosu(A.pg);
+      if (process.env.SHOT) { const el = await A.pg.$("#tModosu"); if (el) await el.scrollIntoViewIfNeeded(); await A.pg.screenshot({ path: require("path").join(process.env.SHOT, "a27_modosu_" + (CHROMIUM ? "cr" : "wk") + ".png") }); }
+      ok('D10 行2つ・新しい順（後に消した方が上）', m.bands.length === 2 && m.bands[0].rid === 'd10b' && m.bands[1].rid === 'd10a', m);
+      // 11-26 --self：戻した後の読みを切る（対局の頁の読み直し1回＋ホームの消した一覧1回＝2回・カードの読み1回）＝控えの印を戻す時に外していなければカードが出ない
+      ctl('A10').by['mj_my_rooms:open'] = { force: [{ __http: 0 }] }; ctl('A10').by['mj_my_rooms:deleted'] = { force: [{ __http: 0 }, { __http: 0 }] };
+      const m2 = await undoAt(A.pg, 'd10a');
+      ok('D10 古い方を戻す→もう1つの行は残る・倉庫', m2.bands.length === 1 && m2.bands[0].rid === 'd10b' && DB.get('d10a').deleted_at === null && !!DB.get('d10b').deleted_at, m2);
       const r10 = ((await ls(A.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'd10a') || {};
-      ok('D10 戻したら控えの印が外れる（読めなくても控えからカード）', !r10.deleted_at && r10.gone !== true && h2.fb === true && h2.cards.includes('d10a'), [r10, h2]);
-      ok('D10 古い方を戻す→その部屋のカード・もう1つの帯は残る', !h2.hidden && (h2.href || '').includes('room=d10a') && h2.bands.length === 1 && h2.bands[0].rid === 'd10b' && DB.get('d10a').deleted_at === null && !!DB.get('d10b').deleted_at, h2);
+      const h2 = await goHomePage(A.pg);
+      ok('D10 戻したら控えの印が外れる（読めなくても控えからカード）', !r10.deleted_at && r10.gone !== true && h2.fb === true && h2.cards.includes('d10a') && (h2.href || '').includes('room=d10a'), [r10, h2]);
     });
 
     await step('D11', async () => {
@@ -377,9 +403,10 @@ async function run(br, port) {
       await openR(A.pg, 'd11'); await A.pg.waitForSelector('#rGone');
       const row = ((await ls(A.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'd11');
       ok('D11 消した端末で開き直す（gone）＝gone を足さない', row && row.gone !== true && !!row.deleted_at, row);
-      const h = await goHomePage(A.pg);
-      ok('D11 ホームに帯が残る', h.bands.length === 1 && h.bands[0].rid === 'd11', h);
-      const h2 = await undoAt(A.pg, 'd11');
+      const m = await modosu(A.pg);
+      ok('D11 対局の頁に行が残る', m.bands.length === 1 && m.bands[0].rid === 'd11', m);
+      await undoAt(A.pg, 'd11');
+      const h2 = await goHomePage(A.pg);
       ok('D11 戻す→カードが戻る', !h2.hidden && (h2.href || '').includes('room=d11'), h2);
     });
 
@@ -405,8 +432,8 @@ async function run(br, port) {
       ctl('A13').delayOp = { op: 'extra_add', ms: 1500 };
       await A.pg.click(PM('m1', 1));
       await sleep(500); // まとめ 0.3秒が流れて送りの最中
-      await A.pg.click('#rDelRoom'); await A.pg.waitForSelector('#rDelGo');
-      await A.pg.click(PM('m2', 1)); // まとめ（0.3秒）に1つ残したまま
+      await A.pg.click(PM('m2', 1)); // 2つ目を押してすぐルールの頁で消す（ルールの頁は出す時にまとめを流す＝送りの最中の並びに積まれる）
+      await A.pg.click('#barR'); await A.pg.waitForSelector('#rDelRoom'); await A.pg.click('#rDelRoom'); await A.pg.waitForSelector('#rDelGo');
       await A.pg.click('#rDelGo'); await waitHome(A.pg);
       await sleep(2000);
       const raw = await lsRaw(A.pg, OUT('u1', 'd13'));
@@ -422,26 +449,64 @@ async function run(br, port) {
       await openR(A.pg, 'd14'); await roomReady(A.pg);
       await waitFor(async () => { const r = ((await ls(A.pg, 'mj-rooms:u1')) || [])[0]; return r && r.closed === true; }, 4000);
       await sleep(500);
+      ok('D14 終えた部屋の頁に［対局終了］#rEnd は出ない（A27 §1）', !(await has(A.pg, '#rEnd')));
+      await rulesPage(A.pg);
       const r = ((await ls(A.pg, 'mj-rooms:u1')) || [])[0];
-      ok('D14 closed の返しの後も owner が残り箱が在る', r && r.closed === true && r.owner === true && (await has(A.pg, '#rDelRoom')), [r, await has(A.pg, '#rDelRoom')]);
+      ok('D14 closed の返しの後も owner が残りルールの頁に箱が在る', r && r.closed === true && r.owner === true && (await has(A.pg, '#rDelRoom')), [r, await has(A.pg, '#rDelRoom')]);
     });
 
-    // ===== v1.4.3（帯は倉庫の消した一覧から） =====
+    // ===== A27 §1：部屋の頁の一番下の［対局終了］#rEnd =====
+    const snapW = (dev) => LOG.filter((x) => x.dev === dev && x.fn === 'mj_write' && x.ops.includes('settle_snap'));
+    await step('E1', async () => {
+      mkRoom('e1');
+      const A = await device('E1A', 'u1', seedOf('u1', [rowOf('e1', 'u1', 9)]));
+      await openR(A.pg, 'e1'); await roomReady(A.pg);
+      ok('E1 #rEnd が在って押せる', (await has(A.pg, '#rEnd')) && !(await A.pg.$eval('#rEnd', (b) => b.disabled)));
+      await A.pg.click('#rEnd'); await waitHome(A.pg);
+      ok('E1 入っていない物 0＝そのまま締めて（settle_snap 1回）ホームへ（精算の頁の［対局終了］と同じ道）', atHome(A.pg) && snapW('E1A').length === 1, [A.pg.url(), snapW('E1A').length, await txt(A.pg, 'main')]);
+    });
+    const unloadedSeed = (rid) => { const o = seedOf('u1', [rowOf(rid, 'u1', 9)]); o[KEY('u1', rid)] = { ...clone(DB.get(rid).st), loaded: [] }; return o; };
+    await step('E3', async () => {
+      mkRoom('e3');
+      let go; ctl('E3A').readHold = new Promise((s) => { go = s; }); // 倉庫の読みを止める＝写しは開催を読んでいない（unloaded）
+      const A = await device('E3A', 'u1', unloadedSeed('e3'));
+      await openR(A.pg, 'e3'); await roomReady(A.pg);
+      await A.pg.click('#rEnd'); await A.pg.waitForSelector('#sLoading');
+      await A.pg.click('#barBack'); await A.pg.waitForSelector('#rSeisan');
+      ctl('E3A').readHold = null; go(); await sleep(1200);
+      await A.pg.click('#rSeisan'); await A.pg.waitForSelector('#sClose'); await sleep(800);
+      ok('E3 ［対局終了］→読み込み中→戻る→［精算を見る］＝締めない（settle_snap 0・精算の頁に残る）', snapW('E3A').length === 0 && !atHome(A.pg) && (await has(A.pg, '#sClose')), [snapW('E3A').length, A.pg.url()]);
+    });
+    await step('E4', async () => {
+      mkRoom('e4');
+      let go; ctl('E4A').readHold = new Promise((s) => { go = s; });
+      const A = await device('E4A', 'u1', unloadedSeed('e4'));
+      await openR(A.pg, 'e4'); await roomReady(A.pg);
+      await A.pg.click('#rEnd'); await A.pg.waitForSelector('#sLoading');
+      ctl('E4A').readHold = null; go();
+      await A.pg.waitForSelector('#sClose'); await sleep(800);
+      ok('E4 ［対局終了］→読み込み中→読めて同じ頁を描き直す＝締めない（印は読み込み中の頁で落ちる・a27 止め1）', snapW('E4A').length === 0 && !atHome(A.pg), [snapW('E4A').length, A.pg.url()]);
+    });
+
+    // ===== v1.4.3（帯は倉庫の消した一覧から）＝A27 で taikyoku.html の #tModosu へ =====
     const ago = (ms) => new Date(Date.now() - ms).toISOString();
     const D_ = 24 * 3600e3;
     await step('V1', async () => {
       mkRoom('v1');
       const A = await device('V1A', 'u1', seedOf('u1', [rowOf('v1', 'u1', 9)]));
       await openR(A.pg, 'v1'); await roomReady(A.pg); await delNow(A.pg); await waitHome(A.pg);
-      const h = await home(A.pg);
-      ok('V1 A：カード無し・帯1つ', h.hidden && h.bands.length === 1 && h.bands[0].rid === 'v1', h);
+      const h = await home(A.pg); const ma = await modosu(A.pg);
+      ok('V1 A：カード無し・ホームに帯無し・対局の頁に行1つ', h.hidden && h.homeBand === false && ma.bands.length === 1 && ma.bands[0].rid === 'v1', [h, ma]);
       const B = await device('V1B', 'u1', {});
-      const hb = await goHomePage(B.pg);
-      ok('V1 B（同じログイン・控え無し）：倉庫から帯1つ・カード無し', hb.hidden && hb.bands.length === 1 && hb.bands[0].rid === 'v1' && hb.bands[0].t === '「対局」を消しました', hb);
-      const hb2 = await undoAt(B.pg, 'v1');
-      ok('V1 B で戻す→倉庫の deleted_at 空・B にカード・帯無し', DB.get('v1').deleted_at === null && hb2.cards.includes('v1') && hb2.bands.length === 0, hb2);
+      const mb = await modosu(B.pg);
+      ok('V1 B（同じログイン・控え無し）：倉庫から行1つ', mb.bands.length === 1 && mb.bands[0].rid === 'v1' && mb.bands[0].t === '「対局」を消しました', mb);
+      const mb2 = await undoAt(B.pg, 'v1');
+      const hb2 = await goHomePage(B.pg);
+      ok('V1 B で戻す→倉庫の deleted_at 空・B にカード・行無し', DB.get('v1').deleted_at === null && hb2.cards.includes('v1') && mb2.bands.length === 0, [mb2, hb2]);
       const ha = await goHomePage(A.pg);
-      ok('V1 A を開き直す→帯無し・カードが戻る・控えの印が外れた', ha.bands.length === 0 && ha.cards.includes('v1') && !(((await ls(A.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'v1') || {}).deleted_at, ha);
+      ok('V1 A を開き直す→カードが戻る・控えの印が外れた', ha.cards.includes('v1') && !(((await ls(A.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'v1') || {}).deleted_at, ha);
+      const ma2 = await modosu(A.pg);
+      ok('V1 A の対局の頁に行無し', ma2.bands.length === 0, ma2);
     });
     await step('V2', async () => {
       mkRoom('v2');
@@ -449,38 +514,41 @@ async function run(br, port) {
       const B = await device('V2B', 'u1', seedOf('u1', [rowOf('v2', 'u1', 9)], { [OUT('u1', 'v2')]: out }));
       DB.get('v2').deleted_at = ago(60e3); // A が消した
       const h = await goHomePage(B.pg); await sleep(300); const h2 = await home(B.pg);
-      ok('V2 B：送っていない部屋でも帯あり・頭のカード無し・控えに deleted_at', h2.bands.length === 1 && h2.bands[0].rid === 'v2' && !h2.cards.includes('v2') && !!(((await ls(B.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'v2') || {}).deleted_at, [h, h2]);
+      const del2 = !!(((await ls(B.pg, 'mj-rooms:u1')) || []).find((x) => x.room_id === 'v2') || {}).deleted_at; // ホームの読みだけで（対局の頁へ行く前に）
+      ok('V2 B：送っていない部屋でも頭のカード無し・ホームの読みで控えに deleted_at', !h2.cards.includes('v2') && del2 && h2.homeBand === false, [h, h2, del2]);
+      const m = await modosu(B.pg);
+      ok('V2 B：対局の頁に行あり', m.bands.length === 1 && m.bands[0].rid === 'v2', m);
     });
     await step('V3', async () => {
       mkRoom('v3', { kind: 'shared', owner: 'u9' }); DB.get('v3').users.add('u1');
       DB.get('v3').deleted_at = ago(60e3);
       const M = await device('V3M', 'u1', seedOf('u1', [rowOf('v3', 'u1', 9)]));
-      const h = await goHomePage(M.pg);
-      ok('V3 持ち主でない人：帯無し', h.bands.length === 0, h);
+      const m = await modosu(M.pg);
+      ok('V3 持ち主でない人：行無し', m.bands.length === 0, m);
     });
     await step('V5', async () => {
       for (let i = 0; i < 51; i++) { const id = 'v5-' + String(i).padStart(2, '0'); mkRoom(id); DB.get(id).deleted_at = ago((i + 1) * 60e3); }
       const B = await device('V5B', 'u1', {});
-      const h = await goHomePage(B.pg); await waitFor(async () => (await home(B.pg)).bands.length === 51, 5000);
-      const h2 = await home(B.pg); const ids = h2.bands.map((x) => x.rid);
-      ok('V5 51部屋＝帯51・重なり無し・新しい順', ids.length === 51 && new Set(ids).size === 51 && ids[0] === 'v5-00' && ids[50] === 'v5-50', ids.slice(0, 3).concat(ids.slice(-2), [ids.length]));
+      await modosu(B.pg); await waitFor(async () => (await modosuNow(B.pg)).bands.length === 51, 5000);
+      const m2 = await modosuNow(B.pg); const ids = m2.bands.map((x) => x.rid);
+      ok('V5 51部屋＝行51・重なり無し・新しい順', ids.length === 51 && new Set(ids).size === 51 && ids[0] === 'v5-00' && ids[50] === 'v5-50', ids.slice(0, 3).concat(ids.slice(-2), [ids.length]));
       ok('V5 頁は2回（50＋1）', LOG.filter((x) => x.dev === 'V5B' && x.list === 'deleted').length >= 2);
       mkRoom('v5x'); mkRoom('v5y', { closed: true });
       const C = await device('V5C', 'u1', seedOf('u1', [rowOf('v5-00', 'u1', 9), rowOf('v5y', 'u1', 8, { deleted_at: ago(D_) })]));
       ctl('V5C').by['mj_my_rooms:deleted:2'] = { force: [{ __http: 0 }] };
-      const hc = await goHomePage(C.pg); await sleep(300); const hc2 = await home(C.pg);
+      const mc = await modosu(C.pg); await sleep(300); const mc2 = await modosuNow(C.pg);
       const rows = (await ls(C.pg, 'mj-rooms:u1')) || [];
-      ok('V5 2頁目が読めない→控えの帯だけ（v5y）・1頁目の印は書かない', hc2.bands.length === 1 && hc2.bands[0].rid === 'v5y' && !(rows.find((x) => x.room_id === 'v5-00') || {}).deleted_at, [hc2.bands, rows.map((x) => [x.room_id, x.deleted_at || null])]);
+      ok('V5 2頁目が読めない→控えの行だけ（v5y）・1頁目の印は書かない', mc2.bands.length === 1 && mc2.bands[0].rid === 'v5y' && !(rows.find((x) => x.room_id === 'v5-00') || {}).deleted_at, [mc, mc2.bands, rows.map((x) => [x.room_id, x.deleted_at || null])]);
     });
     await step('V6', async () => {
       mkRoom('v6');
       const B = await device('V6B', 'u1', seedOf('u1', [rowOf('v6', 'u1', 9, { deleted_at: ago(D_) })]));
       ctl('V6B').by['mj_my_rooms:deleted'] = { force: [{ __http: 0 }] };
-      const h = await goHomePage(B.pg);
-      ok('V6 消した一覧が読めない→控えの帯', h.bands.length === 1 && h.bands[0].rid === 'v6', h);
+      const m = await modosu(B.pg);
+      ok('V6 消した一覧が読めない→控えの行', m.bands.length === 1 && m.bands[0].rid === 'v6', m);
       DB.get('v6').deleted_at = ago(D_);
-      const h2 = await goHomePage(B.pg);
-      ok('V6 読めた→倉庫の帯', h2.bands.length === 1 && h2.bands[0].rid === 'v6', h2);
+      const m2 = await modosu(B.pg);
+      ok('V6 読めた→倉庫の行', m2.bands.length === 1 && m2.bands[0].rid === 'v6', m2);
     });
     await step('V7', async () => {
       mkRoom('v7'); DB.get('v7').deleted_at = ago(8 * D_); // 掃除前の期限切れ（倉庫の一覧に無い）
@@ -489,8 +557,9 @@ async function run(br, port) {
       const B = await device('V7B', 'u1', seedOf('u1', [rowOf('v7', 'u1', 9, { deleted_at: ago(7 * D_ + 60e3) }), rowOf('v7c', 'u1', 8, { deleted_at: ago(2 * D_) })], { [OUT('u1', 'v7c')]: out }));
       const h = await goHomePage(B.pg); await sleep(300); const h2 = await home(B.pg);
       const rows = (await ls(B.pg, 'mj-rooms:u1')) || []; const r7 = rows.find((x) => x.room_id === 'v7') || {}, r7c = rows.find((x) => x.room_id === 'v7c') || {};
-      ok('V7 期限切れ＝gone:true・deleted_at 残す・帯無し', r7.gone === true && !!r7.deleted_at && h2.bands.length === 0, [r7, h2.bands]);
-      ok('V7 2日前で一覧に無い（他で戻した閉じた部屋）＝印を外す・送っていないカードが頭に戻る', !r7c.deleted_at && h2.cards.includes('v7c'), [r7c, h2.cards]);
+      const m = await modosu(B.pg);
+      ok('V7 期限切れ＝gone:true・deleted_at 残す・行無し', r7.gone === true && !!r7.deleted_at && m.bands.length === 0, [r7, m.bands]);
+      ok('V7 2日前で一覧に無い（他で戻した閉じた部屋）＝印を外す・送っていないカードが頭に戻る', !r7c.deleted_at && h2.cards.includes('v7c'), [r7c, h2.cards, h]);
       ctl('V7B').by['mj_my_rooms:open'] = { force: [{ __http: 0 }] };
       const h3 = await goHomePage(B.pg); await sleep(300); const h4 = await home(B.pg);
       ok('V7 カードが読めない（控え）でも期限切れの部屋はカードに出ない', h4.fb === true && !h4.cards.includes('v7'), [h3, h4]);
@@ -502,46 +571,56 @@ async function run(br, port) {
       DB.get('v8').deleted_at = ago(60e3);
       ctl('V8B').by['mj_my_rooms:deleted:1'] = { delayMs: 3000 };
       await B.pg.goto(`http://127.0.0.1:${port}/index.html`); await B.pg.waitForSelector('#btnOut');
-      await waitFor(async () => (await B.pg.$('#tsuzuki .h-cont')).length > 0, 1200);
+      await waitFor(async () => (await B.pg.$('#tsuzuki .h-cont')) !== null, 1200);
       const early = await home(B.pg);
       await sleep(3200); const late = await home(B.pg);
-      ok('V8 カードが先に出た（送っていない頭のカード）', early.cards.includes('v8') && early.bands.length === 0, early);
-      ok('V8 帯の読みの後に頭のカードが消える・帯1つ', !late.cards.includes('v8') && late.bands.length === 1, late);
+      ok('V8 カードが先に出た（送っていない頭のカード）', early.cards.includes('v8'), early);
+      ok('V8 消した一覧の読みの後に頭のカードが消える・ホームに帯は出さない', !late.cards.includes('v8') && late.homeBand === false, late);
     });
     await step('V9', async () => {
       mkRoom('v9'); mkRoom('v9o');
       DB.get('v9').deleted_at = ago(2 * 60e3); DB.get('v9o').deleted_at = ago(60e3);
       const B = await device('V9B', 'u1', {});
-      const h = await goHomePage(B.pg);
-      ok('V9a 帯2つ', h.bands.length === 2, h);
+      const m = await modosu(B.pg);
+      ok('V9a 行2つ', m.bands.length === 2, m);
       DB.get('v9').deleted_at = ago(8 * D_); // 7日の境を越えた
       ctl('V9B').force = [{ ok: false, err: 'gone' }];
       const nMy = () => LOG.filter((x) => x.dev === 'V9B' && x.fn === 'mj_my_rooms').length; const n0 = nMy();
-      const h2 = await undoAt(B.pg, 'v9');
+      const m2 = await undoAt(B.pg, 'v9');
       ok('V9a 戻せない時は描き直さない（倉庫を読み直さない・定め §2 no draw()）', nMy() === n0, [n0, nMy()]);
-      ok('V9a 戻せない→帯と「戻せませんでした」が残る', h2.bands.some((x) => x.rid === 'v9' && /戻せませんでした/.test(x.e || '')), h2);
-      const h3 = await undoAt(B.pg, 'v9o'); await sleep(300); const h4 = await home(B.pg);
-      ok('V9a 描き直した後（他の部屋を戻した）も v9 の帯と字が残る・v9 のカード無し', h4.bands.some((x) => x.rid === 'v9' && /戻せませんでした/.test(x.e || '')) && !h4.cards.includes('v9') && h4.cards.includes('v9o'), [h3, h4]);
+      ok('V9a 戻せない→行と「戻せませんでした」が残る', m2.bands.some((x) => x.rid === 'v9' && /戻せませんでした/.test(x.e || '')), m2);
+      const m3 = await undoAt(B.pg, 'v9o'); await sleep(300); const m4 = await modosuNow(B.pg);
+      const h4 = await goHomePage(B.pg);
+      ok('V9a 描き直した後（他の部屋を戻した）も v9 の行と字が残る・v9 のカード無し', m4.bands.some((x) => x.rid === 'v9' && /戻せませんでした/.test(x.e || '')) && !h4.cards.includes('v9') && h4.cards.includes('v9o'), [m3, m4, h4]);
       mkRoom('v9n'); mkRoom('v9m');
       const C = await device('V9C', 'u1', seedOf('u1', [rowOf('v9m', 'u1', 8, { deleted_at: ago(60e3) }), rowOf('v9n', 'u1', 9, { deleted_at: ago(2 * 60e3) })]));
       DB.get('v9n').deleted_at = ago(2 * 60e3); DB.get('v9m').deleted_at = ago(60e3);
       ctl('V9C').by['mj_my_rooms:deleted'] = { force: [{ __http: 0 }, { __http: 0 }, { __http: 0 }] };
-      const c1 = await goHomePage(C.pg);
-      ok('V9b 網の外＝控えの帯2つ', c1.bands.length === 2, c1);
-      ok('V9b 控えの帯は deleted_at の新しい順（控えの並びに頼らない）', c1.bands.map((x) => x.rid).join() === 'v9m,v9n', c1.bands.map((x) => x.rid));
+      const c1 = await modosu(C.pg);
+      ok('V9b 網の外＝控えの行2つ', c1.bands.length === 2, c1);
+      ok('V9b 控えの行は deleted_at の新しい順（控えの並びに頼らない）', c1.bands.map((x) => x.rid).join() === 'v9m,v9n', c1.bands.map((x) => x.rid));
       ctl('V9C').force = [{ __http: 0 }];
       const c2 = await undoAt(C.pg, 'v9n');
-      const c3 = await undoAt(C.pg, 'v9m'); await sleep(300); const c4 = await home(C.pg);
-      ok('V9b 網の失敗の帯と字が、描き直した後も残る', c4.bands.some((x) => x.rid === 'v9n' && /戻せませんでした/.test(x.e || '')), [c2, c4]);
+      const c3 = await undoAt(C.pg, 'v9m'); await sleep(300); const c4 = await modosuNow(C.pg);
+      ok('V9b 網の失敗の行と字が、描き直した後も残る', c4.bands.some((x) => x.rid === 'v9n' && /戻せませんでした/.test(x.e || '')), [c2, c3, c4]);
     });
   } catch (e) { fail++; bad.push('止まった: ' + String(e.message || e).split('\n').slice(0, 4).join(' | ')); }
   for (const c of ctxs) await c.close().catch(() => {});
   return { pass, fail, bad };
 }
 
-const GR = 'js/gamen-room.mjs', GH = 'js/gamen-home.mjs';
+const GR = 'js/gamen-room.mjs', GH = 'js/gamen-home.mjs', HM = 'js/heya-modosu.mjs';
 const MUT = [
-  { file: GR, from: "    h += delHtml(); // A6：頁の一番下\n", to: '', name: '古い作り＝部屋の頁に箱を出さない', only: 'D1,D8' },
+  // A27 §1-2（置き場）
+  { file: GR, from: "close + delHtml(); // A27 §2", to: "close; // 壊し", name: 'ルールの頁に箱を出さない', only: 'D1,D8,D14' },
+  { file: GR, from: "    el.innerHTML = h;\n    const wrap", to: "    h += delHtml();\n    el.innerHTML = h;\n    const wrap", name: '部屋の頁にも箱を出す（A6 の形）', only: 'D1,D6' },
+  { file: GR, from: "h += '<button class=\"btn btn-main\" id=\"rEnd\"'", to: "h += '<button class=\"btn btn-main\" id=\"rEndX\"'", name: '部屋の頁に［対局終了］を出さない', only: 'D1,E1' },
+  { file: GR, from: "if (table && v.windows.length && !room.closed && ", to: "if (table && v.windows.length && ", name: '終えた部屋にも［対局終了］を出す', only: 'D14' },
+  { file: GR, from: "closeErr = null; endAsk = true; render(); };", to: "closeErr = null; render(); };", name: '［対局終了］が精算を開くだけで締めない', only: 'E1' },
+  { file: GR, from: "const ask = endAsk; endAsk = false; // A27", to: "const ask = endAsk; // A27", name: '精算の頁の頭で印を下ろさない（止め1 の前の形）', only: 'E4' },
+  { file: GR, from: "const ask = endAsk; endAsk = false; // A27", to: "const ask = endAsk; // A27", also: [["const toRoom = () => { endAsk = false; ", "const toRoom = () => { "], ["    if (page !== 'seisan') endAsk = false;", "    //"]], name: '印を一度も下ろさない', only: 'E3' },
+  { file: GR, from: "7日の間は、ホームの［対局］（部屋を作る・入る）の一番下から戻せます。", to: "7日の間はホームから戻せます。", name: '2段目の字が古い（止め2 の前）', only: 'D1' },
+  // A6（そのまま）
   { file: GR, from: "    if (typeof r.owner === 'boolean' && r.owner !== (room.owner === true)) patch.owner = r.owner;", to: '', name: 'roomInfo が owner を写さない', only: 'D2,D8' },
   { file: GR, from: "function canDel() { return !LG && ", to: 'function canDel() { return ', name: 'リーグの対局にも箱を出す', only: 'D2' },
   { file: GR, from: "    if (delOn()) { delDone(); return; } // A6", to: '    // 壊し', name: 'goneStop が印を見ない', only: 'D9' },
@@ -549,24 +628,26 @@ const MUT = [
   { file: GR, from: "if (!(row && row.deleted_at) && room.gone !== true)", to: 'if (room.gone !== true)', name: '消した端末にも gone を足す（v1.2 の形）', only: 'D11' },
   { file: GR, from: "    if (room.gone === true) { room.gone = false; patchRoom(uid, rid, { gone: false }); } // A6", to: '    // 壊し', name: '読めても gone を外さない', only: 'D12' },
   { file: GR, from: "localStorage.removeItem(OUTR); localStorage.removeItem(PCLOSE);", to: 'localStorage.removeItem(PCLOSE);', name: '消した後に並びの鍵を消さない', only: 'D3' },
-  { file: GR, from: "const writeBlocked = () => !!room.closed || closingOn() || stopped === 'deleted';", to: 'const writeBlocked = () => !!room.closed || closingOn();', also: ['outbox = []; clearTimeout(mergeTimer); merge.clear(); clearTimeout(retryTimer);', 'outbox = []; clearTimeout(retryTimer);'], name: '消した後も積める＋まとめを空にしない（二重の守りを両方外す＝pagehide のまとめが並びに入る）', only: 'D13' },
+  { file: GR, from: "const writeBlocked = () => !!room.closed || closingOn() || stopped === 'deleted';", to: 'const writeBlocked = () => !!room.closed || closingOn();', also: ['outbox = []; clearTimeout(mergeTimer); merge.clear(); clearTimeout(retryTimer);', 'outbox = []; clearTimeout(retryTimer);'], name: '消した後も積める＋まとめを空にしない（二重の守りを両方外す）', only: 'D13' },
   { file: GR, from: "if (!op) { op = uuid(); localStorage.setItem(PDEL, op); } // 送り直しは同じ op_id", to: 'op = uuid(); localStorage.setItem(PDEL, op);', name: '送り直しで op_id を替える', only: 'D4,D5,D6' },
   { file: GR, from: "let delUi = { open: delOn(), msg: null, retry: delOn() };", to: 'let delUi = { open: false, msg: null, retry: false };', name: '印が在っても1段目で開く', only: 'D6' },
   { file: GR, from: "(n ? '<p class=\"setsumei\" id=\"rDelUnsent\">", to: "(false ? '<p class=\"setsumei\" id=\"rDelUnsent\">", name: '未送信の数を出さない', only: 'D3' },
   { file: GR, from: "    if (e === 'mj_reauth' || e === 'mj_session') { // 印は残す", to: "    if (e === 'mj_session') { // 印は残す", name: 'mj_reauth でログインし直さない', only: 'D4' },
   { file: GR, from: "if (res.ok === true || e === 'gone') { delDone(); return; }", to: "if (res.ok === true) { delDone(); return; }", name: '消す返しの gone を通ったと見ない', only: 'D9' },
+  // ホーム（カードと印）
   { file: GH, from: "const delRow = (x) => !!x.deleted_at || x.gone === true;", to: "const delRow = (x) => x.gone === true;", name: 'ホームが deleted_at を見ない', only: 'D3,V2,V8' },
   { file: GH, from: "const delRow = (x) => !!x.deleted_at || x.gone === true;", to: "const delRow = (x) => !!x.deleted_at;", name: 'ホームが gone を見ない', only: 'D7,D12' },
-  { file: GH, from: ".sort((a, b) => Date.parse(b.deleted_at) - Date.parse(a.deleted_at))", to: '.reverse()', name: '控えの帯を並べ替えない', only: 'V9' },
-  { file: GH, from: "    paintDel(u, r.rows);\n", to: "    paintDel(u, deviceDel(u.id));\n", name: '読めても控えの帯を出す（v1.3 の形）', only: 'V1,V3' },
-  { file: GH, from: "if (ageOf(x) < DEL_MS - MARGIN_MS) {", to: "if (true) {", name: '期限切れの印も外す（S4 の前の形）', only: 'V7' },
-  { file: GH, from: "if (ageOf(x) < DEL_MS - MARGIN_MS) {", to: "if (false) {", name: '他で戻した印を外さない', only: 'V7' },
   { file: GH, from: "    if (changed && painted) paint(cardsOf(u.id, cardRows), !cardRows);", to: '', name: '印が変わってもカードを描き直さない', only: 'V8' },
-  { file: GH, from: "  paintDel(u, shownDel); // ★描き直さない★", to: '  draw(); //', name: '戻せない時に描き直す（v1.3 の形）', only: 'V9' },
-  { file: GH, from: "...[...failed].filter(([rid]) => !ids.has(rid))", to: "...[...failed].filter(() => false)", name: '一覧に無い失敗の帯を出さない', only: 'V9' },
-  { file: GH, from: "    before = deleted ? { at: last.deleted_at, id: last.room_id } :", to: "    before = deleted ? { at: last.last_write_at || last.created_at, id: last.room_id } :", name: '消した一覧の頁の目印が違う', only: 'V5' },
-  { file: GH, from: "    const changed = applyDel(u.id, r.rows);", to: "    const changed = false;", name: '一覧の印を控えに写さない', only: 'V2,V8' },
-  { file: GH, from: "patchRoom(u.id, rid, { deleted_at: null, gone: false });", to: '', name: '戻しても控えを直さない', only: 'D1,D10,D11' },
+  { file: GH, from: "    const changed = applyDel(u.id, r.rows);", to: "    const changed = false;", name: 'ホームが一覧の印を控えに写さない', only: 'V2,V8' },
+  // 戻す所（heya-modosu.mjs＝A27 でホームから移した）
+  { file: HM, from: ".sort((a, b) => Date.parse(b.deleted_at) - Date.parse(a.deleted_at))", to: '', name: '控えの行を並べ替えない', only: 'V9' },
+  { file: HM, from: "    paint(rows);\n", to: "    paint(deviceDel(u.id));\n", name: '読めても控えの行を出す（v1.3 の形）', only: 'V1,V3' },
+  { file: HM, from: "if (ageOf(x) < DEL_MS - MARGIN_MS) {", to: "if (true) {", name: '期限切れの印も外す（S4 の前の形）', only: 'V7' },
+  { file: HM, from: "if (ageOf(x) < DEL_MS - MARGIN_MS) {", to: "if (false) {", name: '他で戻した印を外さない', only: 'V7' },
+  { file: HM, from: "    paint(shown); // ★読み直さない★", to: '    draw(); //', name: '戻せない時に描き直す（v1.3 の形）', only: 'V9' },
+  { file: HM, from: "...[...failed].filter(([rid]) => !ids.has(rid))", to: "...[...failed].filter(() => false)", name: '一覧に無い失敗の行を出さない', only: 'V9' },
+  { file: HM, from: "      before = { at: last.deleted_at, id: last.room_id };", to: "      before = { at: last.last_write_at || last.created_at, id: last.room_id };", name: '消した一覧の頁の目印が違う', only: 'V5' },
+  { file: HM, from: "patchRoom(u.id, rid, { deleted_at: null, gone: false });", to: '', name: '戻しても控えを直さない', only: 'D10' },
 ];
 (async () => {
   LIB = await import(pathToFileURL(path.join(ROOT, 'lib/room-state.mjs')).href);

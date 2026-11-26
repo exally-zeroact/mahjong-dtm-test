@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '31b99301fdfd';
+const VER = '643a9beabcff';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '0d4295e649b8963f2aae104ada337e8e0562876477847b1bf96f3db1652fdaa3'],
@@ -15,16 +15,17 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
   ['/icons/icon-512.png', 'ff686a73f1bc0a7fb0c475cee7f023fa12b92b1f5d3796b5b66c8f9231f794f3'],
-  ['/index.html', 'b539695cf57e03ff56411f16e7b41010d06bd5e87f96029ef2e2b0b0a1440249'],
+  ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', 'bc767af815bda845916eeef4b761017114a4de2bca7a29fb62d17371807aa4da'],
-  ['/js/gamen-home.mjs', '23289b2e1c368a39d95127f80fc84430355348f3ff63d348d0fb46a5f146ae2c'],
+  ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
-  ['/js/gamen-room.mjs', 'e7511946812f2c53dc452ba6c62a5e1fab98d3c7e811ea888faa457d1e08913e'],
+  ['/js/gamen-room.mjs', 'd5553860672573bd538ca3e24b0c7a74c080ec9deb118361cc98fa08df80cbb1'],
   ['/js/gamen-rules.mjs', 'c308a3d32850af57c063b586d4c6e23089fa3dc27ec7272f92d6f2b9ec7978fb'],
-  ['/js/gamen-taikyoku.mjs', '5a64e8fca6419bf0b2de5fe0124670b823f03a63313b1d2f0c3251e05216a1fa'],
+  ['/js/gamen-taikyoku.mjs', '522acf3456a2a47fa1259e8e0119466374c4295ab51ad1c26ca87e3fd641882a'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
+  ['/js/heya-modosu.mjs', '4294a2c87e727dff0754f927b397b8d8f202a18e3e843cf2d80be8f4be0751cb'],
   ['/js/kenban.mjs', '926ee5cd4d86a47b865d0faae7e5916a47fc695d31411c2bf5d4848e4828076c'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/rules-memory.mjs', '38dc35121e4c63683a3a2ff658803d73368436990a20f121540d9b25b4391495'],
@@ -49,7 +50,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/machi.html', 'e90ddcde5e14ffd8830168be90dd8e021a431dd7580c040fd6b2e3a46c9da54e'],
   ['/manifest.json', '5d695eeb2f751e68f43ffd19adfec9144eccf4466f69dd9f86a48c4e00508afa'],
   ['/senseki.html', 'd374c1503dddb32142cd5f31133c4e51b67009531db32950d655a165998557e5'],
-  ['/taikyoku.html', 'de6ef1cb7e33a17f18a58f3b070ebb2793211599259031d60765f89b6f6c4e3e'],
+  ['/taikyoku.html', 'cc63f016fb974b85f54b7343cc674e8a7374aa13ea25b9738f4e4757c4e092da'],
   ['/tensu.html', '9ecd17a292b5d4619c8cee2aca9039db40fe244189b60d3ce0ef9001c11a0f0c'],
   ['/vendor/qrcode-generator.js', '79ec86f82856005b1c887905cfccfcfbec3821ca61c7fd5a952faa5f778f791c'],
   ['/vendor/supabase-2.112.4.js', 'f8ce7fab799af1916019cbd0b485b39bb80dbdbc6dc062909a751c9e5198e04c'],
