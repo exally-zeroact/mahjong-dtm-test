@@ -337,9 +337,12 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const so = head.ops.find((o) => o.op === 'hanchan_start');
     if (!so || !at || typeof at !== 'object' || (at.what !== 'open' && at.what !== 'new') || typeof at.hanchan_id !== 'string') return false;
     const gone = so.hanchan_id;
+    // 消す op の中の数（始めの点＋後から同じ回へ打った cell_set・tobi_set）を全部拾う＝見ないまま捨てない
+    const cells = so.cells.slice(); let tobiR = so.tobi_to && Array.isArray(so.tobi_to.r) ? so.tobi_to.r.slice() : [];
+    for (const it of outbox) for (const o of it.ops) { if (o.hanchan_id !== gone) continue; if (o.op === 'cell_set' && Number.isInteger(o.seat) && o.seat >= 0 && o.seat < cells.length) cells[o.seat] = o.value; if (o.op === 'tobi_set' && o.tobi_to && Array.isArray(o.tobi_to.r)) tobiR = o.tobi_to.r.slice(); }
     outbox = outbox.map((it) => { const ops = it.ops.filter((o) => o.hanchan_id !== gone); return ops.length === it.ops.length ? it : { op_id: uuid(), ops }; }).filter((it) => it.ops.length);
     save(OUTR, outbox);
-    prefill = { target: at.hanchan_id, seats: so.seats.slice(), cells: so.cells.slice(), tobiR: so.tobi_to && Array.isArray(so.tobi_to.r) ? so.tobi_to.r.slice() : [] };
+    prefill = { target: at.hanchan_id, seats: so.seats.slice(), cells, tobiR };
     pendingStart = null; startMsg = null; since = null;
     refreshTag(); sync();
     return true;
