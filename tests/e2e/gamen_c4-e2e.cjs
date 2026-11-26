@@ -107,6 +107,13 @@ const srv = http.createServer(async (q, r) => {
 });
 
 const fmtPt = (pt10) => (pt10 > 0 ? '+' : pt10 < 0 ? '−' : '') + (Math.abs(pt10) / 10).toFixed(1);
+// A8：ルールの箱は readonly＋inputmode none（アプリの数字鍵盤）＝fill できない。箱を押し ⌫ で空にして鍵で打つ（− は neg・. は dot）
+async function kpPut(pg, sel, v) {
+  const K = (k) => pg.click('.kp:not([hidden]) [data-kp="' + k + '"]');
+  await pg.click(sel);
+  for (let j = 0; j < 8; j++) await K('bs');
+  for (const ch of String(v)) await K(ch === '-' || ch === '−' ? 'neg' : ch === '.' ? 'dot' : ch);
+}
 async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
   const ok = (name, c, info) => { if (c) pass++; else { fail++; bad.push(name + (info !== undefined ? '  ' + JSON.stringify(info) : '')); } };
@@ -275,7 +282,7 @@ async function run(br, port) {
       ok('C6 kan には［次の回からこのルールにする］（主ボタン）', (await txt(A.pg, '#rRuleGo')) === '次の回からこのルールにする' && ((await A.pg.getAttribute('#rRuleGo', 'class')) || '').includes('btn-main'));
       ok('C6 人数は変えられない（4人/3人の押しボタンが無い）', !(await has(A.pg, '#rRules [data-players]')));
       await A.pg.click('#rRules [data-open="uma"]'); await A.pg.waitForSelector('[data-uma="0"]');
-      for (const [i, v] of [[0, '30'], [1, '10'], [2, '−10'], [3, '−30']]) await A.pg.fill('[data-uma="' + i + '"]', v);
+      for (const [i, v] of [[0, '30'], [1, '10'], [2, '−10'], [3, '−30']]) await kpPut(A.pg, '[data-uma="' + i + '"]', v);
       await A.pg.click('#rRuleGo');
       await waitFor(() => opsOf('A6', 'table_rules').length >= 1, 8000);
       const tr = opsOf('A6', 'table_rules');
@@ -298,7 +305,7 @@ async function run(br, port) {
       const A = await device('A7', 'u1', seedOf('u1', 'g1'));
       await openR(A.pg, 'g1'); await sleep(300);
       await A.pg.click('#barR'); await A.pg.waitForSelector('#rRuleGo');
-      await A.pg.fill('#rChip', '3.0'); await A.pg.click('#rRuleGo');
+      await kpPut(A.pg, '#rChip', '3.0'); await A.pg.click('#rRuleGo');
       await waitFor(() => has(A.pg, '#rRuleMsg'), 8000);
       ok('C7 帯「前のルールのチップ等を合計0にしてから変えてください」', (await txt(A.pg, '#rRuleMsg')) === '前のルールのチップ等を合計0にしてから変えてください', await txt(A.pg, '#rRuleMsg'));
       ok('C7 倉庫は区切らない', DB.get('g1').st.tables.length === 1 && opsOf('A7', 'table_rules').length === 1, DB.get('g1').st.tables.length);

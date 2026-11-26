@@ -44,6 +44,13 @@ export async function rpc(fn, args) { (window.__rpc = window.__rpc || []).push({
   if (mutate && f.endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); }
   r.writeHead(200, { 'content-type': MT[path.extname(f)] || 'text/plain' }); r.end(b);
 });
+// A8：ルールの箱は readonly＋inputmode none（アプリの数字鍵盤）＝fill できない。箱を押し ⌫ で空にして鍵で打つ（− は neg・. は dot）
+async function kpPut(pg, sel, v) {
+  const K = (k) => pg.click('.kp:not([hidden]) [data-kp="' + k + '"]');
+  await pg.click(sel);
+  for (let j = 0; j < 8; j++) await K('bs');
+  for (const ch of String(v)) await K(ch === '-' || ch === '−' ? 'neg' : ch === '.' ? 'dot' : ch);
+}
 async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
   const ok = (name, c, info) => { if (c) pass++; else { fail++; bad.push(name + (info ? '  ' + info : '')); } };
@@ -98,22 +105,22 @@ async function run(br, port) {
   { const { pg, ctx } = await open('y=0&pt=0&mode=rules');
     let r = await pg.evaluate(() => window.ctl.read());
     ok('read()：off の既定＝yakitori false・pt は数', r.yakitori === false && Number.isInteger(r.yakitori_pt), JSON.stringify([r.yakitori, r.yakitori_pt]));
-    await pg.click('#rYakiOn'); await pg.fill('#rYaki', '7');
+    await pg.click('#rYakiOn'); await kpPut(pg, '#rYaki', '7');
     r = await pg.evaluate(() => window.ctl.read());
     ok('read()：on・7＝yakitori true・pt 7', r.yakitori === true && r.yakitori_pt === 7, JSON.stringify([r.yakitori, r.yakitori_pt]));
-    await pg.fill('#rYaki', '0'); r = await pg.evaluate(() => window.ctl.read());
+    await kpPut(pg, '#rYaki', '0'); r = await pg.evaluate(() => window.ctl.read());
     ok('read()：on・0＝pt 0 のまま渡る（作る門で止める）', r.yakitori === true && r.yakitori_pt === 0);
-    await pg.click('#rYakiOn'); await pg.fill('#rYaki', 'abc'); r = await pg.evaluate(() => window.ctl.read());
-    ok('read()：崩れた字のまま off＝yakitori false・pt 0（NaN を残さない）', r.yakitori === false && r.yakitori_pt === 0, JSON.stringify([r.yakitori, r.yakitori_pt]));
+    await pg.click('#rYakiOn'); await kpPut(pg, '#rYaki', ''); r = await pg.evaluate(() => window.ctl.read());
+    ok('read()：空の箱のまま off＝yakitori false・pt 0（NaN を残さない・A8 で字は打てない）', r.yakitori === false && r.yakitori_pt === 0, JSON.stringify([r.yakitori, r.yakitori_pt]));
     await ctx.close(); }
   // 5. 作る時の門（gamen-taikyoku doCreate）＝on・pt 0 は倉庫へ送らない／on・7 は yakitori true・7 で送る
   { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000);
     await pg.goto(`http://127.0.0.1:${port}/taikyoku.html`); await pg.waitForSelector('#cName', { state: 'visible' });
     await pg.fill('#cName', '試しの会'); await pg.fill('#cPass', '1234'); await pg.click('#goRules');
-    await pg.click('#rYakiOn'); await pg.fill('#rYaki', '0'); await pg.click('#btnCreate'); await pg.waitForTimeout(300);
+    await pg.click('#rYakiOn'); await kpPut(pg, '#rYaki', '0'); await pg.click('#btnCreate'); await pg.waitForTimeout(300);
     const e0 = await txt(pg, '#cErr'), n0 = await pg.evaluate(() => (window.__rpc || []).length);
     ok('作る門：on・pt 0＝字を出して倉庫へ送らない', e0 === 'やきとり1枚の pt は 1〜999 です（整数）。' && n0 === 0, JSON.stringify([e0, n0]));
-    await pg.fill('#rYaki', '7'); await pg.click('#btnCreate'); await pg.waitForFunction(() => (window.__rpc || []).length > 0).catch(() => {});
+    await kpPut(pg, '#rYaki', '7'); await pg.click('#btnCreate'); await pg.waitForFunction(() => (window.__rpc || []).length > 0).catch(() => {});
     const c = await pg.evaluate(() => (window.__rpc || []).map((x) => [x.fn, x.args && x.args.p_rules && x.args.p_rules.yakitori, x.args && x.args.p_rules && x.args.p_rules.yakitori_pt]));
     ok('作る門：on・7＝mj_room_create に yakitori true・7', c.length === 1 && c[0][0] === 'mj_room_create' && c[0][1] === true && c[0][2] === 7, JSON.stringify(c));
     await ctx.close(); }
