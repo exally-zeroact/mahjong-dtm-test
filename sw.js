@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '4a7e22fe888b';
+const VER = '8357d352f8a3';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '80c5cb4dbe450d44c3071ff2f42186786f79c0364727024c92375b57aa29dee9'],
@@ -19,9 +19,9 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', 'bc767af815bda845916eeef4b761017114a4de2bca7a29fb62d17371807aa4da'],
-  ['/js/gamen-home.mjs', 'd492ba0354e21879c4f446e29bd1b0255b06f200f07607132667a1fb5bb621a3'],
+  ['/js/gamen-home.mjs', '23289b2e1c368a39d95127f80fc84430355348f3ff63d348d0fb46a5f146ae2c'],
   ['/js/gamen-league.mjs', '841ae20c16ad5a4a63212215476513bd791a19ee6c642ffe9edab146cc2ce1c2'],
-  ['/js/gamen-room.mjs', 'a7c871101f8c1879beef2155fb8870446c8616792abb0f7216007a9ad581e4d6'],
+  ['/js/gamen-room.mjs', '6a91f683a69f3492804aeb065ee78aedaedcd219a88bf5fcb9520b6dc7be927d'],
   ['/js/gamen-rules.mjs', '9e01c7fa536c017943393f3b0762f0f959f73286bc029341d390f1dc581e5b04'],
   ['/js/gamen-taikyoku.mjs', 'f17e5f54dadb8c677238a75edd3bc9570ed2fc78ca2f45ae33e719a20658ff97'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],

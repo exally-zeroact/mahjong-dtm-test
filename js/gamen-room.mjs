@@ -274,7 +274,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function goneStop() {
     if (delOn()) { delDone(); return; } // A6：消す印が在る＝消した（前の返りが切れた）＝片付けてホームへ
     homeOff(); stopped = 'gone'; clearTimeout(retryTimer); leaveChan();
-    // A6 §1：この端末で消した部屋（deleted_at）は gone を足さない（戻す帯が残る）。他の人・持ち主の別の端末＝gone:true（ホームのカードに出さない）
+    // A6 §1：この端末で消した部屋（deleted_at）は gone を足さない（戻す帯が残る）。他の人・持ち主の別の端末＝gone:true（ホームのカードに出さない・持ち主の別の端末の帯は倉庫の消した一覧から出る＝v1.4.3）
     const row = myRooms(uid).find((x) => x.room_id === rid);
     if (!(row && row.deleted_at) && room.gone !== true) { room.gone = true; patchRoom(uid, rid, { gone: true }); }
     rerender();
@@ -998,7 +998,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (!delUi.open) h += '<button class="btn btn-aka-line" id="rDelRoom">部屋を消す</button>';
     else {
       const n = unsentN();
-      h += '<p class="setsumei" id="rDelQ">部屋を消すと、入っていた人も誰も開けなくなります。7日の間はこの端末のホームから戻せます。</p>' +
+      h += '<p class="setsumei" id="rDelQ">部屋を消すと、入っていた人も誰も開けなくなります。7日の間はホームから戻せます。</p>' +
         (n ? '<p class="setsumei" id="rDelUnsent">この端末のまだ送れていない点 ' + n + '組も消えます。</p>' : '') +
         '<button class="btn btn-aka" id="rDelGo"' + (delBusy ? ' disabled' : '') + ' aria-busy="' + (delBusy ? 'true' : 'false') + '">部屋を消す</button>';
       if (!delOn()) h += '<button class="btn btn-line" id="rDelNo">やめる</button>'; // 送った後（印が在る間）はやめられない＝倉庫で通ったか分からない
