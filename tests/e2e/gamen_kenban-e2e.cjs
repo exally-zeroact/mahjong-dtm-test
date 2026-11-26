@@ -81,7 +81,7 @@ async function run(br, port) {
     await box(3).click();
     ok('D 値が 10,000', (await box(3).inputValue()) === '10,000', await box(3).inputValue());
     ok('D ✓ 素点の合計', (await pg.getAttribute('#eSum', 'class')).includes('ok') && (await sum()).includes('✓'), await sum());
-    ok('D pt が出る', ((await pg.textContent('[data-p="3"]')) || '').trim() !== '');
+    ok('D 入れる頁に pt の字は無い（E1・pt と順位は対局の一覧で出す）', (await pg.locator('[data-p], .r-er-p').count()) === 0); // 前は [data-p] を待って 30秒切れ（CI 45900985090）
     // E 打ち直せる・合わなければ赤で多い
     await put(3, '11000');
     ok('E 赤で 1,000 多い', (await pg.getAttribute('#eSum', 'class')).includes('bad') && (await sum()).includes('1,000 多い'), await sum());
