@@ -512,7 +512,7 @@ const brk = (fn, pairs) => {
   return t + (fn.startsWith('mahjong_private.') ? `\nrevoke all on function ${fn}${SIG[fn]} from public, anon, authenticated;` : '');
 };
 const WZ = [
-  ['W1 ok の組で read_ver を足さない', () => brk('public.mj_write', [['update mahjong.rooms x set read_ver = x.read_ver + 1 where x.id = p_room_id returning x.read_ver, x.channel_key into v_rv, v_ch1;', 'null;']]),
+  ['W1 ok の組で read_ver を足さない', () => brk('public.mj_write', [['update mahjong.rooms x set read_ver = x.read_ver + 1,', 'update mahjong.rooms x set read_ver = x.read_ver,']]),
     ['§4-2 書いた後 read_ver+1']],
   ['W3 開催の重なりの門を外す', () => brk('mahjong_private.mj_w_op', [['if v_ida is not null and not exists (select 1 from mahjong.settle_snaps z where z.session_id = v_ida) then', 'if false then']]),
     ['§4-2 開催の重なりの門：締めの無い']],
@@ -542,7 +542,7 @@ const WZ = [
     ['P5 既定の loaded']],
   ['W16 P5 (b) を外す', () => brk('public.mj_read', [['and not y.voided order by y.created_at desc, y.id desc limit 1)', 'and false order by y.created_at desc, y.id desc limit 1)']]),
     ['P5 既定の loaded']],
-  ['W17 P5 sessions の部屋の確かめを外す', () => brk('public.mj_read', [["where x.room_id = p_room_id and x.league_id is null\n       and (x.id in", "where (x.room_id = p_room_id and x.league_id is null or x.id = any(v_req))\n       and (x.id in"]]),
+  ['W17 P5 sessions の部屋の確かめを外す', () => brk('public.mj_read', [["where x.room_id = p_room_id and x.league_id is null\n         and (x.id in", "where (x.room_id = p_room_id and x.league_id is null or x.id = any(v_req))\n         and (x.id in"]]),
     ['P5 sessions 指定']],
   ['W18 P5 n に取り消した半荘を入れる', () => brk('public.mj_read', [['and s2.league_id is null and not h2.voided', 'and s2.league_id is null']]),
     ['P5 members の n']],
