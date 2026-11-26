@@ -120,7 +120,7 @@ async function run(br, port, portOld) {
       await pg.evaluate(() => { for (const x of document.querySelectorAll('[data-open], .li')) if (/細か|詳し|その他/.test(x.textContent)) x.click(); });
       const t = await pg.locator('#rr').innerText();
       ok('F 払う先の字が無い', !t.includes('飛び賞を払う先'));
-      ok('F 細かいルールは開いている（同じ点が見える）', t.includes('同じ点'), t.slice(0, 300));
+      ok('F 同じ点の選びは出さない（A13＝［上家］は点の画面・詳しいルールは消した）', !t.includes('同じ点'), t.slice(0, 300));
       const r = await pg.evaluate(() => window.ctl.read());
       ok('F read() に tobi_from が残る', r.tobi_from === 'busted', r.tobi_from);
       await ctx.close(); }
@@ -159,7 +159,7 @@ async function run(br, port, portOld) {
     ['精算の✓から飛び賞0を抜く', 'js/gamen-room.mjs', "(d.used.tobi ? '・飛び賞0' : '')", "''"],
     ['払う先を見せる', 'js/gamen-rules.mjs', "for (const d of DETAIL) if (!d.hide) h += ", "for (const d of DETAIL) h += "],
     ['隠した鍵を保存で落とす', 'js/gamen-rules.mjs', "for (const d of DETAIL) out[d.key] = r[d.key];", "for (const d of DETAIL) if (!d.hide) out[d.key] = r[d.key];"],
-    ['点を入れる時に tobi_to を付ける', 'js/gamen-room.mjs', "cells: e.num, lost: e.lostNum };", "cells: e.num, lost: e.lostNum, tobi_to: { 3: 0 } };"],
+    ['点を入れる時に tobi_to を付ける', 'js/gamen-room.mjs', "cells: e.num, lost: e.lostNum, follow: true };", "cells: e.num, lost: e.lostNum, follow: true, tobi_to: { 3: 0 } };"],
   ];
   let red = 0;
   for (const [nm, file, from, to] of W) {

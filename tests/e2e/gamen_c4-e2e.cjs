@@ -333,7 +333,7 @@ const MUT = [
   { file: G, from: "{ rules: draft, readOnly: !edit, lockPlayers: true }", to: '{ rules: draft, readOnly: !edit }', name: '人数を変えられる（C6）', only: 'C6' },
   { file: G, from: "  const ruleErrText = (r) => (r && r.err === 'bad' && r.at === 'extras' ?", to: '  const ruleErrText = (r) => (false ?', name: 'bad at extras の帯の字を出さない（C7）', only: 'C7' },
   { file: G, from: "const R1 = (entry && entry.R) || R;", to: 'const R1 = R;', name: '前の回を鎖の最後の卓のルールで数える（C2）', only: 'C2' },
-  { file: 'js/gamen-home.mjs', from: "import { chainView, migrateState", to: "import { tableView as chainView, migrateState", name: 'ホームを鎖で数えない（C2）', only: 'C2' },
+  { file: L, from: "const ch = tableChain(st, head.table_id), inChain = new Set(ch);", to: "const ch = [head.table_id], inChain = new Set(ch);", name: 'ホームを鎖で数えない（C2）', only: 'C2' },
   { file: G, from: "    ruleNote = table.table_id !== was ? ruleChangedText(chainView(st, table.table_id)) : null;", to: '    ruleNote = null;', name: '［ルール］で変えた後に帯を出さない（C6）', only: 'C6' },
 ];
 (async () => {

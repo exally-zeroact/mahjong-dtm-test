@@ -514,7 +514,7 @@ const MUT = [
   { file: 'js/gamen-league.mjs', from: "      if (!closed) h += '<div class=\"li li-sub lg-play\">", to: "      if (false) h += '<div class=\"li li-sub lg-play\">", name: 'リーグに［このリーグで対局を始める］を出さない（T10）', only: 'T10' },
   { file: 'js/gamen-core.mjs', from: "if (at === 'alt') return 'この日はもう一方の卓を作れません';", to: "if (at === 'alt') return 'x';", name: 'bad alt の字を変える（T9）', only: 'T9' },
   { file: 'js/gamen-core.mjs', from: "if (e === 'dup' && at === 'session') return '';", to: '', name: 'リーグの日の dup に字を出す（T9）', only: 'T9' },
-  { file: 'js/gamen-taikyoku.mjs', from: "if (!room && lid) room = { room_id: roomId, kind: 'shared', name: '', role: null };", to: '', name: '控えに無い部屋のリーグを開かない（T10）', only: 'T10' },
+  { file: 'js/gamen-taikyoku.mjs', from: "if (!room && lid && room0) { // 控えに無い部屋", to: "if (false) { // 控えに無い部屋", name: '控えに無い部屋のリーグを今だけの形で開かない（T10＝控えに足すか開けない）', only: 'T10' },
   { file: 'css/gamen.css', from: ".r-tk { position: relative; flex: none; display: inline-flex; align-items: center; height: 36px;", to: '.r-tk { position: relative; flex: none; display: inline-flex; align-items: center; height: 30px;', name: '卓のボタンの高さを字に合わせない（T1）', only: 'T1' },
 ];
 (async () => {

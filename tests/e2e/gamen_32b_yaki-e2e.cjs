@@ -130,14 +130,14 @@ async function run(br, port) {
     await br.close(); srv.close(); process.exit(r.fail ? 1 : 0);
   }
   const W = [
-    ['確かめから yaki を抜く', 'js/gamen-room.mjs', "    if (v.used.yaki && v.yakiSum !== 0) bad.push", "    if (false) bad.push"],
+    ['確かめから yaki を抜く', 'lib/room-state.mjs', "    if (yakiSum !== 0) missing.push({ what: 'yaki'", "    if (false) missing.push({ what: 'yaki'"],
     ['内訳から yaki を抜く', 'js/gamen-room.mjs', "if (d.used.yaki) parts.push(", "if (false) parts.push("],
-    ['窓の種から yaki を抜く', 'js/gamen-room.mjs', "['chip', 'shugi', 'yaki']", "['chip', 'shugi']"],
+    ['窓の種から yaki を抜く', 'js/gamen-room.mjs', "{ kind: 'yaki', label: 'やきとり' }, ", ""],
     ['read() から yakitori を抜く', 'js/gamen-rules.mjs', "yakitori: r.yakitori === true, yakitori_pt:", "zz: 0, yakitori_ptx:"],
     ['pt 0 の見せ方を「あり」に', 'js/gamen-rules.mjs', "'あり・1枚 0 pt＝数えません'", "'1枚 ＝ <b>0</b> pt'"],
     ['off で NaN を残す', 'js/gamen-rules.mjs', "r.yakitori_pt = r.yakitori ? p : (Number.isInteger(p) && p >= 1 && p <= 999 ? p : 0);", "r.yakitori_pt = p;"],
     ['作る門を外す', 'js/gamen-taikyoku.mjs', "if (rules.yakitori === true && !(Number.isInteger", "if (false && !(Number.isInteger"],
-    ['missingText で yaki を祝儀と呼ぶ', 'js/gamen-room.mjs', "yaki: 'やきとり' };", "yaki: '祝儀' };"],
+    ['missingText で yaki を祝儀と呼ぶ', 'js/gamen-room.mjs', "yaki: 'やきとり', tobi: '飛び賞' };", "yaki: '祝儀', tobi: '飛び賞' };"],
   ];
   let red = 0;
   for (const [nm, file, from, to] of W) {

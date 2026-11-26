@@ -129,7 +129,7 @@ async function run(br, port) {
     ['窓を windows だけで描く', 'js/gamen-room.mjs', 'for (const w of seatWin(v)) {', 'for (const w of v.windows) {'],
     ['窓の門を windows だけに', 'js/gamen-room.mjs', 'if (v.windows.length || v.seatPeople.length) h += renderWindows(v);', 'if (v.windows.length) h += renderWindows(v);'],
     ['並べを windows が先に', 'js/gamen-room.mjs', 'const out = v.seatPeople.map((p) => byId.get(p.member_id) || zero(p));', 'const out = v.windows.slice().concat(v.seatPeople.filter((p) => !byId.has(p.member_id)).map(zero));'],
-    ['半荘が在っても送る', 'js/gamen-room.mjs', 'if (!st.hanchans.some((h) => h.table_id === table.table_id && !h.voided)) {', 'if (true) {'],
+    ['半荘が在っても送る', 'js/gamen-room.mjs', 'if (!nonL(t) && !st.hanchans.some((h) => ch.includes(h.table_id) && !h.voided)) {', 'if (!nonL(t)) {'],
     ['席だけの卓で精算を出す', 'js/gamen-room.mjs', 'if (v.windows.length) h += renderCheck(v)', 'if (v.windows.length || v.seatPeople.length) h += renderCheck(v)'],
     ['needs_upload でも並びに積む', 'js/gamen-room.mjs', 'if (!st.needs_upload) { outbox.push', 'if (true) { outbox.push'],
   ];

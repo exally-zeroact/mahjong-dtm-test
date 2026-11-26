@@ -216,7 +216,7 @@ async function run(br, port) {
     ['下の空きを作らない', 'js/gamen-room.mjs', "q('#eKpSp').hidden = false;", ''],
     ['机の鍵盤が効かない', 'js/gamen-room.mjs', 'ev.preventDefault(); kpKey(k);', 'return;'],
     ['鍵の高さ 50', 'css/gamen.css', '.kp button { height: 60px;', '.kp button { height: 50px;'],
-    ['対局の押しに＋を戻す', 'js/gamen-room.mjs', `id="rAdd">' + v.nextNo`, `id="rAdd">＋ ' + v.nextNo`],
+    ['対局の押しに＋を戻す', 'js/gamen-room.mjs', `'>' + v.nextNo + '回目の点を入れる</button>'`, `'>＋ ' + v.nextNo + '回目の点を入れる</button>'`],
     ['差に＋を付ける', 'js/gamen-room.mjs', "const diffText = (d) => Math.abs(d).toLocaleString('ja-JP')", 'const diffText = (d) => fmt(d)'],
   ];
   let red = 0;
