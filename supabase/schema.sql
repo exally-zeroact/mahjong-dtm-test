@@ -3532,6 +3532,10 @@ begin
     if found then
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'linked', 'i', p_i, 'member_id', v_id2));
     end if;
+    -- C2-0 §1d：他の人がつないだ人へ、同じ組に member_unlink が在る（移ろうとした）＝taken で組ごと戻す（link だけの組は今まで通り claimed）
+    if v_m.user_id is not null and exists (select 1 from mahjong.history hx where hx.group_id = p_gid and hx.room_id = p_room and hx.op = 'member_unlink') then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'taken', 'i', p_i, 'member_id', v_id));
+    end if;
     if v_m.user_id is not null then
       -- 他の人がつないだ人＝名乗りを1行残して ok（claimed・つないだ人の id は返さない＝v1.1 S2）・二度目は足さない・履歴なし
       if not exists (select 1 from mahjong.member_claims x where x.member_id = v_id and x.user_id = p_me) then
@@ -4351,7 +4355,9 @@ grant execute on function public.mj_write(uuid, uuid, jsonb) to authenticated;
 --   1頁は 512KB の天井：卓を単位に足す（1つの卓が越える時はその卓だけ）。届いたら more true と next_after（返した最後の開催 id・卓 id＝卓の無い日は null）。
 --   開催の行と締めはその日の最初の頁に・extras はその卓と一緒に。締めは全部の rev の行（settles.length が rev）・中身はその日の最後の rev だけ（他は content {}・used と missing null）。
 --   st の形は今のまま（v 2・卓の rules を埋める＝roomGate がそのまま通る）。返し＝{read_ver, days, more, st, next_after?}｜{bad:'after'}
-create or replace function mahjong_private.mj_r_league3(p_room uuid, p_lid uuid, p_since bigint, p_after_s uuid, p_after_t uuid) returns jsonb
+-- C2-0 §1a：p_me（呼んだ人）を足した＝members に me／taken（user_id は返さない）。前の5つの引数の形は消す
+drop function if exists mahjong_private.mj_r_league3(uuid, uuid, bigint, uuid, uuid);
+create or replace function mahjong_private.mj_r_league3(p_room uuid, p_lid uuid, p_since bigint, p_after_s uuid, p_after_t uuid, p_me uuid) returns jsonb
 language plpgsql stable set search_path = '' as $fn$
 declare
   c_cap constant int := 524288;
@@ -4370,6 +4376,7 @@ begin
            order by x.created_at, x.id), '[]'::jsonb)
     into v_days from mahjong.sessions x where x.room_id = p_room and x.league_id = p_lid;
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
+           || case when m.user_id = p_me then '{"me": true}'::jsonb when m.user_id is not null then '{"taken": true}'::jsonb else '{}'::jsonb end
            order by m.created_at, m.id), '[]'::jsonb)
     into v_mem from mahjong.members m where m.room_id = p_room;
   -- 続きの頁の始め（無い開催・その開催に無い卓＝bad after）
@@ -4452,7 +4459,7 @@ begin
                     from pg_catalog.unnest(a_z) with ordinality u(j, o), pg_catalog.jsonb_array_elements(u.j) with ordinality e(value, o))))
     || case when v_more then pg_catalog.jsonb_build_object('next_after', pg_catalog.jsonb_build_object('session_id', v_ls, 'table_id', v_lt)) else '{}'::jsonb end;
 end $fn$;
-revoke all on function mahjong_private.mj_r_league3(uuid, uuid, bigint, uuid, uuid) from public, anon, authenticated;
+revoke all on function mahjong_private.mj_r_league3(uuid, uuid, bigint, uuid, uuid, uuid) from public, anon, authenticated;
 
 -- ── 2d 読む口 public.mj_read（2d_sadame.md v2.1 §1・設計図 §G）──────────────────────────────
 --   通す人＝mj_write 段1 と同じ（持ち主か room_accounts の行・出された人は通さない）。無い・入っていない・消した印（deleted_at）＝gone（在るかを見せない）
@@ -4578,7 +4585,7 @@ begin
 
     -- P2 §1.2：リーグの v3＝頁（read_ver・days・中身は mj_r_league3 の1つの写真）
     if v_lv3 then
-      v_pg := mahjong_private.mj_r_league3(p_room_id, v_lid, (v_since::text)::bigint, v_as, v_at);
+      v_pg := mahjong_private.mj_r_league3(p_room_id, v_lid, (v_since::text)::bigint, v_as, v_at, v_me);
       if v_pg ? 'bad' then v_out := pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'after'); v_cnt := false; exit body; end if;
       v_out := pg_catalog.jsonb_build_object('ok', true, 'read_ver', v_pg -> 'read_ver',
         'room', pg_catalog.jsonb_build_object('kind', r.kind, 'role', v_role, 'owner', v_role = 'owner', 'closed', r.closed_at is not null, 'rules', v_rules,
@@ -4633,6 +4640,8 @@ begin
     )
     select pg_catalog.jsonb_build_object('v', case when v_v3 then 3 else 2 end,
       'members', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
+                             -- C2-0 §1a：me＝呼んだ人がつないだ人・taken＝他の人がつないだ人（user_id は返さない・無い鍵＝false）
+                             || case when m.user_id = v_me then '{"me": true}'::jsonb when m.user_id is not null then '{"taken": true}'::jsonb else '{}'::jsonb end
                              -- P5 §2：v3 は n と last（上の v_ns・座っていない人は 0 と null）
                              || case when v_v3 then coalesce(v_ns -> m.id::text, '{"n": 0, "last": null}'::jsonb) else '{}'::jsonb end
                              order by m.created_at, m.id) from mahjong.members m where m.room_id = p_room_id), '[]'::jsonb),
