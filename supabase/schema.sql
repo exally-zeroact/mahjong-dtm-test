@@ -88,12 +88,8 @@ create table if not exists mahjong.rule_sets (
   primary key (id, version),
   -- 中身の細かい確かめは mahjong_private.mj_rules_ok（段2）。表では外せない3つだけを持つ（S3・S4・D7）
   check (jsonb_typeof(rules) = 'object'),
-  check (coalesce(rules->>'kyotaku_end', 'top') in ('top', 'kieru')),
-  -- ★数に換えるのは数の時だけ（AND の並びは倉庫が守らない＝case で分ける）
-  check (case when rules->'rate' is null or jsonb_typeof(rules->'rate') = 'null' then true
-              when jsonb_typeof(rules->'rate') = 'number'
-                then (rules->>'rate')::numeric between 10 and 100000 and (rules->>'rate')::numeric % 10 = 0
-              else false end)
+  check (coalesce(rules->>'kyotaku_end', 'top') in ('top', 'kieru'))
+  -- rate の check は A18 の節（rule_sets_rate_ok）
 );
 create index if not exists rule_sets_room on mahjong.rule_sets(room_id);
 -- ★players は必須（S3）★＝鍵が無いと ->> は null で、null in (…) は null＝CHECK を素通りする（11-20 試験で踏んだ）
@@ -177,7 +173,7 @@ create table if not exists mahjong.sessions (
   date         date not null,
   place        text check (place is null or char_length(place) <= 40),
   voided       boolean not null default false,
-  rate         int check (rate is null or (rate between 10 and 100000 and rate % 10 = 0)),
+  rate         int, -- check は A18 の節（*_rate_ok）
   rule_set_id  uuid not null,
   rule_version int  not null,
   version      int not null default 1 check (version >= 1),
@@ -213,7 +209,7 @@ create table if not exists mahjong.tables (
   rule_set_id  uuid not null,
   rule_version int  not null,
   rate_mode    text not null default 'session' check (rate_mode in ('session', 'num', 'none')),
-  rate         int check (rate is null or (rate between 10 and 100000 and rate % 10 = 0)),
+  rate         int, -- check は A18 の節（*_rate_ok）
   voided       boolean not null default false,
   version      int not null default 1 check (version >= 1),
   extra_state  text not null default 'input' check (extra_state in ('ok', 'input', 'ng')),
@@ -250,9 +246,7 @@ create table if not exists mahjong.hanchans (
   foreign key (rule_set_id, rule_version) references mahjong.rule_sets(id, version),
   -- 人数は写しと同じ（写しに players が無い半荘は通らない形・v15.8 S3）
   check (case when rules_snapshot->>'players' in ('3', '4') then (rules_snapshot->>'players')::int else 0 end = players),
-  -- 消えた供託（ルールが「消える」の時だけ非0・写しに鍵が無い半荘は非0が入らない・S4）
-  check (lost_kyotaku between 0 and 20000 and lost_kyotaku % 1000 = 0
-         and (lost_kyotaku = 0 or coalesce(rules_snapshot->>'kyotaku_end', '') = 'kieru')),
+  -- 消えた供託の check は A18 の節（hanchans_lost_ok）
   check (ton_order is null or jsonb_array_length(ton_order) = players)
 );
 create index if not exists hanchans_table on mahjong.hanchans(table_id, created_at, id);
@@ -267,12 +261,51 @@ alter table mahjong.hanchans add constraint hanchans_no_device check (created_by
 create table if not exists mahjong.cells (
   hanchan_id        uuid not null references mahjong.hanchans(id) on delete cascade,
   seat              smallint not null check (seat between 0 and 3),
-  value             int not null check (value between -200000 and 200000),
+  value             int not null, -- check は A18 の節（cells_value_ok）
   version           int not null default 1 check (version >= 1),
   updated_by_device uuid,
   updated_at        timestamptz not null default now(),
   primary key (hanchan_id, seat)
 );
+
+-- ── A18 点の上限（11-26 司さん「勝手に点数の上限決めるな」）＝機械の限界 M＝±2,000,000,000（mj_w_int と同じ線）だけ残す ──
+-- 前の版の create の中の無名の check（自動の名）は pg_constraint から名を引いて落とし、名の付いた1本に付け替える（当て直しで転ばない・行は消えない）
+-- ★def の字の 20000／200000 は 2000000000 にも含まれる＝新しい名は conname で外す★
+do $a18$
+declare r record;
+begin
+  for r in select c.conrelid::regclass::text as t, c.conname from pg_catalog.pg_constraint c
+            where c.contype = 'c' and (
+                 (c.conrelid = 'mahjong.rule_sets'::regclass and c.conname <> 'rule_sets_rate_ok'
+                   and pg_catalog.pg_get_constraintdef(c.oid) like '%rate%' and pg_catalog.pg_get_constraintdef(c.oid) like '%100000%')
+              or (c.conrelid = 'mahjong.sessions'::regclass and c.conname <> 'sessions_rate_ok'
+                   and pg_catalog.pg_get_constraintdef(c.oid) like '%rate%' and pg_catalog.pg_get_constraintdef(c.oid) like '%100000%')
+              or (c.conrelid = 'mahjong.tables'::regclass and c.conname <> 'tables_rate_ok'
+                   and pg_catalog.pg_get_constraintdef(c.oid) like '%rate%' and pg_catalog.pg_get_constraintdef(c.oid) like '%100000%')
+              or (c.conrelid = 'mahjong.hanchans'::regclass and c.conname <> 'hanchans_lost_ok'
+                   and pg_catalog.pg_get_constraintdef(c.oid) like '%lost_kyotaku%' and pg_catalog.pg_get_constraintdef(c.oid) like '%20000%')
+              or (c.conrelid = 'mahjong.cells'::regclass and c.conname <> 'cells_value_ok'
+                   and pg_catalog.pg_get_constraintdef(c.oid) like '%value%' and pg_catalog.pg_get_constraintdef(c.oid) like '%200000%')) loop
+    execute pg_catalog.format('alter table %s drop constraint %I', r.t, r.conname);
+  end loop;
+end $a18$;
+alter table mahjong.rule_sets drop constraint if exists rule_sets_rate_ok;
+-- ★数に換えるのは数の時だけ（AND の並びは倉庫が守らない＝case で分ける）
+alter table mahjong.rule_sets add constraint rule_sets_rate_ok check (
+  case when rules->'rate' is null or jsonb_typeof(rules->'rate') = 'null' then true
+       when jsonb_typeof(rules->'rate') = 'number'
+         then (rules->>'rate')::numeric between 10 and 2000000000 and (rules->>'rate')::numeric % 10 = 0
+       else false end);
+alter table mahjong.sessions drop constraint if exists sessions_rate_ok;
+alter table mahjong.sessions add constraint sessions_rate_ok check (rate is null or (rate between 10 and 2000000000 and rate % 10 = 0));
+alter table mahjong.tables drop constraint if exists tables_rate_ok;
+alter table mahjong.tables add constraint tables_rate_ok check (rate is null or (rate between 10 and 2000000000 and rate % 10 = 0));
+-- 消えた供託（ルールが「消える」の時だけ非0・写しに鍵が無い半荘は非0が入らない・S4）
+alter table mahjong.hanchans drop constraint if exists hanchans_lost_ok;
+alter table mahjong.hanchans add constraint hanchans_lost_ok check (lost_kyotaku between 0 and 2000000000 and lost_kyotaku % 1000 = 0
+  and (lost_kyotaku = 0 or coalesce(rules_snapshot->>'kyotaku_end', '') = 'kieru'));
+alter table mahjong.cells drop constraint if exists cells_value_ok;
+alter table mahjong.cells add constraint cells_value_ok check (value between -2000000000 and 2000000000);
 alter table mahjong.cells add column if not exists updated_by_user uuid;
 alter table mahjong.cells drop constraint if exists cells_no_device;
 alter table mahjong.cells add constraint cells_no_device check (updated_by_device is null);
@@ -688,14 +721,14 @@ declare seed jsonb := $rk$[
   {"key":"oorasu_stop","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"pao","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"players","kind":"int","min":3,"max":4,"step":1,"vals":null,"nullable":false,"def4":4,"def3":3,"need":true},
-  {"key":"rate","kind":"int","min":10,"max":100000,"step":10,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
+  {"key":"rate","kind":"int","min":10,"max":2000000000,"step":10,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
   {"key":"renpu_fu","kind":"enum","min":null,"max":null,"step":null,"vals":[2,4],"nullable":false,"def4":4,"def3":4,"need":false},
-  {"key":"return_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":30000,"def3":40000,"need":false},
+  {"key":"return_pts","kind":"int","min":1000,"max":2000000000,"step":100,"vals":null,"nullable":false,"def4":30000,"def3":40000,"need":false},
   {"key":"round","kind":"enum","min":null,"max":null,"step":null,"vals":["gosha","shisha","kirisute","none"],"nullable":false,"def4":"none","def3":"none","need":false},
   {"key":"shugi_pt10","kind":"int","min":1,"max":9999,"step":1,"vals":null,"nullable":true,"def4":null,"def3":null,"need":false},
-  {"key":"start_pts","kind":"int","min":1000,"max":200000,"step":100,"vals":null,"nullable":false,"def4":25000,"def3":35000,"need":false},
+  {"key":"start_pts","kind":"int","min":1000,"max":2000000000,"step":100,"vals":null,"nullable":false,"def4":25000,"def3":35000,"need":false},
   {"key":"tane_custom","kind":"list","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":[],"def3":[],"need":false},
-  {"key":"tenpai_ryo","kind":"int","min":0,"max":30000,"step":1000,"vals":null,"nullable":false,"def4":3000,"def3":3000,"need":false},
+  {"key":"tenpai_ryo","kind":"int","min":0,"max":2000000000,"step":1000,"vals":null,"nullable":false,"def4":3000,"def3":3000,"need":false},
   {"key":"tie","kind":"enum","min":null,"max":null,"step":null,"vals":["kamicha","split"],"nullable":false,"def4":"kamicha","def3":"kamicha","need":false},
   {"key":"tobi","kind":"bool","min":null,"max":null,"step":null,"vals":null,"nullable":false,"def4":true,"def3":true,"need":false},
   {"key":"tobi_from","kind":"enum","min":null,"max":null,"step":null,"vals":["busted","all"],"nullable":false,"def4":"busted","def3":"busted","need":false},
@@ -2112,7 +2145,7 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_people(uuid, jsonb, int, int, text, jsonb) from public, anon, authenticated;
 
--- A13 §6：op の seen_cells（保存した人が見た点）の形＝長さ p_n・どれも正しい点（整数・±200000・100の倍数）＝壊れていれば bad（at seen_cells）
+-- A13 §6：op の seen_cells（保存した人が見た点）の形＝長さ p_n・どれも正しい点（整数・±2000000000・100の倍数）＝壊れていれば bad（at seen_cells）
 create or replace function mahjong_private.mj_w_seen_cells(a jsonb, p_n int, p_i int) returns int[]
 language plpgsql set search_path = '' as $fn$
 declare k int; v numeric; r int[] := '{}';
@@ -2123,7 +2156,7 @@ begin
   for k in 0 .. p_n - 1 loop
     if pg_catalog.jsonb_typeof(a -> k) <> 'number' then perform mahjong_private.mj_w_bad(p_i, 'seen_cells'); end if;
     v := (a -> k)::numeric;
-    if v % 1 <> 0 or v not between -200000 and 200000 or v % 100 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'seen_cells'); end if;
+    if v % 1 <> 0 or v not between -2000000000 and 2000000000 or v % 100 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'seen_cells'); end if;
     r := r || v::int;
   end loop;
   return r;
@@ -2628,7 +2661,7 @@ begin
     v_rate := null;
     if p_o -> 'rate' is not null and p_o -> 'rate' <> 'null'::jsonb then
       v_rate := mahjong_private.mj_w_int(p_o, 'rate', p_i);
-      if v_rate not between 10 and 100000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
+      if v_rate not between 10 and 2000000000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
     end if;
     v_s := null;
     if p_o -> 'place' is not null and p_o -> 'place' <> 'null'::jsonb then
@@ -2738,7 +2771,7 @@ begin
       if pg_catalog.jsonb_typeof(p_o -> 'cells' -> k) <> 'number' or ((p_o -> 'cells' -> k)::numeric) % 1 <> 0 then
         perform mahjong_private.mj_w_bad(p_i, 'cells');
       end if;
-      if ((p_o -> 'cells' -> k)::numeric) not between -200000 and 200000 or ((p_o -> 'cells' -> k)::numeric) % 100 <> 0 then
+      if ((p_o -> 'cells' -> k)::numeric) not between -2000000000 and 2000000000 or ((p_o -> 'cells' -> k)::numeric) % 100 <> 0 then
         perform mahjong_private.mj_w_bad(p_i, 'cells', 'range');
       end if;
     end loop;
@@ -2758,7 +2791,7 @@ begin
     v_x := 0;
     if p_o -> 'lost' is not null and p_o -> 'lost' <> 'null'::jsonb then
       v_x := mahjong_private.mj_w_int(p_o, 'lost', p_i);
-      if v_x not between 0 and 20000 or v_x % 1000 <> 0 or (v_x <> 0 and coalesce(v_rules ->> 'kyotaku_end', '') <> 'kieru') then
+      if v_x not between 0 and 2000000000 or v_x % 1000 <> 0 or (v_x <> 0 and coalesce(v_rules ->> 'kyotaku_end', '') <> 'kieru') then
         perform mahjong_private.mj_w_bad(p_i, 'lost', 'range');
       end if;
     end if;
@@ -2789,7 +2822,7 @@ begin
     k := mahjong_private.mj_w_int(p_o, 'seat', p_i);
     if k < 0 or k >= h.players then perform mahjong_private.mj_w_bad(p_i, 'seat'); end if;
     v_x := mahjong_private.mj_w_int(p_o, 'value', p_i);
-    if v_x not between -200000 and 200000 or v_x % 100 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'value', 'range'); end if;
+    if v_x not between -2000000000 and 2000000000 or v_x % 100 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'value', 'range'); end if;
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
     select x.value, x.version into c from mahjong.cells x where x.hanchan_id = h.id and x.seat = k for update;
     if not found then raise exception 'mj_write: cells の行が無い'; end if;
@@ -2859,7 +2892,7 @@ begin
   elsif v_op = 'kyotaku_set' then
     h := mahjong_private.mj_w_h(p_room, mahjong_private.mj_w_uuid(p_o, 'hanchan_id', p_i), p_i, v_op, p_me, p_role);
     v_x := mahjong_private.mj_w_int(p_o, 'value', p_i);
-    if v_x not between 0 and 20000 or v_x % 1000 <> 0 or (v_x <> 0 and coalesce(h.rules_snapshot ->> 'kyotaku_end', '') <> 'kieru') then
+    if v_x not between 0 and 2000000000 or v_x % 1000 <> 0 or (v_x <> 0 and coalesce(h.rules_snapshot ->> 'kyotaku_end', '') <> 'kieru') then
       perform mahjong_private.mj_w_bad(p_i, 'value', 'range');
     end if;
     v_bv := mahjong_private.mj_w_int(p_o, 'base_version', p_i);
@@ -3067,7 +3100,7 @@ begin
       v_rate := null;
       if p_o -> 'rate' <> 'null'::jsonb then
         v_rate := mahjong_private.mj_w_int(p_o, 'rate', p_i);
-        if v_rate not between 10 and 100000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
+        if v_rate not between 10 and 2000000000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
       end if;
     end if;
     if p_o ? 'voided' then
@@ -3124,7 +3157,7 @@ begin
       if p_o ? 'rate' then
         if p_o -> 'rate' = 'null'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'rate'); end if;
         v_rate := mahjong_private.mj_w_int(p_o, 'rate', p_i);
-        if v_rate not between 10 and 100000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
+        if v_rate not between 10 and 2000000000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;
       elsif v_rate is null then
         perform mahjong_private.mj_w_bad(p_i, 'rate');
       end if;

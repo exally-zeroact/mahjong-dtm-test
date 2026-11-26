@@ -361,7 +361,7 @@ const body = `
 
   /* ③ 範囲 */
   ${RS}
-  ${W('r1', 2, 'ra', A(O('cell_set', { hanchan_id: HA1, seat: 1, value: 200100, base_version: 1 })))}
+  ${W('r1', 2, 'ra', A(O('cell_set', { hanchan_id: HA1, seat: 1, value: 150, base_version: 1 })))}
   ${W('r2', 2, 'ra', A(O('kyotaku_set', { hanchan_id: HA1, value: 1000, base_version: hv(HA1) })))}
   ${W('r3', 6, 'rb', A(O('kyotaku_set', { hanchan_id: HB, value: 1000, base_version: hv(HB) })))}
   ${ROW('r3_row', HR(HB))}
@@ -372,7 +372,7 @@ const body = `
   ${W('r8', 2, 'ra', A(O('hanchan_start', { hanchan_id: U(), table_id: TA, seats: [MA[0], MA[0], MA[1], MA[2]], cells: C4 })))}
   ${W('rr1', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 15 })))}
   ${W('rr2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 0 })))}
-  ${W('rr3', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 100010 })))}
+  ${W('rr3', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 1999999995 })))}
   ${W('rd1', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-02-30', rate: null })))}
   ${W('rd2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026/11/20', rate: null })))}
   ${W('rpl', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: null, place: 'あ'.repeat(41) })))}
@@ -385,7 +385,7 @@ const body = `
   /* ③ 通る端（11-20 叩き直し 注意2＝厳しくしすぎても緑のままにしない・塊の中で書いて戻す） */
   /* 2d：開催の重なりの門（shared で締めの無い開催が在ると dup）＝re2 は re1 と別の塊（同じ塊だと re1 の開催が締め無しで残って dup） */
   ${undo('re2b', `${RS}
-    ${W('re2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 100000, place: 'あ'.repeat(40) })))}`)}
+    ${W('re2', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 2000000000, place: 'あ'.repeat(40) })))}`)}
   ${undo('re', `${RS}
     ${W('re1', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: 10 })))}
     ${W('re3', 2, 'ra', A(O('table_add', { table_id: U(), session_id: SA, label: 'あ'.repeat(20) })))}
@@ -727,7 +727,7 @@ const body = `
     ${ROW('kts2_t', TL(KT[0]))}
     ${W('kts3', 2, 'ra', A(O('table_edit', { table_id: KT[0], rate_mode: 'session', rate: 50 })))}
     ${W('ktr1', 2, 'ra', A(O('table_edit', { table_id: KT[0], rate_mode: 'num', rate: 15 })))}
-    ${W('ktr2', 2, 'ra', A(O('table_edit', { table_id: KT[0], rate_mode: 'num', rate: 100010 })))}
+    ${W('ktr2', 2, 'ra', A(O('table_edit', { table_id: KT[0], rate_mode: 'num', rate: 1999999995 })))}
     ${W('kr1', 2, 'ra', A(O('session_edit', { session_id: SB, place: 'x' })))}
     ${W('kr2', 2, 'ra', A(O('table_edit', { table_id: TB, label: 'x' })))}
     ${W('kr3', 2, 'ra', A(O('hanchan_seats', { hanchan_id: HB, seats: MA.slice(0, 4) })))}
@@ -1274,7 +1274,7 @@ function check(out, lib, say) {
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
-  ok('③ cells 200,100 → range', isErr('r1', 'range', { at: 'value' }) && has('r1', rejNyu), J([R('r1'), d('r1')]));
+  ok('③ cells 150（100の倍数でない）→ range', isErr('r1', 'range', { at: 'value' }) && has('r1', rejNyu), J([R('r1'), d('r1')]));
   ok('③ top のルールで kyotaku 1000 → range', isErr('r2', 'range'), J(R('r2')));
   ok('③ kieru で 1000 → ok（版 +1）', isOk('r3') && out.r3_row?.lost === 1000 && out.r3_row.v === 2, J([R('r3'), out.r3_row]));
   ok('③ kieru で 100 → range', isErr('r4', 'range'), J(R('r4')));
@@ -1282,13 +1282,13 @@ function check(out, lib, say) {
   ok('③ top のルールで lost 1000 の hanchan_start → range', isErr('r6', 'range', { at: 'lost' }), J(R('r6')));
   ok('③ 100 の倍数でない cells → range', isErr('r7', 'range', { at: 'cells' }), J(R('r7')));
   ok('③ seats の重なり → bad', isErr('r8', 'bad', { at: 'seats' }), J(R('r8')));
-  ok('③ rate 15・0・100,010 → range at rate', ['rr1', 'rr2', 'rr3'].every((k) => isErr(k, 'range', { at: 'rate' })) && has('rr1', rejNyu), J(['rr1', 'rr2', 'rr3'].map(R)));
+  ok('③ rate 15・0・1,999,999,995 → range at rate', ['rr1', 'rr2', 'rr3'].every((k) => isErr(k, 'range', { at: 'rate' })) && has('rr1', rejNyu), J(['rr1', 'rr2', 'rr3'].map(R)));
   ok('③ date 2026-02-30・2026/11/20 → bad at date', isErr('rd1', 'bad', { at: 'date' }) && isErr('rd2', 'bad', { at: 'date' }), J([R('rd1'), R('rd2')]));
   ok('③ place 41字 → bad at place', isErr('rpl', 'bad', { at: 'place' }), J(R('rpl')));
   ok('③ label 空白だけ・21字 → bad at label', isErr('rl1', 'bad', { at: 'label' }) && isErr('rl2', 'bad', { at: 'label' }), J([R('rl1'), R('rl2')]));
   ok('③ name 21字・空白だけ → bad at name', isErr('rn1', 'bad', { at: 'name' }) && isErr('rn2', 'bad', { at: 'name' }), J([R('rn1'), R('rn2')]));
   ok('③ settle_snap rev 0 → bad at rev・32KB 越え → range at size', isErr('rs0', 'bad', { at: 'rev' }) && isErr('rsz', 'range', { at: 'size' }) && has('rsz', rejNyu), J([R('rs0'), R('rsz'), d('rsz')]));
-  ok('③ 通る端：rate 10・100,000・place 40字 → ok', isOk('re1') && isOk('re2'), J([R('re1'), R('re2'), out.re_err, out.re2b_err]));
+  ok('③ 通る端：rate 10・2,000,000,000・place 40字 → ok', isOk('re1') && isOk('re2'), J([R('re1'), R('re2'), out.re_err, out.re2b_err]));
   ok('③ 通る端：label 20字・name 20字 → ok', isOk('re3') && isOk('re4'), J([R('re3'), R('re4'), out.re_err]));
   {
     const libLen = Buffer.byteLength(J(MANY(MANY_N + 1))) + 8;   // 写しは content・used・missing を配列ごと stringify＝［］と区切り2つで +8
@@ -1455,7 +1455,7 @@ function check(out, lib, say) {
   ok('⑪ extra_set：取り消した開催日の卓 → bad at table_id', isErr('kv4', 'bad', { at: 'table_id' }), J(R('kv4')));
   ok('⑪ extra_add：取り消した卓 → bad at table_id', isErr('ktx', 'bad', { at: 'table_id' }), J(R('ktx')));
   ok('⑪ extra_set：取り消した卓 → bad at table_id', isErr('kty', 'bad', { at: 'table_id' }), J(R('kty')));
-  ok('⑪ table_edit：num の rate 15・100010 → range at rate（internal にならない）', isErr('ktr1', 'range', { at: 'rate' }) && isErr('ktr2', 'range', { at: 'rate' }), J([R('ktr1'), R('ktr2')]));
+  ok('⑪ table_edit：num の rate 15・1999999995 → range at rate（internal にならない）', isErr('ktr1', 'range', { at: 'rate' }) && isErr('ktr2', 'range', { at: 'rate' }), J([R('ktr1'), R('ktr2')]));
   ok('⑪ 取り消し（mj_w_tvoid）：入力中でチップだけそろった卓（f0）→ 卓の印・半荘には付けない', isOk('ky0') && out.ky0_t?.fc === true && out.ky0_t?.ch === false
     && isOk('ky1') && out.ky1_t?.ch === true && out.ky1_t?.voided === true && out.ky1_h?.fc === false && out.ky1_h?.ch === false, J([R('ky0'), out.ky0_t, R('ky1'), out.ky1_t, out.ky1_h]));
   ok('⑪ session_edit の取り消し：下の半荘に印・一度もそろっていない卓（f0 なし）には付けない', isOk('kv1') && out.kv1_h?.ch === true && out.kv1_t?.ch === false, J([R('kv1'), out.kv1_h, out.kv1_t]));
@@ -1711,7 +1711,7 @@ const fnText = (name) => {
 };
 /* [名, 関数, 壊す字, 替える字, 2つ目の替え（無ければ null）, 狙った試験の名の頭] */
 const WAZA = [
-  ['素点の範囲を見ない（表の行で赤になるか）', 'mahjong_private.mj_w_op', 'if v_x not between -200000 and 200000 or v_x % 100 <> 0 then', 'if false then', null, '⑩ 表：cell_set の 200,100 は range'],
+  ['素点の範囲を見ない（表の行で赤になるか）', 'mahjong_private.mj_w_op', 'if v_x not between -2000000000 and 2000000000 or v_x % 100 <> 0 then', 'if false then', null, '⑩ 表：cell_set の100の倍数でない値は range'],
   ['op_results を書かない', 'public.mj_write', "insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id,\n        case when v_op0 in ('room_secret', 'room_share') then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end, v_me);", 'null;', null, '⑨ 同じ人の同じ op_id 2回'],
   ['卓の部屋を確かめない', 'mahjong_private.mj_w_t', 'where x.id = p_tid and x.room_id = p_room for update', 'where x.id = p_tid for update', null, '② 別の部屋の table_id'],
   ['MJ001 を値に直さない（internal に化ける）', 'public.mj_write', 'v_ret := sqlerrm::jsonb; v_n := 0;', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '② 別の部屋の hanchan_id'],
@@ -1770,7 +1770,7 @@ const WAZA = [
   ['extra_add が取り消した卓を見ない', 'mahjong_private.mj_w_op', 'if t.voided or exists (select 1 from mahjong.sessions z where', 'if exists (select 1 from mahjong.sessions z where', null, '⑪ extra_add：取り消した卓'],
   ['session_edit のレートの印が rate_mode を見ない', 'mahjong_private.mj_w_op', "and not x.voided and x.rate_mode = 'session' order by x.id", 'and not x.voided order by x.id', null, '⑪ session_edit のレート：num・none'],
   ['table_edit のレートの印が取り消した開催日を見ない', 'mahjong_private.mj_w_op', '\n       and not exists (select 1 from mahjong.sessions z3 where z3.id = t.session_id and z3.voided) then', ' then', null, '⑪ table_edit のレート：取り消した開催日'],
-  ['rate の範囲を見ない（table_edit を狙う）', 'mahjong_private.mj_w_op', "if v_rate not between 10 and 100000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;", 'null;', null, '⑪ table_edit：num の rate 15'],
+  ['rate の範囲を見ない（table_edit を狙う）', 'mahjong_private.mj_w_op', "if v_rate not between 10 and 2000000000 or v_rate % 10 <> 0 then perform mahjong_private.mj_w_bad(p_i, 'rate', 'range'); end if;", 'null;', null, '⑪ table_edit：num の rate 15'],
   ['hanchan_seats が部屋の人か見ない', 'mahjong_private.mj_w_op', 'where x.room_id = p_room and x.id in (select (q.v', 'where x.id in (select (q.v', null, '⑪ hanchan_seats：長さ・重なり・よその部屋の人'],
   ['extra_set の行なし value 0 で bv を見ない', 'mahjong_private.mj_w_op', 'if v_bv <> 0 then', 'if false then', null, '⑪ extra_set：行が無く value 0'],
   /* 2c-3b（write3_sekkei.md §3 --waza）。check の正規表現（表）は関数でない＝db-checks.live の行で守る */
