@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '72166b9a2b20';
+const VER = '54a8922337a4';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '2333a31cf42ffb37998f9105741ff07b5894abfee2a3fd3dcc16a8dde1c6e117'],
@@ -37,8 +37,8 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
-  ['/lib/outbox.mjs', 'f35b2ec198a083e9aa5362ba5f035b97f959bf6bb54bfd178a5f512ceeb26bb9'],
-  ['/lib/room-state.mjs', '5680372f8163fb64658358ec4d404a80c1a2f3e70b358d21e4386a9fcc6e7534'],
+  ['/lib/outbox.mjs', '831f24ebaec2774ef64f5ba237d1579cfea848de2f2bd9e6a32f4a08ce918ffe'],
+  ['/lib/room-state.mjs', '379902acb879b06e864491ef4ca7085ed38219de032f93fa822926c21c737572'],
   ['/lib/rules.mjs', 'e389644031b87167e7f9f5fec6b20d997e6d93fee5862e4ba66677856d034f36'],
   ['/lib/safe-int.mjs', 'c3d97c57acb9e2308a2e0e827a715a18b39659985877044b8c5b8d4379fb6b83'],
   ['/lib/score-table.mjs', 'ebde7f0da8aa0905d774caeef696b46e1c2c6832f8674cf2c3fbb38a73644dd0'],

@@ -22,6 +22,7 @@ const CASES = [
   ...['write:all1m', 'write:rn1m', 'write:u1m', 'write:ur1m', 'lock'].map((w) => ['P6g busy ' + w + ' は retry', { data: { ok: false, err: 'busy', what: w } }, 'retry', 'busy']),
   ...['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d', 'write:all1d', 'write:zz1m', 'secret', 'name'].map((w) => ['P6g busy ' + w + ' は stop', { data: { ok: false, err: 'busy', what: w } }, 'stop', 'busy']),
   ['conflict は conflict', { data: { ok: false, err: 'conflict', i: 0 } }, 'conflict'],
+  ['E2 conflict の at（open・new）は振り分けに残す', { data: { ok: false, err: 'conflict', at: { what: 'open', hanchan_id: 'h1' } } }, 'conflict'],
   ['gone は reload', { data: { ok: false, err: 'gone' } }, 'reload'],
   ['mj_reauth は login（err は mj_reauth のまま＝mj_session と分ける）', { data: { ok: false, err: 'mj_reauth', within_min: 10, i: 0 } }, 'login', 'mj_reauth'],
   ...['bad', 'range', 'not_yet', 'full', 'too_many', 'internal', 'mj_op_other_user', 'mj_role'].map((e) => [e + ' は stop', { data: { ok: false, err: e } }, 'stop', e]),
@@ -36,6 +37,10 @@ function run(step, drop = dropHead) {
     const r = step(res);
     ok(name, r.kind === kind && (err === undefined || r.err === err), JSON.stringify(r));
   }
+  const cf = step({ data: { ok: false, err: 'conflict', i: 0, at: { what: 'new', hanchan_id: 'h7' } } });
+  ok('E2 §6 conflict は at を添える（画面が open・new の回を開く）', cf.kind === 'conflict' && JSON.stringify(cf.at) === JSON.stringify({ what: 'new', hanchan_id: 'h7' }), JSON.stringify(cf));
+  const cf0 = step({ data: { ok: false, err: 'conflict', i: 0 } });
+  ok('E2 at の無い conflict は at の鍵を付けない', cf0.kind === 'conflict' && !('at' in cf0), JSON.stringify(cf0));
   const d = step({ data: { ok: false, err: 'dup', member_id: 'm9', name: '山田' } });
   ok('dup は stop で member_id を添える', d.kind === 'stop' && d.err === 'dup' && d.member_id === 'm9', JSON.stringify(d));
   const l = step({ data: { ok: false, err: 'linked', i: 0, member_id: 'm8' } });

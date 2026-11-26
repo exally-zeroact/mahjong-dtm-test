@@ -1305,5 +1305,66 @@ console.log(JSON.stringify({ broken: ch.broken === true, len: ch.length, cvBroke
   ok('P8 輪の鎖の行を書く組は正味の門で bad at table_id', o && o.g === 'bad@table_id', J(o));
 }
 
+console.log('■ E2（A21）1人でも点を入れる・空いた席は null・開いている回は鎖に1つ（e_sadame v2 §E2）');
+{
+  const er = (r) => (r.ok ? 'ok' : r.res.err + '@' + (typeof r.res.at === 'object' ? J(r.res.at) : r.res.at));
+  const run = (x, ops, o) => { const r = applyOps(x, ops, o); if (!r.ok) throw new Error('E2 の台が当たらない：' + J(r.res)); return r.state; };
+  const cs = (seat, value, bv, id = 'h1') => ({ op: 'cell_set', hanchan_id: id, seat, value, base_version: bv });
+  // 手で数えた値：返し 30000・ウマ [20,10,-10,-20]・オカ +20（(30000−25000)×4／1000）→ [40000,30000,20000,10000] は pt [50,10,-20,-40]
+  const FULL10 = [500, 100, -200, -400];
+  const s1 = run(base(), [hs('h1', [40000, null, 20000, null], { seen_n: 0 })]);
+  const h1 = H(s1, 'h1');
+  ok('E2 §1 空いた席が null の始めは通る・cells と cell_ver は席の順に null（倉庫の読みと同じ）', J(h1.cells) === J([40000, null, 20000, null]) && J(h1.cell_ver) === J([1, null, 1, null]), J(h1));
+  ok('E2 §1 全部 null は range at cells', er(applyOps(base(), [hs('h1', [null, null, null, null])])) === 'range@cells');
+  ok('E2 §1 null と 100点単位でない数の混ぜは range at cells', er(applyOps(base(), [hs('h1', [40050, null, 20000, null])])) === 'range@cells');
+  const hv = hanchanView(rules, h1);
+  ok('E2 §2 hanchanView＝why cells・seats は点の無い席の番号', hv.ok === false && hv.why === 'cells' && J(hv.seats) === J([1, 3]), J(hv));
+  const tv = tableView(s1, 't1');
+  ok('E2 §2 tableView の行＝ok false why cells seats・空いた席の cell は null・pt は null', tv.rows[0].ok === false && tv.rows[0].why === 'cells' && J(tv.rows[0].seats) === J([1, 3]) && tv.rows[0].by.m2.cell === null && tv.rows[0].by.m1.cell === 40000 && tv.rows[0].by.m1.pt10 === null, J(tv.rows[0]));
+  ok('E2 §2 その回はお金に入れない（total10 は全員 0）・missing に cells と seats', Object.values(tv.total10).every((x) => x === 0) && J(tv.missing) === J([{ no: 1, why: 'cells', seats: [1, 3] }]), J([tv.total10, tv.missing]));
+  const cv = chainView(s1, 't1');
+  ok('E2 §2 chainView の行も why cells seats', cv.rows[0].why === 'cells' && J(cv.rows[0].seats) === J([1, 3]), J(cv.rows[0]));
+  const ss = sessionSeisan(s1, 's1');
+  ok('E2 §2 sessionSeisan の missing に卓の番号つきで cells', ss.missing.some((m) => m.table === 1 && m.no === 1 && m.why === 'cells' && J(m.seats) === J([1, 3])), J(ss.missing));
+  // 合計の確かめ（A9）は全員そろってから＝合わない数でも null が在る間は sum でなく cells
+  const sBad = run(base(), [hs('h1', [90000, null, 20000, null])]);
+  ok('E2 §2 null が在る間は合計の違いを出さない（why cells・sum でない）', hanchanView(rules, H(sBad, 'h1')).why === 'cells');
+  // §5 (a) 開いている回が在れば次の始めは conflict open・何も書かない
+  const a2 = applyOps(s1, [hs('h2', [40000, 30000, 20000, 10000], { seen_n: 1 })]);
+  ok('E2 §5(a) 開いている回が在れば始めは conflict at {what:open, hanchan_id}', er(a2) === 'conflict@' + J({ what: 'open', hanchan_id: 'h1' }) && a2.state.hanchans.length === 1, er(a2));
+  ok('E2 §5(a) seen_n が無い（古い PWA）でも open は止める', er(applyOps(s1, [hs('h2', [40000, 30000, 20000, 10000])])) === 'conflict@' + J({ what: 'open', hanchan_id: 'h1' }));
+  // §4 行の無い席：版0 で v1・行が在れば conflict cur{value,version}・版1以上は conflict cur{null,0}
+  const b1 = applyOps(s1, [cs(1, 30000, 0)]);
+  ok('E2 §4 行の無い席に版0 で入れると v1', b1.ok && H(b1.state, 'h1').cells[1] === 30000 && H(b1.state, 'h1').cell_ver[1] === 1, er(b1));
+  const b2 = applyOps(b1.state, [cs(1, 31000, 0)]);
+  ok('E2 §4 2回目の版0（行が在る）は conflict cur {value, version}', er(b2) === 'conflict@' + J({ hanchan_id: 'h1', seat: 1 }) && J(b2.res.cur) === J({ value: 30000, version: 1 }), J(b2.res));
+  const b3 = applyOps(s1, [cs(3, 10000, 1)]);
+  ok('E2 §4 行の無い席に版1 は conflict cur {null, 0}（例外にしない）', er(b3) === 'conflict@' + J({ hanchan_id: 'h1', seat: 3 }) && J(b3.res.cur) === J({ value: null, version: 0 }), J(b3.res));
+  const s2 = run(b1.state, [cs(3, 10000, 0)]);
+  const hv2 = hanchanView(rules, H(s2, 'h1'));
+  ok('E2 全員そろうと pt＝手で数えた [50,10,-20,-40]（全部で始めた回と同じ）', hv2.ok && J(hv2.pt10) === J(FULL10), J(hv2));
+  ok('E2 全員そろうと total10 に入る（m1 +500）', tableView(s2, 't1').total10.m1 === 500);
+  // §5 (b) 鎖の回の数（取り消しも）＞ seen_n は conflict new（一番新しい回）
+  const c1 = applyOps(s2, [hs('h2', [40000, 30000, 20000, 10000], { seen_n: 0 })]);
+  ok('E2 §5(b) seen_n が古い（0＜1）は conflict at {what:new, hanchan_id: 一番新しい}', er(c1) === 'conflict@' + J({ what: 'new', hanchan_id: 'h1' }) && c1.state.hanchans.length === 1, er(c1));
+  ok('E2 §5(b) seen_n が今の数なら通る', applyOps(s2, [hs('h2', [40000, 30000, 20000, 10000], { seen_n: 1 })]).ok);
+  ok('E2 §5(b) seen_n が無い（古い PWA）は (b) を飛ばす', applyOps(s2, [hs('h2', [40000, 30000, 20000, 10000])]).ok);
+  ok('E2 §5 seen_n の形が違う（−1・字・1.5・20億超え）は bad at seen_n', [-1, '1', 1.5, 2000000001].every((v) => er(applyOps(s2, [hs('h2', [40000, 30000, 20000, 10000], { seen_n: v })])) === 'bad@seen_n'));
+  ok('E2 §5 seen_n は hanchan_start の鍵（他の op では bad at seen_n）', er(applyOps(s2, [{ ...cs(0, 41000, 1), seen_n: 1 }])) === 'bad@seen_n');
+  // 取り消しも数える・取り消した回は開いていない
+  const d1 = run(s2, [hs('h2', [40000, null, null, null], { seen_n: 1 }), { op: 'hanchan_void', hanchan_id: 'h2' }]);
+  ok('E2 §5 取り消した回も数える（2＞1 は new・一番新しい＝h2）', er(applyOps(d1, [hs('h3', [40000, 30000, 20000, 10000], { seen_n: 1 })])) === 'conflict@' + J({ what: 'new', hanchan_id: 'h2' }));
+  const d2 = applyOps(d1, [hs('h3', [null, 30000, null, null], { seen_n: 2 })]);
+  ok('E2 §3 取り消した点がまだの回は開いていない＝次の始めは通る', d2.ok, er(d2));
+  const d3 = applyOps(d2.state, [{ op: 'hanchan_unvoid', hanchan_id: 'h2' }]);
+  ok('E2 点がまだの回を戻す時に他の開いている回が在れば conflict open', er(d3) === 'conflict@' + J({ what: 'open', hanchan_id: 'h3' }) && H(d3.state, 'h2').voided === true, er(d3));
+  ok('E2 そろった回は戻しても止めない', applyOps(run(s2, [{ op: 'hanchan_void', hanchan_id: 'h1' }, hs('h2', [null, 30000, null, null])]), [{ op: 'hanchan_unvoid', hanchan_id: 'h1' }]).ok);
+  // 区切った卓（鎖）でも開いている回は1つ：頭の卓の開いている回が鎖の最後の卓の始めを止める
+  const T2 = '00000000-0000-4000-8000-0000000000e2';
+  const ch = run(s1, [{ op: 'table_rules', table_id: 't1', new_table_id: T2, rules: { ...rules, uma: [30, 10, -10, -30] } }], { direct: true, role: 'kan' });
+  const e1 = applyOps(ch, [hs('h2', [40000, 30000, 20000, 10000], { follow: true, seen_n: 1 })]);
+  ok('E2 §3 鎖の前の卓に開いている回が在れば、区切った後の始めも conflict open', er(e1) === 'conflict@' + J({ what: 'open', hanchan_id: 'h1' }), er(e1));
+}
+
 console.log(`\n${p} passed, ${f} failed`);
 process.exitCode = f ? 1 : 0;
