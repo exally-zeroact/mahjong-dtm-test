@@ -183,6 +183,7 @@ async function run(br, port) {
     ok('M 飛びありは − のまま入る・受け取りの段に行かない', hsM.length === 1 && hsM[0].cells.some((v) => v < 0) && !((await pg.locator('#app').innerText()) || '').includes('飛びました'), hsM.map((h) => h.cells));
     const t = await pg.locator('#app').innerText();
     ok('K NaN の字が無い', !/NaN|undefined/.test(t));
+  } catch (e) { const at = await pg.evaluate(() => ({ q: location.search, bar: (document.getElementById('bar') || {}).textContent, body: document.body.innerText.slice(0, 300) })).catch(() => null); console.log('✗ 落ちた時の頁 ' + JSON.stringify(at)); throw e; // 30秒切れだけでは どの頁で止まったか分からない（CI 45899460888）
   } finally { await ctx.close(); }
   return { pass, fail, bad };
 }
