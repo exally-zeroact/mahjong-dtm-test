@@ -1,173 +1,181 @@
-// B2 飛び賞＝チップと同じ ±・合計0 の画面（tobi_chip_v3.md 段2）の自己確認。node gamen_tobi-e2e.cjs <作業木> [--old <古い版の作業木>] [--self] [--chromium]
+// E1（A19・e_sadame v2）飛び賞＝点の行の［飛び賞］釦（押した人がもらう・何人でも）の画面の自己確認。node gamen_tobi-e2e.cjs <作業木> [--self] [--chromium]
+//   お金は「押さない時の一覧の pt」と「押した時の pt」の差で見る（ウマ・オカに左右されない）＝手で数えた値（tobi_pt 10 → 1回 pt10 100）
 const http = require('http'), fs = require('fs'), path = require('path');
 const pw = require('playwright');
 const ROOT = path.resolve(process.argv[2]);
 const SELF = process.argv.includes('--self');
-const oi = process.argv.indexOf('--old'), OLD = oi > 0 ? path.resolve(process.argv[oi + 1]) : null;
 const MT = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
-const H = `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/gamen.css"><div id="app"></div><div id="rr"></div>
+const H = `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/gamen.css"><div id="app"></div>
 <script type="module">
 import { mountRoom } from '/js/gamen-room.mjs';
-import { mountRules } from '/js/gamen-rules.mjs';
 import { emptyState, applyOps } from '/lib/room-state.mjs';
 import { defaultRules } from '/lib/rules.mjs';
 const p = new URLSearchParams(location.search);
-const R = { ...defaultRules(4), rate: 50, chip_pt10: null, shugi_pt10: null, tobi: p.get('t') !== '0', tobi_pt: Number(p.get('pt') ?? 10) };
-if (p.get('mode') === 'rules') { window.ctl = mountRules(document.getElementById('rr'), { rules: { ...R } }); }
-else {
-  if (p.get('keep') !== '1') {
-    let st = emptyState(); st.rules = R;
-    const ops = [
-      { op: 'member_add', member_id: 'm1', name: '山田' }, { op: 'member_add', member_id: 'm2', name: '鈴木' },
-      { op: 'member_add', member_id: 'm3', name: '佐藤' }, { op: 'member_add', member_id: 'm4', name: '高橋' },
-      { op: 'session_add', session_id: 's1', date: '2026-11-21', rate: 50 },
-      { op: 'table_add', table_id: 't1', session_id: 's1', label: '卓1' },
-      { op: 'hanchan_start', hanchan_id: 'h1', table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'], cells: p.get('bust') === '0' ? [40000, 30000, 20000, 10000] : [50000, 30000, 25000, -5000] },
-    ];
-    if (p.get('ex') === '1') ops.push({ op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'tobi', add: 1 }, { op: 'extra_add', table_id: 't1', member_id: 'm4', kind: 'tobi', add: -1 });
-    const r = applyOps(st, ops, { roomRules: R, now: '2026-11-21T00:00:00Z' });
-    if (!r.ok) document.body.dataset.err = JSON.stringify(r.res || r);
-    localStorage.setItem('mj-room:u1:r1', JSON.stringify(r.state));
-    localStorage.setItem('mj-seats:u1:r1', JSON.stringify({ table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'] }));
-    window.__st = JSON.stringify(r.state);
-  }
-  if (p.get('build') !== '1') mountRoom(document.getElementById('app'), { me: { id: 'u1' }, room: { room_id: 'r1', rules: R }, showShare() {}, bar() {}, page: p.get('page') || 'room' });
-}
+const n = Number(p.get('n') || 4);
+const R = { ...defaultRules(n), rate: 50, chip_pt10: null, shugi_pt10: null, tobi: p.get('t') !== '0', tobi_pt: Number(p.get('pt') ?? 10), tobi_from: p.get('from') || 'busted' };
+if (n === 3) { R.start_pts = 45000; R.return_pts = 50000; }
+const mem = ['m1', 'm2', 'm3', 'm4'].slice(0, n), nm = ['山田', '鈴木', '佐藤', '高橋'];
+let st = emptyState(); st.rules = R;
+const ops = [...mem.map((m, i) => ({ op: 'member_add', member_id: m, name: nm[i] })),
+  { op: 'session_add', session_id: 's1', date: '2026-11-26', rate: 50 }, { op: 'table_add', table_id: 't1', session_id: 's1', label: '卓1' }];
+if (p.get('ex') === '1') ops.push({ op: 'hanchan_start', hanchan_id: 'h0', table_id: 't1', seats: mem, cells: [50000, 30000, 25000, -5000] }, { op: 'extra_add', table_id: 't1', member_id: 'm1', kind: 'tobi', add: 1 }, { op: 'extra_add', table_id: 't1', member_id: 'm4', kind: 'tobi', add: -1 });
+const r = applyOps(st, ops, { roomRules: R, now: '2026-11-26T00:00:00Z' });
+if (!r.ok) document.body.dataset.err = JSON.stringify(r.res || r);
+localStorage.setItem('mj-room:u1:r1', JSON.stringify(r.state));
+localStorage.setItem('mj-seats:u1:r1', JSON.stringify({ table_id: 't1', seats: mem }));
+mountRoom(document.getElementById('app'), { me: { id: 'u1' }, room: { room_id: 'r1', rules: R }, showShare() {}, bar() {}, page: 'room' });
 document.body.dataset.ready = '1';
 </script>`;
 let mutate = null;
-const mk = (root, mut) => http.createServer((q, r) => {
+const srv = http.createServer((q, r) => {
   const u = decodeURIComponent(q.url.split('?')[0]);
   if (u === '/__h.html') { r.writeHead(200, { 'content-type': MT['.html'] }); r.end(H); return; }
-  const f = path.join(root, u.replace(/^\/+/, ''));
-  if (!f.startsWith(root) || !fs.existsSync(f)) { r.writeHead(404); r.end(); return; }
+  const f = path.join(ROOT, u.replace(/^\/+/, ''));
+  if (!f.startsWith(ROOT) || !fs.existsSync(f)) { r.writeHead(404); r.end(); return; }
   let b = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
-  if (mut && mutate && f.endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); }
+  if (mutate && f.endsWith(mutate.file)) { if (!b.includes(mutate.from)) { console.log('✗ 壊しの字が無い ' + mutate.from); process.exit(2); } b = b.replace(mutate.from, mutate.to); }
   r.writeHead(200, { 'content-type': MT[path.extname(f)] || 'text/plain' }); r.end(b);
 });
-const srv = mk(ROOT, true), srvOld = OLD ? mk(OLD, false) : null;
-async function run(br, port, portOld) {
+async function run(br, port) {
   let pass = 0, fail = 0; const bad = [];
   const ok = (name, c, info) => { if (c) pass++; else { fail++; bad.push(name + (info !== undefined ? '  ' + JSON.stringify(info) : '')); } };
-  const open = async (qs, p = port, init) => { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); if (init) await ctx.addInitScript(init.fn, init.arg); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000); await pg.goto(`http://127.0.0.1:${p}/__h.html?${qs}`); await pg.waitForSelector('body[data-ready="1"]', { state: 'attached' }); return { pg, ctx }; };
+  const open = async (qs) => { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000); await pg.goto(`http://127.0.0.1:${port}/__h.html?${qs}`); await pg.waitForSelector('body[data-ready="1"]', { state: 'attached' }); return { pg, ctx }; };
   const all = (pg, s) => pg.evaluate((x) => [...document.querySelectorAll(x)].map((e) => e.textContent).join('|'), s);
-  const card = (pg, nm, s) => pg.evaluate(([n, x]) => { const c = [...document.querySelectorAll('.r-card')].find((y) => y.querySelector('.r-w-name')?.textContent === n); return c && c.querySelector(x) ? c.querySelector(x).textContent : null; }, [nm, s]);
-  const toNum = (s) => Number(String(s).replace('−', '-').replace(/[+,]/g, ''));
-  const wval = (pg, nm) => pg.evaluate((n) => { const w = [...document.querySelectorAll('.r-w')].find((x) => x.querySelector('.r-w-name').textContent === n); if (!w) return null; const i = [...w.querySelectorAll('.r-w-k')].findIndex((k) => k.textContent.startsWith('飛び賞')); return i < 0 ? null : w.querySelectorAll('.r-w-val')[i].textContent; }, nm);
+  const toNum = (s) => Math.round(Number(String(s).replace('−', '-').replace(/[+,]/g, '')) * 10);
+  const hs = (pg) => pg.evaluate(() => JSON.parse(localStorage.getItem('mj-room:u1:r1')).hanchans);
+  // 部屋の一覧の最後の回の pt（名前ごとの字）
+  const lastPt = (pg, n) => pg.evaluate((k) => {
+    const heads = [...document.querySelectorAll('table.r-hyou thead th')].slice(1).map((x) => x.textContent);
+    const rows = [...document.querySelectorAll('table.r-hyou tbody tr')].filter((x) => x.querySelector('.r-no'));
+    const tr = rows[rows.length - 1]; if (!tr) return null;
+    const tds = [...tr.querySelectorAll('td')];
+    return ['山田', '鈴木', '佐藤', '高橋'].slice(0, k).map((nm) => { const td = tds[heads.indexOf(nm)]; const b = td && td.querySelector('b'); return b ? b.textContent : null; });
+  }, n);
+  // 点を入れて［飛び賞］を押して入れる
+  const enter = async (pg, cells, press) => {
+    await pg.click('#rAdd'); await pg.waitForSelector('[data-c="0"]');
+    for (const [i, v] of cells.entries()) { await pg.click('[data-c="' + i + '"]'); await pg.keyboard.type(String(v)); }
+    await pg.keyboard.press('Escape');
+    for (const i of press) await pg.click('[data-tobi="' + i + '"]');
+    await pg.click('#eOk'); await pg.waitForSelector('table.r-hyou');
+  };
+  const ptNums = (a) => (a && a.every((v) => v && v !== '—') ? a.map(toNum) : null);
+  const delta = async (qs, n, cells, press) => {
+    const a = await open(qs); await enter(a.pg, cells, []); const p0 = await lastPt(a.pg, n); await a.ctx.close();
+    const b = await open(qs); await enter(b.pg, cells, press); const p1 = await lastPt(b.pg, n); const h = await hs(b.pg); await b.ctx.close();
+    const x0 = ptNums(p0), x1 = ptNums(p1);
+    return { d: x0 && x1 ? x1.map((x, i) => x - x0[i]) : null, p0, p1, tobi_to: h && h.length ? h[h.length - 1].tobi_to : null };
+  };
   try {
-    // 0. 土台（飛び賞 on 10pt・飛んだ半荘・枚を入れない）
-    let base;
+    // A 行の形＝［名前］［飛び賞］［上家］［点］・pt の字は無い
     { const { pg, ctx } = await open('');
-      ok('A 門を通る（err 無し）', !(await pg.evaluate(() => document.body.dataset.err)), await pg.evaluate(() => document.body.dataset.err));
-      ok('A 飛び賞の − ＋ が 4人×2', (await pg.$$('.r-pm[data-k="tobi"]')).length === 8);
-      ok('A 1枚＝500（10pt×レート50）', (await all(pg, '.r-w-k')).includes('飛び賞1枚＝500'), await all(pg, '.r-w-k'));
-      ok('A 飛んだのに0枚＝窓に「飛び賞が入っていません」', ((await all(pg, '#rTobiHint')) || '').includes('飛び賞が入っていません'));
-      ok('A ヒントは止めない＝✓ 飛び賞の合計 0', (await all(pg, '.r-check.ok')).includes('飛び賞の合計 0'), await all(pg, '.r-check'));
-      ok('A 受け取りの字が無い', !/受け取/.test(await pg.locator('#app').innerText()));
-      await pg.click('#rSeisan');
-      ok('A 精算にもヒント', ((await all(pg, '#rTobiHint')) || '').includes('飛び賞が入っていません'));
-      ok('A 精算は額を出す（止めない）', (await pg.$$('.r-card')).length === 4);
-      base = { a: toNum(await card(pg, '山田', '.r-card-big')), d: toNum(await card(pg, '高橋', '.r-card-big')) };
+      ok('A 門を通る', !(await pg.evaluate(() => document.body.dataset.err)), await pg.evaluate(() => document.body.dataset.err));
+      await pg.click('#rAdd'); await pg.waitForSelector('[data-c="0"]');
+      const shape = await pg.evaluate(() => [...document.querySelectorAll('.r-er')].map((r) => [...r.children].map((c) => (c.dataset.tobi !== undefined ? 'T' : c.dataset.kam !== undefined ? 'K' : c.dataset.c !== undefined ? 'V' : c.classList.contains('r-er-n') ? 'N' : '?')).join('')));
+      ok('A 4行とも 名前・飛び賞・上家・点', shape.length === 4 && shape.every((s) => s === 'NTKV'), shape);
+      ok('A pt の字（data-p）が無い', (await pg.$$('.r-ent [data-p], .r-er-p')).length === 0);
+      const t = await pg.evaluate(() => { const b = document.querySelector('[data-tobi="2"]'); const s = getComputedStyle(b); return { txt: b.textContent, lab: b.getAttribute('aria-label'), pr: b.getAttribute('aria-pressed'), h: Math.round(b.getBoundingClientRect().height), fs: s.fontSize }; });
+      ok('A 釦は「飛び賞」・aria-label・押していない・高さ36・14px', t.txt === '飛び賞' && t.lab === '佐藤が飛び賞をもらう' && t.pr === 'false' && t.h === 36 && t.fs === '14px', t);
+      await pg.click('[data-tobi="2"]');
+      ok('A 押すと aria-pressed true', (await pg.getAttribute('[data-tobi="2"]', 'aria-pressed')) === 'true');
+      await pg.click('[data-tobi="2"]');
+      ok('A もう1回で外す', (await pg.getAttribute('[data-tobi="2"]', 'aria-pressed')) === 'false');
+      const w = await pg.evaluate(() => Math.max(...[...document.querySelectorAll('.r-er')].map((r) => r.scrollWidth - r.clientWidth)));
+      ok('A 390幅で行がはみ出さない', w <= 0, w);
       await ctx.close(); }
+    // B 3人 [230000,65000,-160000]：押す0 → [+100,0,−100]・押す0,1 → [+100,+100,−200]
+    { const x = await delta('n=3', 3, [230000, 65000, -160000], [0]);
+      ok('B 3人 押す0：差 [+100,0,−100]', JSON.stringify(x.d) === '[100,0,-100]', x);
+      ok('B 保存 tobi_to {r:[0]}', JSON.stringify(x.tobi_to) === '{"r":[0]}', x.tobi_to); }
+    { const x = await delta('n=3', 3, [230000, 65000, -160000], [1, 0]);
+      ok('B 3人 押す0,1：差 [+100,+100,−200]', JSON.stringify(x.d) === '[100,100,-200]', x);
+      ok('B 保存は並べる {r:[0,1]}', JSON.stringify(x.tobi_to) === '{"r":[0,1]}', x.tobi_to); }
+    // C 4人 2人飛び：押す1 → [0,+200,−100,−100]・押す1,2（飛んだ人も押せる）→ [0,+200,0,−200]
+    { const x = await delta('', 4, [70000, 50000, -5000, -15000], [1]);
+      ok('C 4人 2人飛び 押す1：差 [0,+200,−100,−100]', JSON.stringify(x.d) === '[0,200,-100,-100]', x); }
+    { const x = await delta('', 4, [70000, 50000, -5000, -15000], [2, 1]);
+      ok('C 押す1,2：飛んだ人は払ってもらう [0,+200,0,−200]', JSON.stringify(x.d) === '[0,200,0,-200]', x); }
+    // D 誰も押さない＝0・待ちにしない・字も無い／押したが誰も飛んでいない＝0
     { const { pg, ctx } = await open('');
-      const sm = await pg.locator('#app').innerText();
-      ok('H 表の小さい字の − は全角（4位 −5,000）', sm.includes('4位 −5,000') && !/-d/.test(sm), sm.slice(0, 200));
+      await enter(pg, [50000, 30000, 25000, -5000], []);
+      const lp = await lastPt(pg, 4);
+      ok('D 飛んだが押さない：一覧の回は数が出る（— でない・理由の行なし）', !!ptNums(lp) && (await pg.$$('.r-why')).length === 0, lp);
+      ok('D 押さない：飛び賞の字が部屋に無い', !/飛び賞/.test(await pg.locator('#app').innerText()));
+      const h = await hs(pg); ok('D 押さない：tobi_to を付けない', Object.keys(h[h.length - 1].tobi_to || {}).length === 0, h[h.length - 1].tobi_to);
       await ctx.close(); }
-    // 1. 山田 +1・高橋 −1
-    { const { pg, ctx } = await open('');
-      await pg.click('.r-pm[data-k="tobi"][data-m="m1"][data-a="1"]'); await pg.click('.r-pm[data-k="tobi"][data-m="m4"][data-a="-1"]');
-      ok('B ±1：ヒントが消える', (await pg.$$('#rTobiHint')).length === 0);
-      ok('B ±1：✓ 飛び賞の合計 0', (await all(pg, '.r-check.ok')).includes('飛び賞の合計 0'), await all(pg, '.r-check'));
-      ok('B ±1：窓 山田 +500・高橋 −500', (await wval(pg, '山田')) === '+500' && (await wval(pg, '高橋')) === '−500', [await wval(pg, '山田'), await wval(pg, '高橋')]);
-      await pg.click('#rSeisan');
-      const a = toNum(await card(pg, '山田', '.r-card-big')), d = toNum(await card(pg, '高橋', '.r-card-big'));
-      ok('B ±1：精算 山田＝土台＋500・高橋＝土台−500', a === base.a + 500 && d === base.d - 500, [base, a, d]);
-      ok('B ±1：内訳「飛び賞 +1枚 +10.0」', ((await card(pg, '山田', '.r-card-sub')) || '').includes('飛び賞 +1枚 +10.0'), await card(pg, '山田', '.r-card-sub'));
-      ok('B ±1：精算の✓に「飛び賞0」', (await all(pg, '.r-check')).includes('飛び賞0'), await all(pg, '.r-check'));
-      ok('B ±1：精算のヒントも消える', (await pg.$$('#rTobiHint')).length === 0);
-      await ctx.close(); }
-    // 2. 山田 +1 だけ
-    { const { pg, ctx } = await open('');
-      await pg.click('.r-pm[data-k="tobi"][data-m="m1"][data-a="1"]');
-      ok('C +1 だけ：「飛び賞の合計が +1 合いません」', (await all(pg, '.r-check.bad')).includes('飛び賞の合計が +1 合いません'), await all(pg, '.r-check'));
-      await pg.click('#rSeisan');
-      const body = await all(pg, '.r-red, .r-red-btn');
-      ok('C +1 だけ：入っていない物「飛び賞の合計が +1 で合いません（飛び賞を入れていません）」', body.includes('飛び賞の合計が +1 で合いません（飛び賞を入れていません）'), body);
-      ok('C +1 だけ：額の札を出さない', (await pg.$$('.r-card')).length === 0);
-      await ctx.close(); }
-    // 3. 使わない卓（tobi false・pt 0）と飛んでいない卓
-    for (const [qs, nm] of [['t=0', 'tobi false'], ['pt=0', 'pt 0']]) {
+    { const x = await delta('', 4, [40000, 30000, 20000, 10000], [0]);
+      ok('D 誰も飛んでいない：押しても差0', JSON.stringify(x.d) === '[0,0,0,0]', x); }
+    // E 釦が無い卓＝tobi false・tobi_pt 0・払う先「全員」
+    for (const [qs, nm] of [['t=0', 'tobi false'], ['pt=0', 'pt 0'], ['from=all', '払う先 全員']]) {
       const { pg, ctx } = await open(qs);
-      ok('D ' + nm + '：飛び賞の行もヒントも出ない', (await pg.$$('.r-pm[data-k="tobi"]')).length === 0 && (await pg.$$('#rTobiHint')).length === 0);
+      await pg.click('#rAdd'); await pg.waitForSelector('[data-c="0"]');
+      ok('E ' + nm + '：［飛び賞］釦が無い', (await pg.$$('[data-tobi]')).length === 0);
       await ctx.close();
     }
-    { const { pg, ctx } = await open('bust=0');
-      ok('D 飛んでいない：行は出る・ヒントは出ない', (await pg.$$('.r-pm[data-k="tobi"]')).length === 8 && (await pg.$$('#rTobiHint')).length === 0);
-      await ctx.close(); }
-    // 4. 点を入れる＝飛んでも受け取りを選ぶ段が無い・tobi_to を付けない
+    // F 直す＝押した人を戻す・変えた時だけ tobi_set・点だけ直しても押した人は変わらない
     { const { pg, ctx } = await open('');
-      await pg.click('#rAdd');
-      const put = async (i, s, neg) => { await pg.click('[data-c="' + i + '"]'); await pg.keyboard.type(s); if (neg) await pg.click('#eKp [data-kp="neg"]'); };
-      await put(0, '60000'); await put(1, '30000'); await put(2, '15000'); await put(3, '5000', true);
-      await pg.click('#eKp [data-kp="ok"]'); await pg.click('#eOk');
-      const hs = await pg.evaluate(() => JSON.parse(localStorage.getItem('mj-room:u1:r1')).hanchans);
-      ok('E 飛んだ半荘がそのまま入る', hs.length === 2 && hs[1].cells.join() === '60000,30000,15000,-5000', hs.map((h) => h.cells));
-      ok('E 受け取りの段に行かない', !/飛びました|受け取/.test(await pg.locator('#app').innerText()));
-      ok('E tobi_to は空', hs[1] && Object.keys(hs[1].tobi_to || {}).length === 0, hs[1] && hs[1].tobi_to);
+      await enter(pg, [70000, 50000, -5000, -15000], [1]);
+      const id = (await hs(pg))[0].hanchan_id;
+      await pg.click('.r-no[data-h="' + id + '"]'); await pg.waitForSelector('[data-tobi="1"]');
+      ok('F 直す頁は押した人を戻す', (await pg.getAttribute('[data-tobi="1"]', 'aria-pressed')) === 'true' && (await pg.getAttribute('[data-tobi="0"]', 'aria-pressed')) === 'false');
+      await pg.click('[data-c="0"]'); await pg.keyboard.type('71000'); await pg.click('[data-c="1"]'); await pg.keyboard.type('49000'); await pg.keyboard.press('Escape');
+      await pg.click('#eOk'); await pg.waitForSelector('table.r-hyou');
+      let h = (await hs(pg))[0];
+      ok('F 点だけ直す：tobi_to そのまま・tobi_version 1', JSON.stringify(h.tobi_to) === '{"r":[1]}' && h.tobi_version === 1 && h.cells[0] === 71000, [h.tobi_to, h.tobi_version, h.cells]);
+      await pg.click('.r-no[data-h="' + id + '"]'); await pg.waitForSelector('[data-tobi="0"]');
+      await pg.click('[data-tobi="0"]'); await pg.click('#eOk'); await pg.waitForSelector('table.r-hyou');
+      h = (await hs(pg))[0];
+      ok('F 押す人を足す：tobi_to {r:[0,1]}・tobi_version 2', JSON.stringify(h.tobi_to) === '{"r":[0,1]}' && h.tobi_version === 2, [h.tobi_to, h.tobi_version]);
       await ctx.close(); }
-    // 5. ルールの画面＝払う先は隠す・鍵は残す
-    { const { pg, ctx } = await open('mode=rules');
-      await pg.evaluate(() => { for (const x of document.querySelectorAll('[data-open], .li')) if (/細か|詳し|その他/.test(x.textContent)) x.click(); });
-      const t = await pg.locator('#rr').innerText();
-      ok('F 払う先の字が無い', !t.includes('飛び賞を払う先'));
-      ok('F 同じ点の選びは出さない（A13＝［上家］は点の画面・詳しいルールは消した）', !t.includes('同じ点'), t.slice(0, 300));
-      const r = await pg.evaluate(() => window.ctl.read());
-      ok('F read() に tobi_from が残る', r.tobi_from === 'busted', r.tobi_from);
-      await ctx.close(); }
-    // 6. 古い版の端末＝tobi の行で門が newer＝「アプリを新しくしてください」
-    if (portOld) {
-      const b = await open('ex=1&build=1');
-      const stJson = await b.pg.evaluate(() => window.__st); await b.ctx.close();
-      ok('G 新しい版の写しに tobi の行', /"kind":"tobi"/.test(stJson || ''));
-      const o = await open('keep=1&ex=1', portOld, { fn: ([k, v]) => { localStorage.setItem(k, v); localStorage.setItem('mj-seats:u1:r1', JSON.stringify({ table_id: 't1', seats: ['m1', 'm2', 'm3', 'm4'] })); }, arg: ['mj-room:u1:r1', stJson] });
-      const g = (await all(o.pg, '#rGate')) || '';
-      ok('G 古い版は門で止めて「新しくしてください」', g.includes('アプリを新しくしてください'), g);
-      ok('G 古い版は表を作らない', (await o.pg.$$('.r-pm')).length === 0 && (await o.pg.$$('#rAdd')).length === 0);
-      await o.ctx.close();
-    }
+    // G 窓に飛び賞の行が無い・昔の種 tobi の行（テスト線だけ）は開ける・0 と数える
+    { const a = await open('ex=1');
+      ok('G 昔の tobi の行：門を通る', !(await a.pg.evaluate(() => document.body.dataset.err)) && (await a.pg.$$('#rGate')).length === 0, await a.pg.evaluate(() => document.body.dataset.err));
+      ok('G 窓に飛び賞の ± が無い', (await a.pg.$$('.r-pm[data-k="tobi"]')).length === 0);
+      ok('G 窓と✓に飛び賞の字・ヒントが無い', !/飛び賞/.test(await all(a.pg, '.r-w, .r-check')) && (await a.pg.$$('#rTobiHint')).length === 0, await all(a.pg, '.r-w, .r-check'));
+      await a.pg.click('#rSeisan');
+      const bigA = await all(a.pg, '.r-card .r-card-big'), subA = await all(a.pg, '.r-card .r-card-sub, .r-check');
+      await a.ctx.close();
+      ok('G 精算の札が4枚出る（昔の行で止めない）', bigA.split('|').filter(Boolean).length === 4, bigA);
+      ok('G 精算の内訳・✓に飛び賞が無い', !/飛び賞/.test(subA), subA); }
+    // G2 昔の tobi の行は 0＝行が無い時と同じ額
+    { const a = await open('ex=1'); await a.pg.click('#rSeisan'); const x = await all(a.pg, '.r-card .r-card-big'); await a.ctx.close();
+      const b = await open('ex=0'); await b.pg.click('#rAdd'); await b.pg.waitForSelector('[data-c="0"]');
+      for (const [i, v] of [50000, 30000, 25000, -5000].entries()) { await b.pg.click('[data-c="' + i + '"]'); await b.pg.keyboard.type(String(v)); }
+      await b.pg.keyboard.press('Escape'); await b.pg.click('#eOk'); await b.pg.waitForSelector('table.r-hyou');
+      await b.pg.click('#rSeisan'); const y = await all(b.pg, '.r-card .r-card-big'); await b.ctx.close();
+      ok('G2 昔の tobi の行は 0（行の無い同じ回と同じ額）', x === y && !!x, [x, y]); }
   } catch (e) { fail++; bad.push('例外 ' + String(e.message).split('\n')[0]); }
   return { pass, fail, bad };
 }
 (async () => {
   await new Promise((s) => srv.listen(0, '127.0.0.1', s));
-  if (srvOld) await new Promise((s) => srvOld.listen(0, '127.0.0.1', s));
-  const port = srv.address().port, portOld = srvOld ? srvOld.address().port : null;
+  const port = srv.address().port;
   const br = await (process.argv.includes('--chromium') ? pw.chromium : pw.webkit).launch();
   if (!SELF) {
-    const r = await run(br, port, portOld);
+    const r = await run(br, port);
     if (r.bad.length) console.log(r.bad.map((b) => '✗ ' + b).join('\n'));
-    console.log(`tobi-e2e: ${r.pass} passed, ${r.fail} failed${portOld ? '' : '（古い版は見ていない＝--old）'}`);
-    await br.close(); srv.close(); if (srvOld) srvOld.close(); process.exit(r.fail ? 1 : 0);
+    console.log(`tobi-e2e: ${r.pass} passed, ${r.fail} failed`);
+    await br.close(); srv.close(); process.exit(r.fail ? 1 : 0);
   }
   const W = [
-    ['表の小さい字を半角に戻す', 'js/gamen-room.mjs', "(c.rank + 1) + '位 ' : '') + boxNum(c.cell);", "(c.rank + 1) + '位 ' : '') + c.cell.toLocaleString('ja-JP');"],
-    ['窓の種から tobi を抜く', 'js/gamen-room.mjs', ", { kind: 'tobi', label: '飛び賞' }];", "];"],
-    ['窓のヒントを出さない', 'js/gamen-room.mjs', "const tobiHintLine = (on) => (on ?", "const tobiHintLine = (on) => (false ?"],
-    ['精算のヒントを出さない', 'js/gamen-room.mjs', "h += tobiHintLine(st.tables.some(", "h += tobiHintLine(false && st.tables.some("],
-    ['入っていない物で飛び賞を祝儀と呼ぶ', 'js/gamen-room.mjs', "tobi: '飛び賞' };", "tobi: '祝儀' };"],
-    ['内訳から飛び賞を抜く', 'js/gamen-room.mjs', "if (d.used.tobi) parts.push(", "if (false) parts.push("],
-    ['精算の✓から飛び賞0を抜く', 'js/gamen-room.mjs', "(d.used.tobi ? '・飛び賞0' : '')", "''"],
-    ['払う先を見せる', 'js/gamen-rules.mjs', "for (const d of DETAIL) if (!d.hide) h += ", "for (const d of DETAIL) h += "],
-    ['隠した鍵を保存で落とす', 'js/gamen-rules.mjs', "for (const d of DETAIL) out[d.key] = r[d.key];", "for (const d of DETAIL) if (!d.hide) out[d.key] = r[d.key];"],
-    ['点を入れる時に tobi_to を付ける', 'js/gamen-room.mjs', "cells: e.num, lost: e.lostNum, follow: true };", "cells: e.num, lost: e.lostNum, follow: true, tobi_to: { 3: 0 } };"],
+    ['釦を出さない', 'js/gamen-room.mjs', "return tobiUsed(R0) && R0.tobi_from === 'busted'; }", 'return false; }'],
+    ['払う先「全員」でも釦を出す', 'js/gamen-room.mjs', "return tobiUsed(R0) && R0.tobi_from === 'busted'; }", 'return tobiUsed(R0); }'],
+    ['もう1回で外さない', 'js/gamen-room.mjs', 'entry.tobiR = entry.tobiR.includes(i) ? entry.tobiR.filter((x) => x !== i) : [...entry.tobiR, i];', 'entry.tobiR = [...new Set([...entry.tobiR, i])];'],
+    ['新しい回に tobi_to を付けない', 'js/gamen-room.mjs', 'if (tobiBtnOn() && e.tobiR.length) op.tobi_to = { r: tobiRSorted(e.tobiR) };', 'if (false) op.tobi_to = null;'],
+    ['並べずに保存', 'js/gamen-room.mjs', 'const tobiRSorted = (a) => [...new Set(a)].sort((x, y) => x - y);', 'const tobiRSorted = (a) => [...new Set(a)];'],
+    ['直す時に tobi_set を送らない', 'js/gamen-room.mjs', 'if (tobiBtnOn() && canon(tobiRSorted(e.tobiR)) !== canon(tobiRSorted(h.tobiR))) ops.push(', 'if (false) ops.push('],
+    ['直す頁で押した人を戻さない', 'js/gamen-room.mjs', 'const tobiROf = (t) => (t && Array.isArray(t.r) ? t.r.filter((x) => Number.isInteger(x)) : []);', 'const tobiROf = (t) => [];'],
+    ['窓に飛び賞の行を戻す', 'js/gamen-room.mjs', "{ kind: 'yaki', label: 'やきとり' }];", "{ kind: 'yaki', label: 'やきとり' }, { kind: 'tobi', label: '飛び賞' }];"],
+    ['釦を出す所を消す', 'js/gamen-room.mjs', "'</span>' + (tb ? '<button type=\"button\" class=\"r-kam r-tobi\"", "'</span>' + (false ? '<button type=\"button\" class=\"r-kam r-tobi\""],
+    ['pt の字を戻す', 'js/gamen-room.mjs', "'の素点\"></div>').join('') + '</div>';", "'の素点\"><span class=\"r-er-p\" data-p=\"' + i + '\">+0.0</span></div>').join('') + '</div>';"],
   ];
   let red = 0;
   for (const [nm, file, from, to] of W) {
     mutate = { file: file.replace(/\//g, path.sep), from, to };
-    const r = await run(br, port, portOld);
+    const r = await run(br, port);
     console.log((r.fail ? '✓ 赤 ' : '✗ 緑のまま ') + nm + '（' + r.fail + '）');
     if (r.fail) red++;
   }
   console.log(`tobi-e2e self: ${red}/${W.length} 赤`);
-  await br.close(); srv.close(); if (srvOld) srvOld.close(); process.exit(red === W.length ? 0 : 1);
+  await br.close(); srv.close(); process.exit(red === W.length ? 0 : 1);
 })();

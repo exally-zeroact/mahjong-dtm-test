@@ -150,7 +150,7 @@ async function run(br, port) {
   const W = [
     ['確かめから yaki を抜く', 'lib/room-state.mjs', "    if (yakiSum !== 0) missing.push({ what: 'yaki'", "    if (false) missing.push({ what: 'yaki'"],
     ['内訳から yaki を抜く', 'js/gamen-room.mjs', "if (d.used.yaki) parts.push(", "if (false) parts.push("],
-    ['窓の種から yaki を抜く', 'js/gamen-room.mjs', "{ kind: 'yaki', label: 'やきとり' }, ", ""],
+    ['窓の種から yaki を抜く', 'js/gamen-room.mjs', ", { kind: 'yaki', label: 'やきとり' }]", "]"],
     ['read() から yakitori を抜く', 'js/gamen-rules.mjs', "yakitori: r.yakitori === true, yakitori_pt:", "zz: 0, yakitori_ptx:"],
     ['pt 0 の見せ方を「あり」に', 'js/gamen-rules.mjs', "'あり・1枚 0 pt＝数えません'", "'1枚 ＝ <b>0</b> pt'"],
     ['off で NaN を残す', 'js/gamen-rules.mjs', "r.yakitori_pt = r.yakitori ? p : (Number.isInteger(p) && p >= 1 && p <= 999 ? p : 0);", "r.yakitori_pt = p;"],

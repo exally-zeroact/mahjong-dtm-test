@@ -187,9 +187,11 @@ async function run(br, port) {
       await A.pg.click('#vRoom .r-no[data-h="h1"]'); await A.pg.waitForSelector('[data-c="0"]');
       ok('C2 直す頁の題は通し番号', ((await txt(A.pg, '#title')) || '').startsWith('1回目'), await txt(A.pg, '#title'));
       await put(A.pg, 0, '41000'); await put(A.pg, 1, '29000'); await kpk(A.pg, 'ok');
-      const pv = await txt(A.pg, '[data-p="0"]');
-      ok('C2 直す頁の pt は前の卓のルール', pv === fmtPt(ptOf(RULES, [41000, 29000, 20000, 10000], 0)), [pv, fmtPt(ptOf(RULES, [41000, 29000, 20000, 10000], 0)), fmtPt(ptOf(newR, [41000, 29000, 20000, 10000], 0))]);
       await A.pg.click('#eOk'); await A.pg.waitForSelector('#vRoom .r-top');
+      // E1：直す頁の pt の字は消した＝保存した後の一覧の h1 の行で、4人の pt が前の卓のルールの数か
+      { const C1 = [41000, 29000, 20000, 10000]; const pv = await A.pg.evaluate(() => { const b = document.querySelector('#vRoom .r-no[data-h="h1"]'); const tr = b && b.closest('tr'); return tr ? [...tr.querySelectorAll('td b')].map((x) => x.textContent).sort() : null; });
+        const want = [0, 1, 2, 3].map((s) => fmtPt(ptOf(RULES, C1, s))).sort(), other = [0, 1, 2, 3].map((s) => fmtPt(ptOf(newR, C1, s))).sort();
+        ok('C2 直した回の pt は前の卓のルール（一覧の h1）', JSON.stringify(pv) === JSON.stringify(want) && JSON.stringify(want) !== JSON.stringify(other), [pv, want, other]); }
       await waitFor(() => opsOf('A2', 'cell_set').length >= 2, 8000);
       const h1 = DB.get('b1').st.hanchans.find((h) => h.hanchan_id === 'h1');
       ok('C2 前の回の直しは前の卓のまま（cell_set・h1 は t1）', opsOf('A2', 'cell_set').length === 2 && h1.table_id === 't1' && h1.cells[0] === 41000, h1);
