@@ -42,8 +42,9 @@ function show(neg, ip, fp) {
   return (neg ? '−' : '') + i + (fp === null ? '' : '.' + fp);
 }
 
-export function keypadHtml() {
-  return '<div class="kp-sp" hidden></div><div class="kp" role="group" aria-label="数字の鍵盤" hidden></div>';
+// sp:false＝下の空きは呼ぶ側がボタンより下に置く（wireKeypad の sp に渡す）＝空きが釦より上だと鍵盤を開いた時に釦が鍵盤の下に隠れて押せない（KPSP・CI 45811332647）
+export function keypadHtml({ sp = true } = {}) {
+  return (sp ? '<div class="kp-sp" hidden></div>' : '') + '<div class="kp" role="group" aria-label="数字の鍵盤" hidden></div>';
 }
 function keysHtml(spec) {
   return KEYS(spec.dec).map(([k, t, a]) => '<button type="button" data-kp="' + k + '"' + (a ? ' aria-label="' + a + '"' : '')
@@ -51,9 +52,10 @@ function keysHtml(spec) {
     + (k === 'neg' && !spec.neg ? ' disabled aria-disabled="true"' : '') + '>' + (t || k) + '</button>').join('');
 }
 
-export function wireKeypad(host, { boxes, spec, onChange }) {
-  const kp = host.querySelector('.kp'), sp = host.querySelector('.kp-sp');
+export function wireKeypad(host, { boxes, spec, onChange, sp: spOut }) {
+  const kp = host.querySelector('.kp'), sp = spOut || host.querySelector('.kp-sp');
   if (!kp) return;
+  if (spOut) spOut.hidden = true; // 外の空きは描き直しで消えない＝つなぎ直す時に隠す（中の空きが描き直しで隠れるのと同じ）
   let inp = null, fresh = false;
   // 閉じる：✓・最後の ↓ は下の空きも消す。箱から外れて閉じる時（他の釦を押した）は空きを残す
   //   ＝押した瞬間に空きが消えると頁がずれ、指を離す所が釦から外れて押せない（11-23 Chromium・WebKit で測った）

@@ -251,7 +251,7 @@ function openForm(f) {
   form.mainN = v.players_main;
   form.alt = { on: !!v.rules_alt, open: new Set(), ...altFrom(v.rules_alt, 7 - v.players_main) };
   form.ctl = mountRules($('fRules'), {
-    rules: v.rules, readOnly: false, lockPlayers: f.mode === 'edit', labels: { sec: '打ち方とレート', players: '主の打ち方' },
+    rules: v.rules, readOnly: false, sp: $('fKpSp'), lockPlayers: f.mode === 'edit', labels: { sec: '打ち方とレート', players: '主の打ち方' },
     onPlayers: (n) => { readAlt(); form.mainN = n; Object.assign(form.alt, altFrom(null, 7 - n)); renderAlt(); },
   });
   $('fGo').textContent = f.mode === 'create' ? 'このルールでリーグを作る' : '保存';

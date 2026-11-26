@@ -857,7 +857,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     el.innerHTML = (ruleMsg ? '<div class="r-red" id="rRuleMsg"><b>' + esc(ruleMsg) + '</b></div>' : '') + '<div id="rRules"></div>' +
       (edit ? '<p class="err" id="rRuleErr"></p><button class="btn btn-main" id="rRuleGo"' + (ruleBusy || closingOn() ? ' disabled' : '') + ' aria-busy="' + (ruleBusy ? 'true' : 'false') + '">次の回からこのルールにする</button>' : '') +
       (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '') + close + delHtml(); // A27 §2：［部屋を消す］は［部屋を終える］の下
-    ruleCtl = mountRules(el.querySelector('#rRules'), { rules: draft, readOnly: !edit, lockPlayers: true });
+    el.insertAdjacentHTML('beforeend', '<div class="kp-sp" id="rKpSp" hidden></div>'); // KPSP：鍵盤の下の空きは釦（［部屋を消す］まで）より下
+    ruleCtl = mountRules(el.querySelector('#rRules'), Object.assign({ rules: draft, readOnly: !edit, lockPlayers: true }, { sp: el.querySelector('#rKpSp') }));
     if (!edit) ruleCtl = null;
     if (showShare) el.querySelector('#rShare').onclick = showShare;
     if (edit) el.querySelector('#rRuleGo').onclick = () => {

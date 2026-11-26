@@ -85,7 +85,7 @@ async function goRules(kind) {
   const memo = () => { $('cMemo').hidden = false; }; // 黙らない（読めない／崩れた覚え）
   if (st.unread || st.bad.includes(n)) memo();
   const memory = { 3: st.bad.includes(3) ? 'bad' : st.memory[3], 4: st.bad.includes(4) ? 'bad' : st.memory[4] };
-  rulesCtl = mountRules($('cRules'), { rules: st.memory[n] || { ...defaultRules(n), rate: 100 }, readOnly: false, memory, onBad: memo });
+  rulesCtl = mountRules($('cRules'), { rules: st.memory[n] || { ...defaultRules(n), rate: 100 }, readOnly: false, memory, onBad: memo, sp: $('cKpSp') });
   reread = false;
 }
 async function doCreate() {

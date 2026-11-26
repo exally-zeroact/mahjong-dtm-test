@@ -1,6 +1,6 @@
 /* gamen-rules.mjs — ★ルール設定の画面★（絵 mahjong_home_v154 ③）
  * =============================================================================
- * mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers }) → { read() }
+ * mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, sp }) → { read() }（sp＝鍵盤の下の空き・ボタンより下に置いた .kp-sp）
  *   labels＝{ sec, players }（リーグを作る頁＝「打ち方とレート」「主の打ち方」・絵 mahjong_league_v157 ①）・onPlayers(n)＝人数を替えた時（リーグのもう一方の打ち方を替える）
  *   lockPlayers＝人数は見せるだけ（リーグの日など）
  *   midGame＝対局の途中で変える時（A20 a20_sadame v4 §1-7）＝人数を押すと「人数で既定が違う鍵」（PLAYERS_KEYS）だけ替える・他の鍵は今の卓のまま
@@ -63,7 +63,7 @@ export function umaText(uma) {
 
 // memory＝A14g（tataki/a14g_sadame_v1_1.md）新しい対局だけ：{3,4}＝rules-memory.mjs の fromMemory の返し（覚えの形／null＝無し／'bad'＝崩れ）。
 //   人数を押した時、覚えが在ればそれを全部出す・'bad' は既定（rate 100）＋onBad(n)・null は今の動き（4鍵だけ既定）。途中の変え・リーグは渡さない
-export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad, midGame }) {
+export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad, midGame, sp }) {
   const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
   const open = new Set(); // 開いている行（ps＝持ち点／返し・uma・tobi）
@@ -115,7 +115,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       else h += '<div class="li"><span>やきとり</span><span class="li-v">1枚 ＝ ' + box('rYaki', on || okP ? String(p) : '5', 'numeric') + ' pt ' + sw('rYakiOn', on) + '</span></div>';
     }
     h += '</div>';
-    if (!readOnly) h += keypadHtml();
+    if (!readOnly) h += keypadHtml({ sp: !sp });
     el.innerHTML = h;
     if (!readOnly) wire();
   }
@@ -143,7 +143,7 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
   const KP_MAX = { rRate: 6, rStart: 6, rReturn: 6, rTobi: 3, rChip: 3, rShugi: 3, rYaki: 3 };
   const kpSpec = (x) => (x.dataset.uma !== undefined ? { neg: true, dec: false, max: 3 } : { neg: false, dec: x.dataset.kpdec !== undefined, max: KP_MAX[x.id] || 6 });
   function wire() {
-    wireKeypad(el, { boxes: () => [...el.querySelectorAll('input.box')], spec: kpSpec });
+    wireKeypad(el, { boxes: () => [...el.querySelectorAll('input.box')], spec: kpSpec, sp });
     el.onclick = (e) => {
       const b = e.target.closest('button'); if (!b || b.closest('.kp')) return; // 鍵盤の鍵は render しない（箱の focus と字を落とさない）
       readBoxes();
