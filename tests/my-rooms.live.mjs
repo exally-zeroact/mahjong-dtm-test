@@ -9,6 +9,7 @@
  *  ④ 3引数で呼べる（p_open 既定 false）・前からの欄（room_id kind name role closed created_at last_write_at）がそのまま在る
  *  ⑤ 権限：anon に EXECUTE 無し・PUBLIC 無し・authenticated だけ・3引数の古い形が倉庫に残っていない
  *  ⑥ 速さ（§2）：50部屋（各 1日 80半荘・3万半荘の部屋を1つ混ぜる）で p_open=true の1頁 5回の中央値 ms ≤ 100
+ *  A6（a6db_sadame v1.2 §3）p_deleted=true：持ち主だけ・7日の境・room_undelete で戻る・deleted_at の頁・bad deleted・速さ（消した20）
  * --waza：5つ壊して狙った試験が赤になるか（壊した関数を塊の初めに当てる＝塊ごと戻る）。
  * 使い方: node tests/my-rooms.live.mjs [--waza]
  */
@@ -54,7 +55,8 @@ const asWho = (i, j = i) => `perform set_config('request.jwt.claims', jsonb_buil
 const T = (key, expr) => `begin r := ${expr}; exception when others then r := jsonb_build_object('raised', sqlerrm); end;
     res := res || jsonb_build_object('${key}', r);`;
 const ROW = (key, sql) => `res := res || jsonb_build_object('${key}', (${sql}));`;
-const MY = (a, b, n, open) => `public.mj_my_rooms(${a}, ${b}, ${n}${open === undefined ? '' : ', ' + open})`;
+const MY = (a, b, n, open, del) => `public.mj_my_rooms(${a}, ${b}, ${n}${open === undefined ? '' : ', ' + open}${del === undefined ? '' : ', ' + del})`;
+const WR = (room, op) => `public.mj_write(${room}, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', '${op}')))`;
 
 /* 部屋（v）を人 us[o] の持ち物で・ルール rs・last_write_at は今から m 分前 */
 const mkRoom = (v, rs, o, m, extra = {}) => `
@@ -127,10 +129,22 @@ const PAGE = (key, open) => `
     ba := coalesce((r -> 'rooms' -> 0 ->> 'last_write_at')::timestamptz, (r -> 'rooms' -> 0 ->> 'created_at')::timestamptz);
   end loop;
   res := res || jsonb_build_object('${key}', to_jsonb(ids));`;
+/* A6：消した一覧（p_deleted=true）を limit 1 でたどる＝before は deleted_at */
+const PAGED = (key) => `
+  ids := '{}'; ba := null; bi := null;
+  for i in 1..20 loop
+    begin r := ${MY('ba', 'bi', 1, 'false', 'true')}; exception when others then r := jsonb_build_object('raised', sqlerrm, 'rooms', '[]'::jsonb); end;
+    exit when jsonb_array_length(r -> 'rooms') = 0;
+    ids := ids || (r -> 'rooms' -> 0 ->> 'room_id')::uuid;
+    bi := (r -> 'rooms' -> 0 ->> 'room_id')::uuid;
+    ba := (r -> 'rooms' -> 0 ->> 'deleted_at')::timestamptz;
+  end loop;
+  res := res || jsonb_build_object('${key}', to_jsonb(ids));`;
 
 const mkSql = (prefix = '') => `do ${q('mr')} declare res jsonb := '{}'; r jsonb; i int; rk int;
   us uuid[] := '{}'; ss uuid[] := '{}'; s uuid; t uuid; ids uuid[]; ba timestamptz; bi uuid; t0 timestamptz; ms float8[] := '{}';
   r1 uuid; r2 uuid; r3 uuid; r4 uuid; r5 uuid; r6 uuid; g1 uuid; g2 uuid; g3 uuid; g4 uuid; g5 uuid; g6 uuid; vb uuid; gb uuid; vbig uuid; gbig uuid;
+  r7 uuid; g7 uuid; rdo uuid; gdo uuid; rde uuid; gde uuid; rd3 uuid; gd3 uuid;
 begin
   ${prefix}
   for i in 1..4 loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
@@ -157,6 +171,15 @@ begin
   /* ② 表の組（人1 の部屋） */
   ${CASES.map((x) => x.sql).join('\n  ')}
   ${ROW('ids', `jsonb_build_object('r1', r1, 'r2', r2, 'r3', r3, 'r4', r4, 'r5', r5, 'r6', r6)`)}
+  /* A6（a6db_sadame v1.1 §3）：rdo＝人1 が7日と1秒前に消した／rde＝人1 が7日の1分前に消した／rd3＝人1 の部屋（後で room_delete→room_undelete）／
+     r7＝人2 の部屋を1時間前に消した・人1 は kan・人3 は入で出された（room_bans）＝人2 にだけ出る */
+  ${mkRoom('rdo', 'gdo', 1, 60, { deleted: "now() - interval '7 days' - interval '1 second'" })}
+  ${mkRoom('rde', 'gde', 1, 61, { deleted: "now() - interval '7 days' + interval '1 minute'" })}
+  ${mkRoom('rd3', 'gd3', 1, 62)}
+  ${mkRoom('r7', 'g7', 2, 63, { deleted: "now() - interval '1 hour'" })}
+  insert into mahjong.room_accounts (room_id, user_id, role, joined_via) values (r7, us[1], 'kan', 'pass'), (r7, us[3], 'nyu', 'pass');
+  insert into mahjong.room_bans (room_id, user_id) values (r7, us[3]);
+  ${ROW('ids2', `jsonb_build_object('rdo', rdo, 'rde', rde, 'rd3', rd3, 'r7', r7)`)}
 
   ${asWho(1)}
   ${T('all', MY('null', 'null', 50, 'false'))}
@@ -173,6 +196,30 @@ begin
   ${T('other', MY('null', 'null', 50, 'false'))}
   perform set_config('request.jwt.claims', '', true);
   ${T('nose', MY('null', 'null', 50, 'true'))}
+
+  /* A6 §3：消した一覧（mj_write を呼ぶ前に境を見る＝ついでの掃除で rdo が先に消えると境の試験が空回りする） */
+  ${asWho(1)}
+  ${T('d_pre', MY('null', 'null', 50, 'false', 'true'))}
+  ${T('d_del', WR('rd3', 'room_delete'))}
+  ${T('all2', MY('null', 'null', 50, 'false'))}
+  ${T('d_all', MY('null', 'null', 50, 'false', 'true'))}
+  ${T('d_null', MY('null', 'null', 50, 'false', 'null'))}
+  ${T('d_bad', MY('null', 'null', 50, 'true', 'true'))}
+  ${T('named3', `public.mj_my_rooms(p_before_at => null, p_before_id => null, p_limit => 50)`)}
+  ${T('named4', `public.mj_my_rooms(p_before_at => null, p_before_id => null, p_limit => 50, p_open => false)`)}
+  ${PAGED('pg_del')}
+  ${asWho(1, 5)}
+  ${T('d_dev2', MY('null', 'null', 50, 'false', 'true'))}
+  ${asWho(2)}
+  ${T('d_u2', MY('null', 'null', 50, 'false', 'true'))}
+  ${asWho(3)}
+  ${T('d_u3', MY('null', 'null', 50, 'false', 'true'))}
+  ${asWho(4)}
+  ${T('d_u4', MY('null', 'null', 50, 'false', 'true'))}
+  ${asWho(1)}
+  ${T('d_undel', WR('rd3', 'room_undelete'))}
+  ${T('d_after', MY('null', 'null', 50, 'false', 'true'))}
+  ${T('all3', MY('null', 'null', 50, 'false'))}
 
   /* 掃除を回しても 200日開かない入の行は残る（§1.7） */
   perform mahjong_private.mj_sweep_tail(1000);
@@ -231,6 +278,14 @@ begin
     'bigm', (select (x ->> 'member_n')::int from jsonb_array_elements(r -> 'rooms') x order by (x ->> 'hanchan_n')::int desc limit 1),
     'all', (select count(*) from mahjong.hanchans where room_id = vbig))`)}
 
+  /* A6 §2 速さ：人4 の 50部屋のうち 20（3万半荘の鎖の部屋 25 を含む）を消した印にして p_deleted=true の1頁 5回 */
+  update mahjong.rooms x set deleted_at = now() - make_interval(mins => 10 + (abs(hashtext(x.id::text)) % 1000))
+   where x.owner_user_id = us[4] and (x.id = vbig or x.id in (select y.id from mahjong.rooms y where y.owner_user_id = us[4] and y.id <> vbig order by y.id limit 19));
+  ms := '{}';
+  for i in 1..5 loop t0 := clock_timestamp(); begin r := ${MY('null', 'null', 50, 'false', 'true')}; exception when others then r := jsonb_build_object('raised', sqlerrm, 'rooms', '[]'::jsonb); end; ms := ms || (extract(epoch from clock_timestamp() - t0) * 1000)::float8; end loop;
+  ${ROW('dspeed', `jsonb_build_object('ms', to_jsonb(ms), 'n', jsonb_array_length(r -> 'rooms'),
+    'big', (select max((x ->> 'hanchan_n')::int) from jsonb_array_elements(r -> 'rooms') x))`)}
+
   /* ⑥c（§2 v1.3）：人3 に 締めた部屋 300（最後の開催に settle_snaps）＋開いた部屋 5・p_open=true で limit 50 を全部たどる */
   ${asWho(3)}
   for rk in 1..305 loop
@@ -257,11 +312,12 @@ begin
   ${ROW('walk', `jsonb_build_object('ms', to_jsonb(ms), 'n', coalesce(array_length(ids, 1), 0))`)}
 
   ${ROW('acl', `jsonb_build_object(
-    'anon', has_function_privilege('anon', 'public.mj_my_rooms(timestamptz, uuid, int, boolean)', 'execute'),
-    'auth', has_function_privilege('authenticated', 'public.mj_my_rooms(timestamptz, uuid, int, boolean)', 'execute'),
+    'anon', has_function_privilege('anon', 'public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean)', 'execute'),
+    'auth', has_function_privilege('authenticated', 'public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean)', 'execute'),
     'pub', exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x
-                   where p.oid = 'public.mj_my_rooms(timestamptz, uuid, int, boolean)'::regprocedure and x.grantee = 0),
+                   where p.oid = 'public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean)'::regprocedure and x.grantee = 0),
     'old3', to_regprocedure('public.mj_my_rooms(timestamptz, uuid, int)') is not null,
+    'old4', to_regprocedure('public.mj_my_rooms(timestamptz, uuid, int, boolean)') is not null,
     'n', (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'mj_my_rooms'))`)}
   raise exception 'MJRESULT%', res::text;
 end ${q('mr')};`;
@@ -313,7 +369,24 @@ function check(o) {
     && (o.three.rooms || []).every((x) => OLD_KEYS.every((k) => k in x)) && !J(o.three).includes('room_no'), J(o.three));
   /* ⑤ */
   const a = o.acl || {};
-  ok('⑤ anon に EXECUTE 無し・PUBLIC 無し・authenticated だけ・3引数の古い形は無い（1本）', a.anon === false && a.auth === true && a.pub === false && a.old3 === false && Number(a.n) === 1, J(a));
+  ok('⑤ anon に EXECUTE 無し・PUBLIC 無し・authenticated だけ・3引数と4引数の古い形は無い（1本）', a.anon === false && a.auth === true && a.pub === false && a.old3 === false && a.old4 === false && Number(a.n) === 1, J(a));
+  /* A6（a6db_sadame v1.1 §3） */
+  const I2 = o.ids2 || {};
+  const DAY7 = 7 * 86400000;
+  const r3d = byId(o.d_dev2, I2.rd3);
+  ok('A6-1 持ち主が消す→同じ人の別の端末の p_deleted=true に出る（deleted_at・undo_until＝＋7日・role owner）・p_deleted=false には出ない',
+    o.d_del?.ok === true && !!r3d && r3d.role === 'owner' && typeof r3d.deleted_at === 'string'
+    && Date.parse(r3d.undo_until) - Date.parse(r3d.deleted_at) === DAY7 && !pick(o.all2).includes(I2.rd3), J([o.d_del, r3d]));
+  ok('A6-2 消した一覧＝持ち主の消した7日の内の部屋だけ・deleted_at の新しい順（rd3 r3 rde）', J(pick(o.d_all)) === J([I2.rd3, I.r3, I2.rde]), J(pick(o.d_all)));
+  ok('A6-3 kan の人（人1）・出された入の人（人3）・他の人（人4）には r7 が出ない・持ち主（人2）には1回 role owner',
+    !pick(o.d_all).includes(I2.r7) && !pick(o.d_u3).includes(I2.r7) && o.d_u4?.ok === true && pick(o.d_u4).length === 0
+    && pick(o.d_u2).filter((x) => x === I2.r7).length === 1 && byId(o.d_u2, I2.r7)?.role === 'owner', J([pick(o.d_all), o.d_u2, o.d_u3, o.d_u4]));
+  ok('A6-4 7日の境：7日と1秒前に消した部屋は出ない・7日の1分前は出る', !pick(o.d_pre).includes(I2.rdo) && pick(o.d_pre).includes(I2.rde), J(pick(o.d_pre)));
+  ok('A6-5 room_undelete の後は消した一覧から消え、普通の一覧に戻る', o.d_undel?.ok === true && !pick(o.d_after).includes(I2.rd3) && pick(o.all3).includes(I2.rd3), J([o.d_undel, pick(o.d_after)]));
+  ok('A6-6 limit 1 で before（deleted_at）をたどる＝全部と同じ並び・重なりも抜けも無い', J(o.pg_del) === J(pick(o.d_all)) && (o.pg_del || []).length === 3, J([o.pg_del, pick(o.d_all)]));
+  ok('A6-7 p_open と p_deleted の両方は bad deleted・p_deleted null は false と同じ・名前で3つ4つの呼びも同じ行・普通の行に deleted_at は無い',
+    isErr(o.d_bad, 'bad', { what: 'deleted' }) && o.all2?.ok === true && J(o.d_null) === J(o.all2) && J(o.named3) === J(o.all2) && J(o.named4) === J(o.all2)
+    && !(o.all2.rooms || []).some((x) => 'deleted_at' in x || 'undo_until' in x), J([o.d_bad, o.d_null?.rooms?.length, o.named3?.rooms?.length, o.named4?.rooms?.length]));
   /* §1.7 */
   ok('§1.7 200日開かない入の行は mj_sweep_tail を回しても残る', o.kept === true, J(o.kept));
   /* ⑥（§2 v4.1） */
@@ -322,11 +395,13 @@ function check(o) {
   ok(`⑥a 50部屋（3万半荘を375日に分けた部屋1つ）で p_open=true の1頁 中央値 ${ma?.toFixed?.(1)}ms ≤ 100`, o.speed?.n === 50 && o.speed.big === 80 && o.speed.all === 30000 && ma <= 100, J(o.speed));
   ok(`⑥b 一番重い形（1つの鎖に3万半荘）で1頁 中央値 ${mb?.toFixed?.(1)}ms ≤ 200`, o.worst?.n === 50 && o.worst.big === 30000 && o.worst.bigm === 5 && o.worst.all === 60000 && mb <= 200, J(o.worst));
   ok(`⑥c 締めた300＋開いた5 を limit 50 で全部たどる：5部屋・頁ごと最大 ${wmax.toFixed(1)}ms ≤ 100`, wk.n === 5 && wmax <= 100, J(wk));
+  const md = med(o.dspeed);
+  ok(`A6 §2 50部屋のうち消した20（3万半荘の鎖の部屋を含む）で p_deleted=true の1頁 中央値 ${md?.toFixed?.(1)}ms ≤ 200（重さは3万半荘の鎖の数え＝⑥b と同じ所・消した絞りでない）`, o.dspeed?.n === 20 && o.dspeed.big === 30000 && md <= 200, J(o.dspeed));
   return L;
 }
 
 /* --waza：関数の字を置き換えて塊の初めに当てる */
-const FN = 'public.mj_my_rooms(timestamptz, uuid, int, boolean)';
+const FN = 'public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean)';
 const brk = (from, to) => `fd := pg_get_functiondef('${FN}'::regprocedure); fd2 := replace(fd, ${q('a')}${from}${q('a')}, ${q('b')}${to}${q('b')});
   if fd2 = fd then raise exception 'waza の字が見つからない'; end if; execute fd2;`;
 const T2 = (re) => { const k = CARDS.findIndex((c) => re.test(c.name)); if (k < 0) throw new Error('表の組が無い ' + re); return `② 表 ${k + 1}「`; };
@@ -347,6 +422,11 @@ const WZ = [
   ['W13 頭の判じで voided を見ない', brk('(case when not t.voided', '(case when true'), [T2(/^卓1 を取り消す→/)]],
   ['W14 member_n が voided の半荘の席も数える', brk("and not k.voided and e.value <> ''", "and e.value <> ''"), [T2(/^取り消した半荘にだけ座った人/)]],
   ['W15 最後の開催でリーグを外さない', brk('s.league_id is null and not s.voided', 'not s.voided'), [T2(/^リーグの日が後に在る/)]],
+  ['WD1 消した一覧の持ち主の絞りを room_accounts の人にする', brk('where v_del and x.owner_user_id = v_me', 'where v_del and exists (select 1 from mahjong.room_accounts a2 where a2.room_id = x.id and a2.user_id = v_me)'), ['A6-3']],
+  ['WD2 7日の境を8日にする', brk("x.deleted_at >= pg_catalog.now() - interval '7 days'", "x.deleted_at >= pg_catalog.now() - interval '8 days'"), ['A6-4']],
+  ['WD3 消した一覧で普通の行も出す', brk('and not v_del', 'and true'), ['A6-2']],
+  ['WD4 消した一覧の頁を古い順で切る', brk('order by x.deleted_at desc, x.id desc', 'order by x.deleted_at, x.id'), ['A6-6']],
+  ['WD5 undo_until を6日にする', brk("q.dd + interval '7 days'", "q.dd + interval '6 days'"), ['A6-1']],
 ];
 
 let pass = 0, fail = 0, exit = 0;

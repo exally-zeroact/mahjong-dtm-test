@@ -1763,24 +1763,32 @@ grant execute on function public.mj_room_join(text, text, text, text, text) to a
 -- 返し＝{ok:true, rooms:[{room_id, kind, name（shared だけ）, role, closed, created_at, last_write_at, last_date, hanchan_n, member_n}]}。
 -- 3引数の前の形は drop（残すと名前で呼んだ時に PGRST203）。今の画面（3つの名前）は p_open 既定 false。
 -- ★plpgsql のまま★（language sql だと作る時に中身を確かめ、この後で足す列 tables.seats・chain_head に当たって初めの当てが落ちる）。
+-- A6（a6db_sadame v1.1）：p_deleted=true＝自分が持ち主（owner_user_id）で、消して7日の内（deleted_at >= now()-7日＝mj_write の門と同じ側）の部屋だけ。
+--   room_accounts は見ない（kan の他の人には出さない＝taiketsu S1）・出された印も見ない（mj_write の持ち主の道と同じ）。
+--   並び＝(deleted_at desc, id desc)・before は (deleted_at, id) と比べる。行は A15 の欄＋deleted_at・undo_until（＝deleted_at＋7日）・role は 'owner'。
+--   p_open と両方 true は bad what deleted。p_deleted=false（null も）の道は前と同じ行（deleted_at の欄は足さない）。4引数の前の形は drop。
 drop function if exists public.mj_my_rooms(timestamptz, uuid, int);
-create or replace function public.mj_my_rooms(p_before_at timestamptz, p_before_id uuid, p_limit int, p_open boolean default false)
+drop function if exists public.mj_my_rooms(timestamptz, uuid, int, boolean);
+create or replace function public.mj_my_rooms(p_before_at timestamptz, p_before_id uuid, p_limit int, p_open boolean default false, p_deleted boolean default false)
 returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
-  v_me uuid; v_rooms jsonb; v_open boolean := coalesce(p_open, false);
+  v_me uuid; v_rooms jsonb; v_open boolean := coalesce(p_open, false); v_del boolean := coalesce(p_deleted, false);
 begin
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
   if p_limit is null or p_limit not between 1 and 50 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'limit'); end if;
   if (p_before_at is null) <> (p_before_id is null) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'before'); end if;
+  if v_open and v_del then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'deleted'); end if;
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('room_id', q.id, 'kind', q.kind,
            'name', case when q.kind = 'shared' then q.name end, 'role', q.role, 'closed', q.closed_at is not null,
            'created_at', q.created_at, 'last_write_at', q.last_write_at,
-           'last_date', q.last_date, 'hanchan_n', coalesce(c.hn, 0), 'member_n', coalesce(c.mn, 0)) order by q.t desc, q.id desc), '[]'::jsonb)
+           'last_date', q.last_date, 'hanchan_n', coalesce(c.hn, 0), 'member_n', coalesce(c.mn, 0))
+           || case when v_del then pg_catalog.jsonb_build_object('deleted_at', q.dd, 'undo_until', q.dd + interval '7 days') else '{}'::jsonb end
+           order by q.t desc, q.id desc), '[]'::jsonb)
     into v_rooms
-    from (select x.id, x.kind, x.name, x.closed_at, x.created_at, x.last_write_at, a.role,
-                 coalesce(x.last_write_at, x.created_at) as t, ls.id as sid, ls.date as last_date
+    from ((select x.id, x.kind, x.name, x.closed_at, x.created_at, x.last_write_at, a.role,
+                 coalesce(x.last_write_at, x.created_at) as t, ls.id as sid, ls.date as last_date, null::timestamptz as dd
             from mahjong.room_accounts a join mahjong.rooms x on x.id = a.room_id
             left join lateral (select s.id, s.date from mahjong.sessions s
                                 where s.room_id = x.id and s.league_id is null and not s.voided
@@ -1790,8 +1798,21 @@ begin
                                  and (ls.id is null or not exists (select 1 from mahjong.settle_snaps z where z.session_id = ls.id))))
              and not exists (select 1 from mahjong.room_bans b where b.room_id = x.id and b.user_id = v_me)
              and (p_before_at is null or (coalesce(x.last_write_at, x.created_at), x.id) < (p_before_at, p_before_id))
+             and not v_del
            order by coalesce(x.last_write_at, x.created_at) desc, x.id desc
-           limit p_limit) q
+           limit p_limit)
+          union all
+          (select x.id, x.kind, x.name, x.closed_at, x.created_at, x.last_write_at, 'owner'::text,
+                 x.deleted_at as t, ls.id as sid, ls.date as last_date, x.deleted_at as dd
+            from mahjong.rooms x
+            left join lateral (select s.id, s.date from mahjong.sessions s
+                                where s.room_id = x.id and s.league_id is null and not s.voided
+                                order by s.created_at desc, s.id desc limit 1) ls on true
+           where v_del and x.owner_user_id = v_me
+             and x.deleted_at is not null and x.deleted_at >= pg_catalog.now() - interval '7 days'
+             and (p_before_at is null or (x.deleted_at, x.id) < (p_before_at, p_before_id))
+           order by x.deleted_at desc, x.id desc
+           limit p_limit)) q
     left join lateral (select coalesce(t.chain_head, t.id) as h from mahjong.tables t
                         where t.session_id = q.sid
                         order by (case when not t.voided
@@ -1816,8 +1837,8 @@ begin
                                                  where e.value <> '' group by e.value) g) end as mn) c on ft.h is not null;
   return pg_catalog.jsonb_build_object('ok', true, 'rooms', v_rooms);
 end $fn$;
-revoke all on function public.mj_my_rooms(timestamptz, uuid, int, boolean) from public, anon, authenticated;
-grant execute on function public.mj_my_rooms(timestamptz, uuid, int, boolean) to authenticated;
+revoke all on function public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean) from public, anon, authenticated;
+grant execute on function public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean) to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
 -- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・
