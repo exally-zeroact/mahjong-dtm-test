@@ -119,10 +119,10 @@ async function run(br, port) {
     await pg.goto(`http://127.0.0.1:${port}/taikyoku.html`); await pg.waitForSelector('#cName', { state: 'visible' });
     await pg.fill('#cName', '試しの会'); await pg.fill('#cPass', '1234'); await pg.click('#goRules');
     await pg.click('#rYakiOn'); await kpPut(pg, '#rYaki', '0'); await pg.click('#btnCreate'); await pg.waitForTimeout(300);
-    const e0 = await txt(pg, '#cErr'), n0 = await pg.evaluate(() => (window.__rpc || []).length);
+    const e0 = await txt(pg, '#cErr'), n0 = await pg.evaluate(() => (window.__rpc || []).filter((x) => x.fn === 'mj_room_create').length); // A14g：開いた時に mj_my_rules を読む＝作る口だけ数える
     ok('作る門：on・pt 0＝字を出して倉庫へ送らない', e0 === 'やきとり1枚の pt は 1〜999 です（整数）。' && n0 === 0, JSON.stringify([e0, n0]));
-    await kpPut(pg, '#rYaki', '7'); await pg.click('#btnCreate'); await pg.waitForFunction(() => (window.__rpc || []).length > 0).catch(() => {});
-    const c = await pg.evaluate(() => (window.__rpc || []).map((x) => [x.fn, x.args && x.args.p_rules && x.args.p_rules.yakitori, x.args && x.args.p_rules && x.args.p_rules.yakitori_pt]));
+    await kpPut(pg, '#rYaki', '7'); await pg.click('#btnCreate'); await pg.waitForFunction(() => (window.__rpc || []).some((x) => x.fn === 'mj_room_create')).catch(() => {});
+    const c = await pg.evaluate(() => (window.__rpc || []).filter((x) => x.fn === 'mj_room_create').map((x) => [x.fn, x.args && x.args.p_rules && x.args.p_rules.yakitori, x.args && x.args.p_rules && x.args.p_rules.yakitori_pt]));
     ok('作る門：on・7＝mj_room_create に yakitori true・7', c.length === 1 && c[0][0] === 'mj_room_create' && c[0][1] === true && c[0][2] === 7, JSON.stringify(c));
     await ctx.close(); }
   return { pass, fail, bad };
