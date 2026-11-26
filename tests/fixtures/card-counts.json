@@ -1,0 +1,729 @@
+{
+  "about": "A15 カードの数の期待値（a15_sadame §1.3 が正本）。倉庫の試験 tests/my-rooms.live.mjs と lib cardCounts の試験が同じ表を読む。並びの順＝配列の順（sessions も tables も前が先に作った＝created_at が小さい）。members＝部屋の人の数（m1..mN）。hanchans の n＝同じ形の半荘の数・seats を省くと m1..m{卓の players}。tables の seats＝卓の席（配列・[] か players 人）。next＝続きの卓の key。settled＝その開催に締めが在る。want.open＝p_open=true で出るか。",
+  "cases": [
+    {
+      "name": "開催が無い部屋",
+      "members": 4,
+      "sessions": [],
+      "want": {
+        "open": true,
+        "last_date": null,
+        "hanchan_n": 0,
+        "member_n": 0
+      }
+    },
+    {
+      "name": "締めた後に同じ日に新しい開催＝新しい開催の分だけ",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "settled": true,
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 3,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "最後の開催に締めが在る＝p_open=true で出ない",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "settled": true,
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": false,
+        "last_date": "2026-11-22",
+        "hanchan_n": 2,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "日付を前にずらしても last_date は最後に作った開催の日",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "date": "2026-11-20",
+          "tables": [
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 1
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-20",
+        "hanchan_n": 1,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "取り消した開催が最後＝その前の開催",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-21",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "date": "2026-11-23",
+          "voided": true,
+          "tables": [
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 5
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-21",
+        "hanchan_n": 2,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "8局のうち1局を取り消す→8",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 7
+                },
+                {
+                  "n": 1,
+                  "voided": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 8,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "同じ開催に鎖でない卓が2つ（卓1 3局・卓2 5局）→開いた時に出る卓1の3",
+      "members": 8,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 5,
+                  "seats": [
+                    "m5",
+                    "m6",
+                    "m7",
+                    "m8"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 3,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "卓1 を取り消す→卓2 の5",
+      "members": 8,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "voided": true,
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 5,
+                  "seats": [
+                    "m5",
+                    "m6",
+                    "m7",
+                    "m8"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 5,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "区切った鎖（3局＋4局）→7",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "next": "B",
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 4
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 7,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "10人の部屋で4人が打つ→4",
+      "members": 10,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 2,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "取り消した卓が後＝その前の卓",
+      "members": 8,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "voided": true,
+              "hanchans": [
+                {
+                  "n": 5,
+                  "seats": [
+                    "m5",
+                    "m6",
+                    "m7",
+                    "m8"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 3,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "鎖の半荘を全部取り消す（1局・席4人）→1・卓の席の4",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "seats": [
+                "m1",
+                "m2",
+                "m3",
+                "m4"
+              ],
+              "hanchans": [
+                {
+                  "n": 1,
+                  "voided": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 1,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "半荘0で席だけ決めた卓（配列で4人）→0・4",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "seats": [
+                "m1",
+                "m2",
+                "m3",
+                "m4"
+              ],
+              "hanchans": []
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 0,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "鎖 A→B で B を取り消す→鎖の最後は B・数は A＋B",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "next": "B",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "voided": true,
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 5,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "鎖 A→B（4人→3人）で B を取り消し半荘も全部取り消し→member_n は鎖の最後 B の席の3",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "next": "B",
+              "seats": [
+                "m1",
+                "m2",
+                "m3",
+                "m4"
+              ],
+              "hanchans": [
+                {
+                  "n": 1,
+                  "voided": true
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "players": 3,
+              "voided": true,
+              "seats": [
+                "m1",
+                "m2",
+                "m3"
+              ],
+              "hanchans": [
+                {
+                  "n": 1,
+                  "voided": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 2,
+        "member_n": 3
+      }
+    },
+    {
+      "name": "鎖 A→B で A を取り消す→頭が無い＝卓の1つ目 A の鎖＝A＋B",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "voided": true,
+              "next": "B",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 3
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 5,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "卓1 を取り消し・卓2 が A→B で A も取り消し→頭が無い＝卓の1つ目（卓1）の数",
+      "members": 8,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "T1",
+              "voided": true,
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            },
+            {
+              "key": "A",
+              "voided": true,
+              "next": "B",
+              "hanchans": [
+                {
+                  "n": 3,
+                  "seats": [
+                    "m5",
+                    "m6",
+                    "m7",
+                    "m8"
+                  ]
+                }
+              ]
+            },
+            {
+              "key": "B",
+              "hanchans": [
+                {
+                  "n": 4,
+                  "seats": [
+                    "m5",
+                    "m6",
+                    "m7",
+                    "m8"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 2,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "5人で回す鎖（4人ずつ座る半荘3つで5人とも座る）→5",
+      "members": 5,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 1,
+                  "seats": [
+                    "m1",
+                    "m2",
+                    "m3",
+                    "m4"
+                  ]
+                },
+                {
+                  "n": 1,
+                  "seats": [
+                    "m2",
+                    "m3",
+                    "m4",
+                    "m5"
+                  ]
+                },
+                {
+                  "n": 1,
+                  "seats": [
+                    "m1",
+                    "m3",
+                    "m4",
+                    "m5"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 3,
+        "member_n": 5
+      }
+    },
+    {
+      "name": "取り消した半荘にだけ座った人は数えない（m5 は取り消した1局だけ）→4",
+      "members": 5,
+      "sessions": [
+        {
+          "date": "2026-11-22",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2,
+                  "seats": [
+                    "m1",
+                    "m2",
+                    "m3",
+                    "m4"
+                  ]
+                },
+                {
+                  "n": 1,
+                  "seats": [
+                    "m2",
+                    "m3",
+                    "m4",
+                    "m5"
+                  ],
+                  "voided": true
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-22",
+        "hanchan_n": 3,
+        "member_n": 4
+      }
+    },
+    {
+      "name": "リーグの日が後に在る（締めも在る）＝数と締めの判じはリーグでない最後の開催→2",
+      "members": 4,
+      "sessions": [
+        {
+          "date": "2026-11-20",
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "date": "2026-11-22",
+          "league": true,
+          "settled": true,
+          "tables": [
+            {
+              "key": "A",
+              "hanchans": [
+                {
+                  "n": 5
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "want": {
+        "open": true,
+        "last_date": "2026-11-20",
+        "hanchan_n": 2,
+        "member_n": 4
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@
  *  ⑦ ok でない返し（create の bad・join の wrong・bad）では古い行が消えない
  *  ① 古い limits（1m・1h・1d・u1d・sweep:* の境目の前後）・creates・op_results → join の ok で消える・内側は残る・知らない kind は残る
  *     1手順で p_max を超えない（150 入れて 100 → 50 残る）
- *  ② room_accounts：入 181日 消える／入 179日 残る／管 181日・持ち主 181日・L 181日 残る／members.user_id は残る
+ *  ② room_accounts：★A15 で入180日の掃除をやめた★＝入 181日も★消えない★／入 179日 残る／管 181日・持ち主 181日・L 181日 残る／members.user_id は残る
  *  ③ 空の部屋（段C v10.1 で ⓑ を止めた）：8日・半荘0・誰も来ない・小さい→★消えない★／昨日 last_seen→残る／半荘1→残る／子が p_max 超え→★印も付かない★
  *  ④-0 小さい消した部屋（rule_sets 2版を sessions・tables・hanchans が指す）が1回で消え、set constraints all immediate で赤0
  *  ④ 消して8日の大きい部屋を p_max 1〜13 で回し、毎回 set constraints all immediate → 赤0で減り最後に消える・rooms_all −1・消して6日は残る
@@ -165,7 +165,7 @@ begin
   res := res || jsonb_build_object('p1', (select count(*) from mahjong.limits where key like 'test:p%'));
   ${SW(100)}
   res := res || jsonb_build_object('p2', (select count(*) from mahjong.limits where key like 'test:p%'));
-  /* ② room_accounts の 180日（R0） */
+  /* ② room_accounts の 180日（R0）＝A15 §1.7 で掃除をやめた＝全部残る */
   m := gen_random_uuid();
   insert into mahjong.members (id, room_id, name, name_key, user_id) values (m, r0, '乙', '乙', us[2]);
   update mahjong.room_accounts set last_seen = now() - interval '181 days', member_id = m where room_id = r0 and user_id = us[2];
@@ -352,7 +352,7 @@ if (out) {
   ok('① 1手順で p_max を超えない（150 → 1回目 50 残る → 2回目 0）', Number(out.p1) === 50 && Number(out.p2) === 0, `${out.p1} → ${out.p2}`);
   /* ② */
   const ra = out.ra || {};
-  ok('② 入 181日は消える', ra['2'] === false, J(ra));
+  ok('② 入 181日も★消えない★（A15 §1.7・入った部屋は全部ホームに出す）', ra['2'] === true, J(ra));
   ok('② 入 179日は残る', ra['4'] === true, J(ra));
   ok('② 管 181日は残る', ra['3'] === true, J(ra));
   ok('② 持ち主（入の行・181日）は残る', ra['1'] === true, J(ra));

@@ -1067,7 +1067,8 @@ create index if not exists hanchans_rule on mahjong.hanchans(rule_set_id, rule_v
 create index if not exists op_results_at_only on mahjong.op_results(at);
 create index if not exists creates_at on mahjong.creates(at);
 create index if not exists limits_window on mahjong.limits(window_start);
-create index if not exists room_accounts_nyu_seen on mahjong.room_accounts(last_seen) where role = 'nyu';
+-- A15 §1.7（a15_sadame v1.1）：入180日の掃除をやめた＝それだけが使っていた索引を消す
+drop index if exists mahjong.room_accounts_nyu_seen;
 create index if not exists rooms_sweep_pick on mahjong.rooms(swept_at nulls first, deleted_at, id) where deleted_at is not null;   -- §2 の測り（11-23）＝部屋を選ぶ所が呼びごとに rooms を読み切っていた（10秒ごと）＝消した部屋だけの小さい索引・選ぶ順そのまま
 
 -- ── ついでの掃除（段2b-2・案 mahjong_tataki_2026-11-20/sweep_sekkei.md v1.2＝設計前 taiketsu 止め3→叩き直し 止め1→止め0）──
@@ -1079,7 +1080,7 @@ create index if not exists rooms_sweep_pick on mahjong.rooms(swept_at nulls firs
 --         （sessions・tables・hanchans の rule_sets への外部キーは NO ACTION＝rooms の cascade に任せると順で落ちる＝v1.2）
 --     1-b 大きい部屋＝ⓐ は子を決まった順に枠の数だけ消す（hanchans は cells・tobi が付く＝残り÷9・rule_sets は sessions の後で rooms が指す1行と開催日・卓・半荘が指す版を除く＝S1・1回の掃除は手順ごとに p_max 行まで＝設計図 §3.2）
 --     塊が落ちた部屋は limits ('sweep:bad', 部屋, 今日) の印＝その日は飛ばす
---   4 totals の数え直し（1日1回・印 sweep:recount）  2 入の room_accounts 180日（持ち主とその部屋のリーグの L は残す・members.user_id は残す）
+--   4 totals の数え直し（1日1回・印 sweep:recount）  2 （A15 でやめた＝入った部屋は消さない・外れるのは出る・出される・パスが変わる時だけ）
 --   3 古い行＝op_results 7日・creates 2日・limits（kind の終わり 1m＝10分・1h＝2時間・1d／u1d／sweep:*＝2日・★他の kind は消さず log★）
 -- P7：手順1（部屋の消し）だけ＝mj_sweep_room（1部屋・true＝部屋を1つ選べた）。尾（2・3・4）は mj_sweep_tail（別の取引で毎分＝§1-2a）
 create or replace function mahjong_private.mj_sweep_room(p_max int default 1000) returns boolean
@@ -1232,7 +1233,7 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_sweep_tailbad(text) from public, anon, authenticated;
 
--- P7 §1-2a：尾＝2 入180日 → 3 古い行 → 窓の無い kind（1日1回）→ cron の記録 → 4 数え直し（印の無い日だけ totals を取る＝最後）
+-- P7 §1-2a：尾＝（2 入180日は A15 でやめた）3 古い行 → 窓の無い kind（1日1回）→ cron の記録 → 4 数え直し（印の無い日だけ totals を取る＝最後）
 create or replace function mahjong_private.mj_sweep_tail(p_max int default 1000) returns void
 language plpgsql security definer set search_path = '' set lock_timeout = '50ms' as $fn$
 declare
@@ -1240,18 +1241,7 @@ declare
   v_all int; v_real bigint; v_d bigint;
   v_day  timestamptz := pg_catalog.date_trunc('day', pg_catalog.now());
 begin
-  -- ── 2 入の room_accounts 180日（持ち主・その部屋のリーグの L は残す） ──
-  begin
-    delete from mahjong.room_accounts z where z.ctid = any(array(
-      select a.ctid from mahjong.room_accounts a join mahjong.rooms x on x.id = a.room_id
-       where a.role = 'nyu' and a.last_seen < pg_catalog.now() - interval '180 days'
-         and a.user_id is distinct from x.owner_user_id
-         and not exists (select 1 from mahjong.leagues g where g.room_id = a.room_id and g.owner_user_id = a.user_id)
-       limit v_max for update of a skip locked));
-  exception when others then
-    raise log 'mj_sweep nyu %', sqlstate;
-    perform mahjong_private.mj_sweep_tailbad('nyu');
-  end;
+  -- ── 2 入の room_accounts 180日＝A15 §1.7 でやめた（司さん「対局は全部残す」「履歴に上限作るな」・入った部屋は全部ホームに出す） ──
 
   -- ── 3 古い行 ──
   begin
@@ -1759,15 +1749,26 @@ end $fn$;
 revoke all on function public.mj_room_join(text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.mj_room_join(text, text, text, text, text) to authenticated;
 
--- ── 入口：自分の部屋の一覧（段C §5）──
+-- ── 入口：自分の部屋の一覧（段C §5・A15＝a15_sadame v4.1 §1・§2）──
 -- mj_session・p_limit 1〜50（他は bad what limit）・p_before_at と p_before_id は両方在るか両方 null（片方だけは bad what before）。
--- 対象＝呼んだ人の room_accounts が在り deleted_at null の部屋（終えた部屋も）。並び＝(coalesce(last_write_at, created_at) desc, id desc)。
--- 返し＝{ok:true, rooms:[{room_id, kind, name（shared だけ）, role, closed, created_at, last_write_at}]}。room_no は返さない。読むだけ（数えない）。
-create or replace function public.mj_my_rooms(p_before_at timestamptz, p_before_id uuid, p_limit int)
+-- 対象＝呼んだ人の room_accounts が在り deleted_at null・room_bans に本人が無い部屋（p_open=false は終えた部屋も・
+--   true は closed_at null で、最後の開催に締め（settle_snaps）が無い部屋＝lib pickSession と同じ判じ・絞りは limit の前）。
+-- 並び＝(coalesce(last_write_at, created_at) desc, id desc)。読むだけ（数えない・読みの門の外）。
+-- 数（a15_sadame §1.3 が正本・期待値は tests/fixtures/card-counts.json）：
+--   最後の開催＝league_id is null・not voided の開催を (created_at desc, id desc) で1つ。
+--   今の卓＝部屋を開いた時に出る卓（js/gamen-room.mjs firstTable）：最後の開催の卓を (created_at, id) に並べ、
+--     voided でなく、どの卓の next_table_id でもない卓の1つ目・無ければ卓の1つ目。その鎖＝coalesce(chain_head, id) の卓（voided も含む）。
+--   hanchan_n＝鎖の半荘の数（voided も）・member_n＝鎖の voided でない半荘の seats（object）の値の人・
+--     その半荘が0なら鎖の最後の卓（chain_no 一番大きい）の seats（array）の要素の人。どちらも空でない字を重なり無しで。
+-- 返し＝{ok:true, rooms:[{room_id, kind, name（shared だけ）, role, closed, created_at, last_write_at, last_date, hanchan_n, member_n}]}。
+-- 3引数の前の形は drop（残すと名前で呼んだ時に PGRST203）。今の画面（3つの名前）は p_open 既定 false。
+-- ★plpgsql のまま★（language sql だと作る時に中身を確かめ、この後で足す列 tables.seats・chain_head に当たって初めの当てが落ちる）。
+drop function if exists public.mj_my_rooms(timestamptz, uuid, int);
+create or replace function public.mj_my_rooms(p_before_at timestamptz, p_before_id uuid, p_limit int, p_open boolean default false)
 returns jsonb
 language plpgsql security definer set search_path = '' as $fn$
 declare
-  v_me uuid; v_rooms jsonb;
+  v_me uuid; v_rooms jsonb; v_open boolean := coalesce(p_open, false);
 begin
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
@@ -1775,19 +1776,48 @@ begin
   if (p_before_at is null) <> (p_before_id is null) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'before'); end if;
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('room_id', q.id, 'kind', q.kind,
            'name', case when q.kind = 'shared' then q.name end, 'role', q.role, 'closed', q.closed_at is not null,
-           'created_at', q.created_at, 'last_write_at', q.last_write_at) order by q.t desc, q.id desc), '[]'::jsonb)
+           'created_at', q.created_at, 'last_write_at', q.last_write_at,
+           'last_date', q.last_date, 'hanchan_n', coalesce(c.hn, 0), 'member_n', coalesce(c.mn, 0)) order by q.t desc, q.id desc), '[]'::jsonb)
     into v_rooms
     from (select x.id, x.kind, x.name, x.closed_at, x.created_at, x.last_write_at, a.role,
-                 coalesce(x.last_write_at, x.created_at) as t
+                 coalesce(x.last_write_at, x.created_at) as t, ls.id as sid, ls.date as last_date
             from mahjong.room_accounts a join mahjong.rooms x on x.id = a.room_id
+            left join lateral (select s.id, s.date from mahjong.sessions s
+                                where s.room_id = x.id and s.league_id is null and not s.voided
+                                order by s.created_at desc, s.id desc limit 1) ls on true
            where a.user_id = v_me and x.deleted_at is null
+             and (not v_open or (x.closed_at is null
+                                 and (ls.id is null or not exists (select 1 from mahjong.settle_snaps z where z.session_id = ls.id))))
+             and not exists (select 1 from mahjong.room_bans b where b.room_id = x.id and b.user_id = v_me)
              and (p_before_at is null or (coalesce(x.last_write_at, x.created_at), x.id) < (p_before_at, p_before_id))
            order by coalesce(x.last_write_at, x.created_at) desc, x.id desc
-           limit p_limit) q;
+           limit p_limit) q
+    left join lateral (select coalesce(t.chain_head, t.id) as h from mahjong.tables t
+                        where t.session_id = q.sid
+                        order by (case when not t.voided
+                                         and not exists (select 1 from mahjong.tables y where y.next_table_id = t.id) then 0 else 1 end),
+                                 t.created_at, t.id
+                        limit 1) ft on true
+    -- 鎖の半荘は1回だけ読む（hn＝全部・nv＝voided でない）。人は group by でまとめる（count(distinct) の並べ替えより速い・答えは同じ）。
+    left join lateral (select pg_catalog.count(*) as hn, pg_catalog.count(*) filter (where not k.voided) as nv
+                         from mahjong.hanchans k
+                        where k.table_id in (select x.id from mahjong.tables x where x.session_id = q.sid and (x.id = ft.h or x.chain_head = ft.h))) c1 on ft.h is not null
+    left join lateral (select c1.hn, case when c1.nv > 0
+                                          then (select pg_catalog.count(*) from (select e.value from mahjong.hanchans k
+                                                                                   cross join lateral pg_catalog.jsonb_each_text(k.seats) e
+                                                                                  where k.table_id in (select x.id from mahjong.tables x where x.session_id = q.sid and (x.id = ft.h or x.chain_head = ft.h))
+                                                                                    and not k.voided and e.value <> ''
+                                                                                  group by e.value) g)
+                                          else (select pg_catalog.count(*) from (select e.value
+                                                  from (select x.seats from mahjong.tables x
+                                                         where x.session_id = q.sid and (x.id = ft.h or x.chain_head = ft.h)
+                                                         order by x.chain_no desc, x.created_at desc, x.id desc limit 1) lt
+                                                  cross join lateral pg_catalog.jsonb_array_elements_text(lt.seats) e
+                                                 where e.value <> '' group by e.value) g) end as mn) c on ft.h is not null;
   return pg_catalog.jsonb_build_object('ok', true, 'rooms', v_rooms);
 end $fn$;
-revoke all on function public.mj_my_rooms(timestamptz, uuid, int) from public, anon, authenticated;
-grant execute on function public.mj_my_rooms(timestamptz, uuid, int) to authenticated;
+revoke all on function public.mj_my_rooms(timestamptz, uuid, int, boolean) from public, anon, authenticated;
+grant execute on function public.mj_my_rooms(timestamptz, uuid, int, boolean) to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
 -- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・
