@@ -43,8 +43,8 @@ const hs = (id, cells, extra = {}) => ({ op: 'hanchan_start', hanchan_id: id, ta
 const H = (st, id) => st.hanchans.find((h) => h.hanchan_id === id);
 
 console.log('■ 決まりの数（倉庫 schema と同じ）');
-ok('素点は ±200,000', CELL_MAX === 200000);
-ok('消えた供託は 20,000 まで', LOST_MAX === 20000);
+ok('素点は ±2,000,000,000（A18 機械の限界）', CELL_MAX === 2e9);
+ok('消えた供託は 2,000,000,000 まで（A18）', LOST_MAX === 2e9);
 ok('チップ・祝儀は ±999', EXTRA_MAX === 999);
 ok('1つの組は30個まで', OPS_MAX === 30);
 ok('op は33個（B1 で table_seats を足した・2c-2a2 の直す op 6個・2c-2b の人の op 5個・2c-2c の部屋の op 4個・2c-2d1 のリーグの op 3個・段C の room_share・room_close を足した・2c-3c’ で yakitori_set を外した・C4 で table_rules を足した）', OP_NAMES.length === 34 && J([...OP_NAMES].sort()) === J(['account_remove', 'cell_set', 'extra_add', 'extra_set', 'hanchan_order', 'hanchan_seats', 'hanchan_start', 'hanchan_unvoid', 'hanchan_void', 'kyotaku_set', 'league_create', 'league_owner_set', 'league_save', 'member_active', 'member_add', 'member_link', 'member_relink', 'member_rename', 'member_unlink', 'role_set', 'room_close', 'room_delete', 'room_leave', 'room_secret', 'room_share', 'room_undelete', 'session_add', 'session_edit', 'settle_snap', 'table_add', 'table_edit', 'table_rules', 'table_seats', 'tobi_set']), J(OP_NAMES));

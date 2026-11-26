@@ -40,6 +40,7 @@ import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { rulesOk } from '../lib/rules.mjs';
+import { mulS } from '../lib/safe-int.mjs'; // A18 §2：画面で掛けない（safe の外は null）
 
 const WRITE_READY = true; // 2d：倉庫の mj_read が入った（送る所は sendOutbox・直に送るのは開催の始めの startShared だけ）
 const KEY = (uid, rid) => 'mj-room:' + uid + ':' + rid;
@@ -87,6 +88,7 @@ const fmt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleStri
 const fmtPt = (pt10) => (pt10 > 0 ? '+' : pt10 < 0 ? '−' : '') + (Math.abs(pt10) / 10).toFixed(1);
 const fmtCnt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
 const sign = (n) => (n > 0 ? 'plus' : n < 0 ? 'minus' : 'zero');
+const BIG_TEXT = '数が大きすぎて計算できません'; // A18 §2：safe の外の額は出さない（窓・精算）
 const md = (d) => (d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
 const hm = (iso) => { const d = new Date(iso); return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -786,9 +788,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function renderWindows(v) {
     // 足し①（終えた部屋に送れていない点が在る）＝この端末の額は部屋の額と違う＝窓は名前だけと赤い1行（v4 止め4）
     if (closedHold()) return '<div class="r-mado">' + seatWin(v).map((w) => '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div></div>').join('') + '</div><p class="r-check bad" id="rMadoNo">この端末の点の一部が部屋に入っていないので、額は出しません。</p>';
+    // A18 §2：窓の数のどれか1つでも safe の外（lib の bigNg）＝窓全体を名前だけと帯にして額を出さない（fmt・sign・unit に null を渡さない）
+    if (v.bigNg) return '<div class="r-mado">' + seatWin(v).map((w) => '<div class="r-w"><div class="r-w-name">' + esc(w.name) + '</div></div>').join('') + '</div><p class="r-check bad" id="rMadoBig">' + BIG_TEXT + '</p>';
     const pmOff = closingOn() ? ' disabled' : ''; // 終える送りの最中は ± を押せない形
     const ten = v.rate !== null;
-    const unit = (pt10) => (ten ? (pt10 * v.rate / 10).toLocaleString('ja-JP') : (pt10 / 10).toFixed(1) + 'pt');
+    const unit = (pt10) => (ten ? mulS(pt10, v.rate / 10).toLocaleString('ja-JP') : (pt10 / 10).toFixed(1) + 'pt'); // A18：1枚の額は lib の mulS（bigNg が false の間は null にならない）
     let h = '<div class="r-mado">';
     for (const w of seatWin(v)) {
       const big = ten ? fmt(w.big) : fmtPt(w.big) + '<small>pt</small>';
@@ -1310,7 +1314,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (!want.has(d.sid)) { want.add(d.sid); sync(); }
       el.innerHTML = '<div class="r-top"><span>' + (d.date ? esc(md(d.date)) : '') + '</span>' + liveTag() + '</div>' + bandsHtml() + staleHtml() + '<div class="r-red" id="sLoading"><b>この日の記録を読み込んでいます</b></div>'; wireBands(); return; // 半荘の数・レートも読めるまで出さない
     }
-    if (!s.ok) { el.innerHTML = top + '<div class="r-red"><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; wireBands(); return; }
+    if (!s.ok || d.bigNg) { el.innerHTML = top + '<div class="r-red"' + (s.err === 'big' || d.bigNg ? ' id="sBig"' : '') + '><b>' + (s.err === 'voided' ? 'この対局は取り消されています（精算は出しません）' : s.err === 'big' || d.bigNg ? BIG_TEXT : '精算を出せません（' + esc(s.err) + '）') + '</b></div>'; wireBands(); return; } // A18 §2：big＝払う表も1人ずつも出さない
     // 足し①＝この端末の写しの点が部屋に入っていない＝partial と同じく誰が誰に・1人ずつの額を1つも出さない（v3 止め2・s.missing が空でも出す）
     if (closedHold()) { el.innerHTML = top + '<div class="r-red" id="sClosedNo"><b>この端末の点の一部が部屋に入っていないので、精算の額は出しません。</b></div>'; wireBands(); return; }
     const settles = st.settles.filter((x) => x.session_id === d.sid);
@@ -1588,7 +1592,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         if (/^[0-9]+$/.test(k)) {
           if (kpFresh) { if (digits) neg = false; digits = ''; }
           const d = (digits + k).replace(/^0+(?=d)/, '');
-          if (d.length > 6) return; // ±200,000（CELL_MAX）より長い数は打たせない
+          if (d.length > 10) return; // A18：10桁まで（9,999,999,999）・±20億（CELL_MAX）の外は保存の時に字で弾く
           digits = d;
         } else if (k === 'bs') { if (digits) digits = digits.slice(0, -1); else neg = false; }
         else if (k === 'neg') neg = !neg;
