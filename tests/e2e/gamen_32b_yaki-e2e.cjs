@@ -1,6 +1,6 @@
-// ③-2 B 画面の自己確認（gamen_32b_sadame.md v1.1 §7）。node yaki-e2e.cjs <作業木> [--self]
+// ③-2 B 画面の自己確認（gamen_32b_sadame.md v1.1 §7）＋KPSP（鍵盤の下の空きは釦より下）。node yaki-e2e.cjs <作業木> [--self]
 const http = require('http'), fs = require('fs'), path = require('path');
-const pw = require('playwright');
+const pw = require(require.resolve('playwright', { paths: ['C:/Users/zeroa/Exally-test'] }));
 const ROOT = path.resolve(process.argv[2]);
 const SELF = process.argv.includes('--self');
 const MT = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
@@ -125,6 +125,16 @@ async function run(br, port) {
     const c = await pg.evaluate(() => (window.__rpc || []).filter((x) => x.fn === 'mj_room_create').map((x) => [x.fn, x.args && x.args.p_rules && x.args.p_rules.yakitori, x.args && x.args.p_rules && x.args.p_rules.yakitori_pt]));
     ok('作る門：on・7＝mj_room_create に yakitori true・7', c.length === 1 && c[0][0] === 'mj_room_create' && c[0][1] === true && c[0][2] === 7, JSON.stringify(c));
     await ctx.close(); }
+  // 6. KPSP：鍵盤を開いたまま頁の一番下へずらすと［部屋を作る］が鍵盤より上に出て、そのまま押せる（下の空きが釦より下）
+  { const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 4000 : 30000);
+    await pg.goto(`http://127.0.0.1:${port}/taikyoku.html`); await pg.waitForSelector('#cName', { state: 'visible' });
+    await pg.fill('#cName', '試しの会'); await pg.fill('#cPass', '1234'); await pg.click('#goRules');
+    await pg.click('#rRate'); await pg.waitForSelector('.kp:not([hidden])');
+    const g = await pg.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); const b = document.getElementById('btnCreate').getBoundingClientRect(), k = document.querySelector('.kp:not([hidden])').getBoundingClientRect(); return [Math.round(b.bottom), Math.round(k.top)]; });
+    ok('KPSP：鍵盤を開いて一番下へずらすと［部屋を作る］の下の端が鍵盤の上の端より上', g[1] > 0 && g[0] <= g[1], JSON.stringify(g));
+    let hit = null; try { await pg.click('#btnCreate', { timeout: SELF ? 2000 : 5000 }); hit = true; } catch (e) { hit = String(e.message).split(String.fromCharCode(10))[0]; }
+    ok('KPSP：鍵盤を開いたまま［部屋を作る］を押せる', hit === true, String(hit));
+    await ctx.close(); }
   return { pass, fail, bad };
 }
 (async () => {
@@ -146,6 +156,8 @@ async function run(br, port) {
     ['off で NaN を残す', 'js/gamen-rules.mjs', "r.yakitori_pt = r.yakitori ? p : (Number.isInteger(p) && p >= 1 && p <= 999 ? p : 0);", "r.yakitori_pt = p;"],
     ['作る門を外す', 'js/gamen-taikyoku.mjs', "if (rules.yakitori === true && !(Number.isInteger", "if (false && !(Number.isInteger"],
     ['missingText で yaki を祝儀と呼ぶ', 'js/gamen-room.mjs', "yaki: 'やきとり', tobi: '飛び賞' };", "yaki: '祝儀', tobi: '飛び賞' };"],
+    ['KPSP 作る頁の外の空きを外す（中の空き＝釦より上に戻る）', 'taikyoku.html', '<div class="kp-sp" id="cKpSp" hidden></div>', ''],
+    ['KPSP 外の空きを使わない（空きが無くなる）', 'js/kenban.mjs', "sp = spOut || host.querySelector('.kp-sp');", "sp = host.querySelector('.kp-sp');"],
   ];
   let red = 0;
   for (const [nm, file, from, to] of W) {
