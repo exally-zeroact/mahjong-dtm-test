@@ -89,6 +89,8 @@ jobs:
         run: node tests/room-state.test.mjs
       - name: 続きの部屋のカードの数と終えた判じ（lib cardCounts・roomEnded）＝倉庫と同じ表 tests/fixtures/card-counts.json（a15_sadame §1.3）
         run: node tests/card-counts.test.mjs
+      - name: 額の守り（lib/safe-int.mjs）＝±2,000,000,000 の外は null・null は持ち回す・精算は big・窓は bigNg（a18_sadame v5 §2・§5）
+        run: node tests/safe-int.test.mjs
       - name: 送り口（lib/outbox.mjs）＝倉庫の返りの振り分け（done・retry・conflict・reload・login・stop）と止めた並びの held（取り決め §6-11・12・14・14'）
         run: node tests/outbox.test.mjs
       - name: 送り口の見張りの自己確認（振り分けをわざと壊して赤になるか）
