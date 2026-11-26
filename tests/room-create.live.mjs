@@ -316,8 +316,8 @@ if (out) {
   /* ⑨ */
   const fn = (out.funcs || []);
   const fc = fn.find((x) => x.name === 'mj_room_create');   // 段2c-1 から public.mj_* は3本（mj_room_join は room-join.live ⑮・mj_write は write.live ⓪）
-  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join・write・my_rooms・read の5本＝段C・2d）', fn.filter((x) => x.name === 'mj_room_create').length === 1
-    && fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_read,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
+  ok('⑨ public.mj_* に mj_room_create が1本（全部で create・join・write・my_rooms・read・my_rules の6本＝段C・2d・A14）', fn.filter((x) => x.name === 'mj_room_create').length === 1
+    && fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_my_rules,mj_read,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
   ok('⑨ definer・search_path 空・authenticated に EXECUTE・anon と PUBLIC に無し', fc && fc.definer === true
     && JSON.stringify(fc.config) === JSON.stringify(['search_path=""']) && !fc.anon && fc.auth && !fc.public, JSON.stringify(fc));
   ok('⑨ 部屋の関数は客から呼べない', Number(out.priv_anon) === 0, String(out.priv_anon));

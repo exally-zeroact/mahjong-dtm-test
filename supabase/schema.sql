@@ -398,6 +398,16 @@ create table if not exists mahjong.room_accounts (
 create unique index if not exists room_accounts_member on mahjong.room_accounts(room_id, member_id) where member_id is not null;
 create index if not exists room_accounts_user on mahjong.room_accounts(user_id);
 create index if not exists room_accounts_seen on mahjong.room_accounts(room_id, last_seen);
+
+-- ── A14（a14_sadame v1.1 §1）：覚えたルール（人×人数・前回作った／途中で変えたルール・次の新しい対局の既定）──
+--   1人2行が天井（上限・掃除は要らない）。読み書きは definer の関数だけ（RLS 入・客の権限0＝下の全部の表の回し）。
+create table if not exists mahjong.account_rules (
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  players    smallint not null check (players in (3, 4)),
+  rules      jsonb not null check (jsonb_typeof(rules) = 'object'),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, players)
+);
 -- 段C：入り方に 'name'（部屋名＋パス）を足す＝create table の中の check は名前が倉庫の付けた名＝pg_constraint で引いて落としてから付け直す
 do $jvdo$
 declare v_c text;
@@ -1549,6 +1559,9 @@ begin
                   when 'rooms_room_no_key' then 'room_no' when 'rooms_channel_key_key' then 'channel_key'
                   when 'creates_pkey' then 'op_id' else 'other' end);
   end;
+  -- A14 §2.1：新しい部屋と rule_sets を入れた道だけで覚える（送り直しの道⑤では覚えない）・落ちたら呑まない（server）
+  insert into mahjong.account_rules (user_id, players, rules, updated_at) values (v_me, (v_rules ->> 'players')::smallint, v_rules, pg_catalog.clock_timestamp())
+    on conflict (user_id, players) do update set rules = excluded.rules, updated_at = excluded.updated_at;   -- 時刻は clock（last の比べ＝同じ取引でも前後が付く）
   begin perform mahjong_private.mj_sweep(); exception when others then raise log 'mj_sweep %', sqlstate; end;   -- 2b-2 ついでの掃除（ok の返しの直前だけ）
   if v_kind = 'solo' then
     return pg_catalog.jsonb_build_object('ok', true, 'room_id', v_room, 'kind', v_kind, 'channel_key', v_ch);
@@ -1872,6 +1885,24 @@ begin
 end $fn$;
 revoke all on function public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean) from public, anon, authenticated;
 grant execute on function public.mj_my_rooms(timestamptz, uuid, int, boolean, boolean) to authenticated;
+
+-- ── A14 §3：覚えたルールを読む＝{ok:true, rules:{"3": obj|null, "4": obj|null}, last: 3|4|null（updated_at が新しい方・同じなら 4）}（本人の行だけ・中身は確かめ直さない＝画面が既定に戻して帯）──
+--   mj_me_read（押さえない）・session 無しは mj_session・読むだけ（数えない）
+create or replace function public.mj_my_rules()
+returns jsonb
+language plpgsql security definer set search_path = '' as $fn$
+declare
+  v_me uuid;
+begin
+  v_me := mahjong_private.mj_me_read();
+  if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+  return pg_catalog.jsonb_build_object('ok', true, 'rules', pg_catalog.jsonb_build_object(
+    '3', (select a.rules from mahjong.account_rules a where a.user_id = v_me and a.players = 3),
+    '4', (select a.rules from mahjong.account_rules a where a.user_id = v_me and a.players = 4)),
+    'last', (select a.players from mahjong.account_rules a where a.user_id = v_me order by a.updated_at desc, a.players desc limit 1));
+end $fn$;
+revoke all on function public.mj_my_rules() from public, anon, authenticated;
+grant execute on function public.mj_my_rules() to authenticated;
 
 -- ══ 段2c-1：書く入口 public.mj_write（案 mahjong_tataki_2026-11-20/write_sekkei.md v5.2）══════════════
 -- op は28個（member_add・session_add・table_add・hanchan_start・hanchan_order・cell_set・tobi_set・
@@ -3457,6 +3488,9 @@ begin
     end if;
     select pg_catalog.max(r.version) + 1 into v_rv from mahjong.rule_sets r where r.id = t.rule_set_id;
     insert into mahjong.rule_sets (id, version, room_id, rules) values (t.rule_set_id, v_rv, p_room, v_rules);
+    -- A14 §2.2：新しい規則の行を入れた時だけ・書いた本人に覚える（送り直し・同じルールの道では覚えない）・落ちたら呑まない（internal）
+    insert into mahjong.account_rules (user_id, players, rules, updated_at) values (p_me, t.players, v_rules, pg_catalog.clock_timestamp())
+      on conflict (user_id, players) do update set rules = excluded.rules, updated_at = excluded.updated_at;
     insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version, rate_mode, rate, extra_state, chip_state, shugi_state, seats, created_at, chain_head, chain_no)
       values (v_id, p_room, t.session_id, t.label, t.players, t.rule_set_id, v_rv, v_mode, case when v_mode = 'num' then v_rate end,
               'ok', 'unused', 'unused', t.seats, pg_catalog.clock_timestamp(), coalesce(t.chain_head, t.id), t.chain_no + 1);   -- P8：鎖の印

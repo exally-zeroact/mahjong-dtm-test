@@ -390,8 +390,8 @@ if (out) {
   ok('⑭ 平文のパス・外れのパス・token が rooms・room_accounts・limits の字に無い', pl.rooms && hits.length === 0, hits.join(','));
   /* ⑮ */
   const fn = out.funcs || [];
-  ok('⑮ public.mj_* は mj_my_rooms・mj_read・mj_room_create・mj_room_join・mj_write の5本（段C・2d）', fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_read,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
-  ok('⑮ 5本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 5 && fn.every((x) => x.definer === true
+  ok('⑮ public.mj_* は mj_my_rooms・mj_my_rules・mj_read・mj_room_create・mj_room_join・mj_write の6本（段C・2d・A14）', fn.map((x) => x.name).sort().join(',') === 'mj_my_rooms,mj_my_rules,mj_read,mj_room_create,mj_room_join,mj_write', JSON.stringify(fn.map((x) => x.name)));
+  ok('⑮ 6本とも definer・search_path 空・authenticated だけに EXECUTE', fn.length === 6 && fn.every((x) => x.definer === true
     && JSON.stringify(x.config) === JSON.stringify(['search_path=""']) && !x.anon && x.auth && !x.public), JSON.stringify(fn));
   const errs = Object.keys(out).filter((k) => k.endsWith('_err'));
   ok('塊の中で思わぬ例外が無い', errs.length === 0, errs.map((k) => k + '=' + out[k]).join(' / '));
