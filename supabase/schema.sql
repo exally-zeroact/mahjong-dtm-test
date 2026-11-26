@@ -2115,6 +2115,8 @@ begin
   t := mahjong_private.mj_w_t(p_room, p_tid, p_i, p_op, p_me, p_role);
   if p_o ? 'follow' and pg_catalog.jsonb_typeof(p_o -> 'follow') <> 'boolean' then perform mahjong_private.mj_w_bad(p_i, 'follow'); end if;
   if t.next_table_id is null then return t; end if;
+  -- A20 §6：follow:false と書いた hanchan_start だけ、区切られた卓にそのまま入れる（押した時に見えていた卓のルール・人数）。鍵が無い・他の op は今まで通り
+  if p_op = 'hanchan_start' and (p_o -> 'follow') = 'false'::jsonb then return t; end if;
   if (p_o -> 'follow') is distinct from 'true'::jsonb then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
   s := t;
   v_h := coalesce(s.chain_head, s.id);
@@ -3461,7 +3463,7 @@ begin
     select x.* into v_ss from mahjong.sessions x where x.id = t.session_id;
     if t.voided or v_ss.voided or v_ss.league_id is not null then perform mahjong_private.mj_w_bad(p_i, 'table_id'); end if;
     v_rules := mahjong_private.mj_w_rules(p_o -> 'rules', 'rules', p_i);
-    if (v_rules ->> 'players')::int is distinct from t.players::int then perform mahjong_private.mj_w_bad(p_i, 'players'); end if;
+    -- A20 §6：人数の門は外した（途中で3人⇔4人）。続きの卓の人数＝新しい rules の players・席は人数が同じなら写し違えば []
     if t.next_table_id is not null then
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'conflict', 'i', p_i,
         'at', pg_catalog.jsonb_build_object('table_id', t.id, 'what', 'next'), 'cur', pg_catalog.jsonb_build_object('next_table_id', t.next_table_id)));
@@ -3489,11 +3491,12 @@ begin
     select pg_catalog.max(r.version) + 1 into v_rv from mahjong.rule_sets r where r.id = t.rule_set_id;
     insert into mahjong.rule_sets (id, version, room_id, rules) values (t.rule_set_id, v_rv, p_room, v_rules);
     -- A14 §2.2：新しい規則の行を入れた時だけ・書いた本人に覚える（送り直し・同じルールの道では覚えない）・落ちたら呑まない（internal）
-    insert into mahjong.account_rules (user_id, players, rules, updated_at) values (p_me, t.players, v_rules, pg_catalog.clock_timestamp())
+    insert into mahjong.account_rules (user_id, players, rules, updated_at) values (p_me, (v_rules ->> 'players')::smallint, v_rules, pg_catalog.clock_timestamp())
       on conflict (user_id, players) do update set rules = excluded.rules, updated_at = excluded.updated_at;
     insert into mahjong.tables (id, room_id, session_id, label, players, rule_set_id, rule_version, rate_mode, rate, extra_state, chip_state, shugi_state, seats, created_at, chain_head, chain_no)
-      values (v_id, p_room, t.session_id, t.label, t.players, t.rule_set_id, v_rv, v_mode, case when v_mode = 'num' then v_rate end,
-              'ok', 'unused', 'unused', t.seats, pg_catalog.clock_timestamp(), coalesce(t.chain_head, t.id), t.chain_no + 1);   -- P8：鎖の印
+      values (v_id, p_room, t.session_id, t.label, (v_rules ->> 'players')::smallint, t.rule_set_id, v_rv, v_mode, case when v_mode = 'num' then v_rate end,
+              'ok', 'unused', 'unused', case when (v_rules ->> 'players')::int = t.players::int then t.seats else '[]'::jsonb end,
+              pg_catalog.clock_timestamp(), coalesce(t.chain_head, t.id), t.chain_no + 1);   -- P8：鎖の印
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'tables', pg_catalog.jsonb_build_object('id', v_id), null, null,
       pg_catalog.jsonb_build_object('session_id', t.session_id, 'label', t.label, 'from_table_id', t.id, 'rule_version', v_rv), 1);
     update mahjong.tables x set next_table_id = v_id, split_same = v_b, version = x.version + 1 where x.id = t.id;
@@ -4401,7 +4404,8 @@ begin
               where y.session_id = d.id and (not v_cont or (y.created_at, y.id) > (v_tc, p_after_t))
               order by y.created_at, y.id loop
       v_tj := pg_catalog.jsonb_build_object('table_id', t.id, 'session_id', t.session_id, 'label', t.label,
-                'rules', (select q.rules from mahjong.rule_sets q where q.id = t.rule_set_id and q.version = t.rule_version), 'seats', t.seats)
+                'rules', (select q.rules from mahjong.rule_sets q where q.id = t.rule_set_id and q.version = t.rule_version), 'seats', t.seats,
+                'created_at', pg_catalog.to_char(pg_catalog.timezone('UTC', t.created_at), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))   -- A20 §6 late：区切りの時刻＝続きの卓の created_at
               || case when t.rate_mode <> 'session' then pg_catalog.jsonb_build_object('rate_mode', t.rate_mode) else '{}'::jsonb end
               || case when t.rate_mode = 'num' then pg_catalog.jsonb_build_object('rate', t.rate) else '{}'::jsonb end
               || case when t.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
@@ -4411,7 +4415,7 @@ begin
                'cells', (select pg_catalog.jsonb_agg(c.value order by g.s) from pg_catalog.generate_series(0, hh.players - 1) g(s) left join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s),
                'cell_ver', (select pg_catalog.jsonb_agg(c.version order by g.s) from pg_catalog.generate_series(0, hh.players - 1) g(s) left join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s),
                'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
-               'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+               'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided, 'created_at', pg_catalog.to_char(pg_catalog.timezone('UTC', hh.created_at), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
                || case when hh.order_cells is not null then pg_catalog.jsonb_build_object('order_cells', pg_catalog.to_jsonb(hh.order_cells)) else '{}'::jsonb end   -- A13 §6：null でない時だけ
                order by hh.created_at, hh.id), '[]'::jsonb)
         into v_hh
@@ -4634,7 +4638,8 @@ begin
                              || case when ss.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
                              order by ss.created_at, ss.id) from ss), '[]'::jsonb),
       'tables', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', tt.id, 'session_id', tt.session_id, 'label', tt.label,
-                             'rules', (select q.rules from mahjong.rule_sets q where q.id = tt.rule_set_id and q.version = tt.rule_version), 'seats', tt.seats)
+                             'rules', (select q.rules from mahjong.rule_sets q where q.id = tt.rule_set_id and q.version = tt.rule_version), 'seats', tt.seats,
+                             'created_at', pg_catalog.to_char(pg_catalog.timezone('UTC', tt.created_at), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
                              || case when tt.rate_mode <> 'session' then pg_catalog.jsonb_build_object('rate_mode', tt.rate_mode) else '{}'::jsonb end
                              || case when tt.rate_mode = 'num' then pg_catalog.jsonb_build_object('rate', tt.rate) else '{}'::jsonb end
                              || case when tt.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
@@ -4646,7 +4651,7 @@ begin
                              'cells', (select pg_catalog.jsonb_agg(c.value order by g.s) from pg_catalog.generate_series(0, hh.players - 1) g(s) left join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s),
                              'cell_ver', (select pg_catalog.jsonb_agg(c.version order by g.s) from pg_catalog.generate_series(0, hh.players - 1) g(s) left join mahjong.cells c on c.hanchan_id = hh.id and c.seat = g.s),
                              'ton_order', hh.ton_order, 'order_version', hh.order_version, 'lost', hh.lost_kyotaku, 'version', hh.version,
-                             'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided)
+                             'tobi_to', hh.tobi_to, 'tobi_version', hh.tobi_version, 'voided', hh.voided, 'created_at', pg_catalog.to_char(pg_catalog.timezone('UTC', hh.created_at), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
                              || case when hh.order_cells is not null then pg_catalog.jsonb_build_object('order_cells', pg_catalog.to_jsonb(hh.order_cells)) else '{}'::jsonb end   -- A13 §6：null でない時だけ
                              order by hh.created_at, hh.id) from hh), '[]'::jsonb),
       'extras', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('table_id', e.table_id, 'member_id', e.member_id, 'kind', e.kind, 'value', e.value, 'version', e.version)
