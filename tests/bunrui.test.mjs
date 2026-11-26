@@ -26,6 +26,9 @@ const ROWS = [
   ['終わり値1 は自己確認が満点でも 赤', 1, '自己確認: 8/8\n', '赤', 8],
   ['✗ が在る終わり値0 → exit0failed', 0, '  ✓ a\n  ✗ b\n', 'exit0failed', 0],
   ['最後の 自己確認 を読む', 0, '自己確認: 1/2\n自己確認: 4/4\n', '測った', 4],
+  ['画面の自己確認（✗ の行＋自己確認: 10/10・run 45902498019 tobi の本物の出し）→ 測った', 0, '✓ 赤 釦を出さない（2）\n✓ 赤 もう1回で外さない（1）\n✗ 頁の例外 null is not an object (evaluating \'mulS(pt10, v.rate / 10).toLocaleString\')\n✓ 赤 窓に飛び賞の行を戻す（1）\ntobi-e2e self: 10/10 赤\n自己確認: 10/10\n', '測った', 10],
+  ['画面の自己確認 9/10 で終わり値0 → exit0failed', 0, '✓ 赤 釦を出さない（2）\n✓ 赤 もう1回で外さない（1）\n✗ 頁の例外 null is not an object (evaluating \'mulS(pt10, v.rate / 10).toLocaleString\')\n✓ 赤 窓に飛び賞の行を戻す（1）\ntobi-e2e self: 9/10 赤\n自己確認: 9/10\n', 'exit0failed', 9],
+  ['画面の自己確認で 自己確認: の行が無い → exit0failed（✗ が在る）', 0, '✓ 赤 釦を出さない（2）\n✓ 赤 もう1回で外さない（1）\n✗ 頁の例外 null is not an object (evaluating \'mulS(pt10, v.rate / 10).toLocaleString\')\n✓ 赤 窓に飛び賞の行を戻す（1）\ntobi-e2e self: 10/10 赤\n', 'exit0failed', 0],
 ];
 
 function judge(bunrui) {

@@ -270,4 +270,5 @@ jobs:
         shell: bash
         run: |
           node ${{ matrix.script }} . --self | tee g-self.out
+          grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-self.out | tail -n 1 | sed -E 's#^.* ([0-9]+/[0-9]+) 赤.*$#自己確認: \1#' || true   # ci-3tsu（tools/_bunrui.mjs の yomuJikakunin）が読む約束の行＝無ければ 読めない
           grep -E "(壊し|self:) [0-9]+/[0-9]+ 赤" g-self.out | tail -n 1 | awk -v g=${{ matrix.yuka }} '{ split($0, a, "/"); m = a[1]; sub(/.* /, "", m); t = a[2] + 0; ok = (m + 0 == t && t >= g) } END { exit !ok }' || { echo "✗ 床: 画面 ${{ matrix.name }} の壊しが ${{ matrix.yuka }} に届かない・全部赤でない"; exit 1; }
