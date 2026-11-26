@@ -562,6 +562,7 @@ console.log('■ ③-0 境目の門（roomGate＝部屋ごとに1回・newer／r
   ok('extras の知らない kind（zz・c:・c:ABC・c:123456789・数）→ newer', ['zz', 'c:', 'c:ABC', 'c:123456789', 1].every((k) => tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: k, value: 1, version: 1 }); }).mode === 'newer'));
   ok('2c-3b：extras の c:<id> の形（卓の tane_custom に無い id も）→ ok（数えないだけ）', tw((x) => { x.extras.push({ table_id: x.tables[0].table_id, member_id: 'm1', kind: 'c:x', value: 1, version: 1 }); }).mode === 'ok');
   ok('半荘の知らない欄（zzz）→ newer', tw((x) => { x.hanchans[0].zzz = []; }).mode === 'newer');
+  ok('半荘に created_at（A20 §6 late・mj_read が返す）が在っても ok', tw((x) => { x.hanchans[0].created_at = '2026-11-27T00:00:00Z'; }).mode === 'ok');
   ok('2c-3c：半荘の yakitori・yakitori_version は知っている欄 → ok', tw((x) => { x.hanchans[0].yakitori = [1]; x.hanchans[0].yakitori_version = 2; }).mode === 'ok');
   ok('2c-3c：やきとりの欄の片方だけ・形が悪い・版が悪い → rules_bad（yakitori）', [
     (x) => { x.hanchans[0].yakitori = []; },
