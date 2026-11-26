@@ -170,7 +170,7 @@ async function run(br, port) {
 
     // C2 鍵が同じ区切りの後の対局の頁：前の回が通し番号で残る・数えは回の卓のルール・前の回の直しは前の卓へ cell_set・代打ちに窓が出て鎖の最後へ extra_add（follow:true）・新しい回は鎖の最後へ
     if (want('C2')) {
-      const newR = umaR([30, 10, -10, -30]);
+      const newR = RL.rulesOk({ ...RULES, uma: [30, 10, -10, -30], kyotaku_end: 'kieru' }).rules; // 鍵が同じ区切り（ウマと供託の終わり＝どちらも SPLIT_KEYS の外）。E1 で直す頁の pt の字を消した＝直す頁で回の卓のルールが見えるのは［消えた供託］の欄
       mkRoom('b1', [...base(), H1, H2, split(newR)]);
       const A = await device('A2', 'u1', seedOf('u1', 'b1'));
       await openR(A.pg, 'b1'); await A.pg.waitForSelector(PM('m5')); await sleep(300);
@@ -186,6 +186,7 @@ async function run(br, port) {
       // 前の回（1回目）を直す＝前の卓のまま cell_set・見せる pt は前のルール
       await A.pg.click('#vRoom .r-no[data-h="h1"]'); await A.pg.waitForSelector('[data-c="0"]');
       ok('C2 直す頁の題は通し番号', ((await txt(A.pg, '#title')) || '').startsWith('1回目'), await txt(A.pg, '#title'));
+      ok('C2 直す頁は前の卓のルール（前の卓は供託が消えない＝［消えた供託］の欄が無い）', (await A.pg.locator('#eLost').count()) === 0);
       await put(A.pg, 0, '41000'); await put(A.pg, 1, '29000'); await kpk(A.pg, 'ok');
       await A.pg.click('#eOk'); await A.pg.waitForSelector('#vRoom .r-top');
       // E1：直す頁の pt の字は消した＝保存した後の一覧の h1 の行で、4人の pt が前の卓のルールの数か
