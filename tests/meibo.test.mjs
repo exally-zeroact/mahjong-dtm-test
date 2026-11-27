@@ -75,6 +75,17 @@ async function run(L, quiet) {
     ok('点が在る人の字', L.offText('佐藤', { n: 2, at: [] }) === '佐藤さんは半荘 2 回の点があります。外しても点はリーグの順位に残ります。');
     ok('点の無い人の字', L.offText('佐藤', { n: 0, at: [] }) === '佐藤さんを外します。人を選ぶ所に出なくなります。');
     ok('今の席の卓を足す', L.offText('佐藤', { n: 1, at: ['卓1', '卓3'] }) === '佐藤さんは半荘 1 回の点があります。外しても点はリーグの順位に残ります。今 卓1・卓3 の席にいます。その卓の次の半荘は人を選び直します。');
+    // 消す（対局の頁・a25r v1）＝「消します」＋最後に［戻す］・既定は「外す」のまま
+    ok('消す：点の無い人', L.offText('佐藤', { n: 0, at: [] }, { verb: '消す' }) === '佐藤さんを消します。人を選ぶ所に出なくなります。下の［戻す］で戻せます。', L.offText('佐藤', { n: 0, at: [] }, { verb: '消す' }));
+    ok('消す：点が在る人・今の席', L.offText('佐藤', { n: 2, at: ['卓1'] }, { verb: '消す' }) === '佐藤さんは半荘 2 回の点があります。消しても点はリーグの順位に残ります。今 卓1 の席にいます。その卓の次の半荘は人を選び直します。下の［戻す］で戻せます。', L.offText('佐藤', { n: 2, at: ['卓1'] }, { verb: '消す' }));
+    ok('知らない verb・opts 無しは外す（［戻す］の字を付けない）', L.offText('佐藤', { n: 0, at: [] }, { verb: 'x' }) === '佐藤さんを外します。人を選ぶ所に出なくなります。' && L.offText('佐藤', { n: 0, at: [] }, {}) === '佐藤さんを外します。人を選ぶ所に出なくなります。');
+    // 分けた読み（st.loaded）＝部屋の分は倉庫の members[].n（写しの半荘は数えない）・リーグの分は今まで通り足す
+    const split = (nv) => ({ ...roomSt(), loaded: [], members: [{ member_id: 'm1', name: '一', active: true, ...(nv === undefined ? {} : { n: nv }) }] });
+    const uS = L.memberUse(split(7), [lgSt()], 'm1'), uS0 = L.memberUse(split(7), [], 'm1');
+    ok('分けた読みは部屋の分＝members の n', uS0.n === 7, uS0);
+    ok('分けた読み＋リーグ＝n＋リーグの回数', uS.n === 7 + (u1.n - uR.n), { uS, u1, uR });
+    ok('分けた読みで n が無い人は写しを数える', L.memberUse(split(undefined), [], 'm1').n === uR.n);
+    ok('分けた読みでない（v2）は n が在っても写しを数える', L.memberUse({ ...roomSt(), members: [{ member_id: 'm1', n: 7 }] }, [], 'm1').n === uR.n);
     // 押した時の op_id
     let k = 0; const uu = () => 'id' + (++k);
     const p1 = L.pressOp(null, L.memberOp.off('m1'), uu);
@@ -109,6 +120,12 @@ if (!self) {
     ['今の席の卓を出さない', '        if (b && b.includes(mid)) at.push(t.label);', ''],
     ['送り直しで新しい id', '  if (ed && ed.p && JSON.stringify(ed.p.op) === JSON.stringify(op)) return ed.p;\n', ''],
     ['net で印を消す', "'busy', 'net', 'offline'", "'busy', 'offline'"],
+    ['消すでも外すの字', "  const kesu = !!opts && opts.verb === '消す';", '  const kesu = false;'],
+    ['どの verb でも消すの字', "  const kesu = !!opts && opts.verb === '消す';", '  const kesu = !!opts;'],
+    ['消すで［戻す］の字を付けない', " + (kesu ? '下の［戻す］で戻せます。' : '');", ";"],
+    ['分けた読みでも写しを数える', '    if (mm && Number.isInteger(mm.n)) n += mm.n;\n    else count(roomSt);', '    count(roomSt);'],
+    ['v2 でも n を使う', 'const mm = Array.isArray(roomSt.loaded) ? (roomSt.members', 'const mm = true ? (roomSt.members'],
+    ['分けた読みで n と写しを両方数える', '    if (mm && Number.isInteger(mm.n)) n += mm.n;\n    else count(roomSt);', '    if (mm && Number.isInteger(mm.n)) n += mm.n;\n    count(roomSt);'],
   ];
   let p = 0, f = 0;
   console.log('[meibo --self-test] lib をわざと壊して赤になるか');

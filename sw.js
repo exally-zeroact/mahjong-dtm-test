@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '320abc31a404';
+const VER = 'a48b6be6afd4';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
@@ -40,7 +40,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/league-rank.mjs', 'b581d6419d0e47096699ebd290a156aa2d027fb94eff5d0b420e899833401e57'],
   ['/lib/league-round.mjs', '5d7675480bd067e8f1b012b2c00694f9f013339dbc65c185d5e8efba3d170b1c'],
-  ['/lib/meibo.mjs', '9912bbb90829f56b7988e101d84ec87744cc5d02e03aa30bdb22118ab31972ec'],
+  ['/lib/meibo.mjs', 'eed08c1bd414a0a1250d7dd942bc172e1f6883b780170070d823cd9bf6d713a8'],
   ['/lib/my-stats.mjs', 'c69ac0283a7a6d8f45adcf973c746ff10cb538ebc59b21e1d8fdf4ae4b44f4bb'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],

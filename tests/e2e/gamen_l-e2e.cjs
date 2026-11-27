@@ -44,6 +44,7 @@ const ctl = (dev) => (CTL[dev] = CTL[dev] || { forceWrite: [] });
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const NOW = () => new Date().toISOString();
 const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
+let SPLIT_N = null; // L5s：部屋の読みを分けた読み（v3）にする＝st.loaded と members[].n（倉庫が league の無い全開催で数えた数）
 let LG_HOLD = null; // L5：リーグを読む答えを止めておく（読む前の［外す］が押せないかを見る）
 const mkHold = () => { let f; const p = new Promise((s) => { f = s; }); return { p, go: f }; };
 const pad = (n) => String(n).padStart(2, '0');
@@ -140,7 +141,9 @@ function mjRead(uid, a) {
     return { ok: true, read_ver: R.read_ver, room, league: lgOut(R, l, uid), days: clone(days), st: (() => { const p = stPart(R.st, (s) => s.league_id === l.league_id); p.sessions = p.sessions.map((s) => { const c = { ...s }; delete c.league_id; return c; }); return p; })() }; // 本物（schema.sql の st.sessions）と同じ＝日に league_id を付けない
   }
   if (args.since === R.read_ver) return { ok: true, same: true, read_ver: R.read_ver };
-  return { ok: true, read_ver: R.read_ver, room, st: stPart(R.st, (s) => !s.league_id), leagues: R.leagues.map((l) => lgOut(R, l, uid)) };
+  const rst = stPart(R.st, (s) => !s.league_id);
+  if (SPLIT_N) { rst.loaded = []; rst.members = rst.members.map((m) => ({ ...m, n: SPLIT_N[m.member_id] || 0, last: null })); }
+  return { ok: true, read_ver: R.read_ver, room, st: rst, leagues: R.leagues.map((l) => lgOut(R, l, uid)) };
 }
 let mjWrite = async function (dev, uid, a) {
   const R = DB.get(a.p_room_id);
@@ -369,6 +372,22 @@ async function run(br, port) {
       ok('L5 戻す＝member_active true', ob.length === 2 && ob[1].active === true, ob);
       ok('L5 戻すと外した人の段が消える', !(await has(A.pg, '[data-gone]')) && !(await has(A.pg, '.lg-gone')));
     } catch (e) { if (LG_HOLD) { LG_HOLD.go(); LG_HOLD = null; } fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+
+    // L5s 分けた読み（v3・st.loaded）では部屋の分を倉庫の members[].n で数える（写しは最後の数開催だけ＝少なく数えない・a25r 11-28 画面の頼み）
+    if (want('L5s')) try { NM = 'L5s';
+      DB.clear(); mkRoom('ra'); mkLeague('ra', { league_id: LID, name: '金曜リーグ', rules: LR4 });
+      const S1 = U(1), T1 = U(101);
+      seed('ra', [day(S1), tb(T1, S1, '卓1'), H(U(201), T1, ['m1', 'm2', 'm3', 'm4'], [40000, 30000, 20000, 10000]), seats(T1, ['m1', 'm2', 'm3', 'm4'])]);
+      SPLIT_N = { m3: 6 };
+      const A = await device('A5s', 'u1');
+      await openList(A.pg);
+      await A.pg.click('[data-roster="ra"]');
+      await A.pg.waitForSelector('[data-off="m3"]:not([disabled])');
+      await A.pg.click('[data-off="m3"]');
+      const t = (await txt(A.pg, '[data-offt]')) || '';
+      ok('L5s 分けた読み＝部屋の n 6 ＋リーグ 1 ＝ 7 回', t.includes('佐藤さんは半荘 7 回の点があります。'), t);
+    } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+    SPLIT_N = null;
   } catch (e) { fail++; bad.push('止まった: ' + String(e.message || e).split('\n').slice(0, 6).join(' | ')); }
   for (const c of ctxs) await c.close().catch(() => {});
   return { pass, fail, bad, hold };
@@ -392,6 +411,7 @@ const MUT = [
   { file: 'lib/meibo.mjs', from: "  if (e === 'dup') return MEIBO_ERR.dup;\n", to: '', name: '名の dup に字を出さない（L4）', only: 'L4' },
   { file: 'lib/meibo.mjs', from: "  if (e === 'mj_role') return MEIBO_ERR.role;\n", to: '', name: '役の門の字を出さない（L4）', only: 'L4' },
   { file: 'lib/meibo.mjs', from: "    if (!st) continue;\n    count(st);\n", to: "    if (!st) continue;\n", name: 'リーグの半荘を点の回数に数えない（L5）', only: 'L5' },
+  { file: 'lib/meibo.mjs', from: '    if (mm && Number.isInteger(mm.n)) n += mm.n;\n    else count(roomSt);', to: '    count(roomSt);', name: '分けた読みでも写しを数える（L5s）', only: 'L5s' },
   { file: 'lib/meibo.mjs', from: "        if (b && b.includes(mid)) at.push(t.label);", to: '', name: '今の席の卓を出さない（L5）', only: 'L5' },
   { file: G, from: "(x.mm && x.mm.sts ? '' : ' disabled')", to: "''", name: 'リーグを読む前から［外す］を押せる（L5）', only: 'L5' },
   { file: G, from: "const mem = all.filter((m) => m.active !== false), gone = all.filter((m) => m.active === false);", to: 'const mem = all, gone = [];', name: '外した人を名簿に並べたまま（L5）', only: 'L5' },
