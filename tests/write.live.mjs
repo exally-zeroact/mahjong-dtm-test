@@ -898,8 +898,10 @@ const body = `
 
   /* ⑧' 上限 */
   ${RS}
-  ${undo('fm', `update mahjong.mj_caps set cap = (select count(*) from mahjong.members where room_id = ra) where tbl = 'members' and scope = 'room';
-    ${W('fm', 2, 'ra', A(ma(U(), '満ち')))}`)}
+  /* caps v1.1：前の上限 members 300 の部屋へ 301人目も書ける */
+  ${undo('fm', `insert into mahjong.members (id, room_id, name, name_key) select gen_random_uuid(), ra, 'm' || k, 'cap300_' || k from generate_series(1, greatest(0, 300 - (select count(*) from mahjong.members where room_id = ra)::int)) k;
+    ${W('fm', 2, 'ra', A(ma(U(), '満ち')))}
+    ${ROW('fm_n', `select count(*) from mahjong.members where room_id = ra`)}`)}
   /* H1'（h1b_sadame v2）：前の上限を1つ越える数でも書ける（full にならない） */
   ${undo('ft', `insert into mahjong.tables select (jsonb_populate_record(null::mahjong.tables, to_jsonb(t) || jsonb_build_object('id', gen_random_uuid(), 'next_table_id', null))).*
       from mahjong.tables t, generate_series(1, 10 - (select count(*) from mahjong.tables where session_id = '${SA}')::int) k where t.id = '${TA}';
@@ -916,8 +918,7 @@ const body = `
   ${undo('fp', `update mahjong.rooms set row_count = 30000 where id = ra;
     ${W('fp', 2, 'ra', A(ma(U(), 'P 越え')))}
     ${ROW('fp_n', `select row_count from mahjong.rooms where id = ra`)}`)}
-  ${undo('fn', `delete from mahjong.mj_caps where tbl = 'members' and scope = 'room';
-    ${W('fn', 2, 'ra', A(ma(U(), 'cap 無し')))}`)}
+  ${ROW('fn_caps', `select jsonb_agg(m.tbl || '/' || m.scope order by m.tbl) from mahjong.mj_caps m`)}
   ${undo('fo', `update mahjong.mj_caps set cap = 1 where tbl = 'op_results' and scope = 'room';
     ${W('fo1', 2, 'ra', A(ma(U(), '答え1')))}
     ${W('fo2', 2, 'ra', A(ma(U(), '答え2')))}`)}
@@ -969,8 +970,9 @@ const body = `
     ${W('ql9', 11, 'ra', A(lk(2)))}
     ${W('ql10', 11, 'ra', A(lk(3)))}
     ${W('ql11', 11, 'ra', A(lk(4)))}
-    ${undo('qlc', `update mahjong.mj_caps set cap = (select count(*) from mahjong.member_claims where room_id = ra) where tbl = 'member_claims' and scope = 'room';
-      ${W('ql12', 9, 'ra', A(lk(2)))}`)}
+    ${undo('qlc', `with nu as (insert into auth.users (id, email, aud, role, is_anonymous) select z.u, z.u::text || '@${MAIL}', 'authenticated', 'authenticated', false from (select gen_random_uuid() as u from generate_series(1, 200)) z returning id) insert into mahjong.member_claims (room_id, member_id, user_id) select ra, (select m.id from mahjong.members m where m.room_id = ra order by m.id limit 1), nu.id from nu;
+      ${W('ql12', 9, 'ra', A(lk(2)))}
+      ${ROW('ql12_n', `select count(*) from mahjong.member_claims where room_id = ra`)}`)}
     update mahjong.members set active = false where id = '${L[9]}';
     ${W('ql13', 9, 'ra', A(lk(9)))}
     ${W('ql14', 9, 'ra', A(O('member_link', { member_id: MB[0] })))}`)}
@@ -1014,8 +1016,9 @@ const body = `
     ${undo('qxl', `insert into mahjong.leagues (id, room_id, name, rule_set_id, rule_version, owner_user_id, voided) values ('${U()}', ra, 'L', (select rule_set_id from mahjong.rooms where id = ra), (select rule_version from mahjong.rooms where id = ra), us[2], true);
       ${W('qx7', 3, 'ra', A(ar(2)))}`)}
     ${W('qx8', 3, 'ra', A(ar(4)))}
-    ${undo('qxc', `update mahjong.mj_caps set cap = (select count(*) from mahjong.room_bans where room_id = ra) where tbl = 'room_bans' and scope = 'room';
-      ${W('qx9', 3, 'ra', A(ar(2)))}`)}`)}
+    ${undo('qxc', `with nu as (insert into auth.users (id, email, aud, role, is_anonymous) select z.u, z.u::text || '@${MAIL}', 'authenticated', 'authenticated', false from (select gen_random_uuid() as u from generate_series(1, 200)) z returning id) insert into mahjong.room_bans (room_id, user_id) select ra, nu.id from nu;
+      ${W('qx9', 3, 'ra', A(ar(2)))}
+      ${ROW('qx9_n', `select count(*) from mahjong.room_bans where room_id = ra`)}`)}`)}
   /* ⑮ 2c-2c 部屋の op 4つ（write5_sadame.md v1.1・各節を undo で分ける） */
   ${undo('zrl', `${H14('zrl')}
     ${JA(2, '3 days')} ${JA(8, '2 days')} ${JA(3, '1 day')}
@@ -1611,12 +1614,12 @@ function check(out, lib, say) {
   ok('⑧ 例外（P0001）→ internal・何も書かない・ur1m +1', isErr('ie_P0001', 'internal') && has('ie_P0001', busyD), J([R('ie_P0001'), d('ie_P0001'), out.ie_err]));
   ['55P03', '40P01', '40001'].forEach((c) => ok(`⑧ 一時の失敗（${c}）→ busy lock・何も書かない・ur1m +1・分け合う分と1日 0`, isErr('ie_' + c, 'busy', { what: 'lock' }) && has('ie_' + c, busyD), J([R('ie_' + c), d('ie_' + c)])));
   /* ⑧' */
-  ok("⑧' members が上限 → full members・何も書かない", isErr('fm', 'full', { what: 'members' }) && has('fm', busyD), J([R('fm'), d('fm'), out.fm_err]));
+  ok("⑧' members：前の上限 300 の部屋へ 301人目 → ok（full にならない）", isOk('fm') && Number(out.fm_n) >= 301, J([R('fm'), out.fm_n, out.fm_err]));
   ok("⑧' H1' tables：開催日に10卓ある所へ11卓目 → ok（full にならない）", isOk('ft') && Number(out.ft_n) >= 11, J([R('ft'), out.ft_n, out.ft_err]));
   ok("⑧' H1' hanchans：卓に60半荘ある所へ61本目 → ok", isOk('fh') && Number(out.fh_n) >= 61, J([R('fh'), out.fh_n, out.fh_err]));
   ok("⑧' H1' sessions：部屋に3000日ある所へ3001日目 → ok", isOk('fs') && Number(out.fs_n) >= 3001, J([R('fs'), out.fs_n, out.fs_err]));
   ok("⑧' H1' P：部屋の行 30000 の所へ書く → ok・数えは増える", isOk('fp') && Number(out.fp_n) > 30000, J([R('fp'), out.fp_n, out.fp_err]));
-  ok("⑧' mj_caps の行が無い → full", isErr('fn', 'full', { what: 'members' }), J([R('fn'), out.fn_err]));
+  ok("⑧' mj_caps は op_results の行だけ（caps v1.1）", J(out.fn_caps) === J(['op_results/room']), J(out.fn_caps));
   ok("⑧' op_results が上限を越えると古い物が消える（full にならない）", isOk('fo1') && isOk('fo2') && Number(out.fo2_c1?.op) === 1, J([R('fo2'), out.fo2_c1, out.fo_err]));
   ok("⑧' op_results は at の古い物から消す（op_id の順でない）・今の組は残る", ['fq1', 'fq2', 'fq3'].every(isOk) && J(out.fq_left) === J([OPQ1, OPQ3].sort()), J([out.fq_left, out.fq_err]));
   ok("⑧' H1' history：history_count 10000 の所へ書く → ok・数えは増える（F の門もたたみも無い）", isOk('fhi') && Number(out.fhi_n) > 10000, J([R('fhi'), out.fhi_n, out.fhi_err]));
@@ -1652,9 +1655,9 @@ function check(out, lib, say) {
   ok('⑭ link：[unlink L0, link L1] で移れて L0 の名乗りが消える', isOk('ql6') && st('ql6_s').lu[0] === null && st('ql6_s').lu[1] === 2 && !st('ql6_s').cl.some((c) => c[0] === 0) && has('ql6', { hc: 2 }),
     J([R('ql6'), st('ql6_s'), d('ql6')]));
   ok('⑭ link：名乗った人が空きへつながると、その人の名乗りが全部消える（N3）', isOk('ql7') && st('ql7_s').lu[3] === 3 && !st('ql7_s').cl.some((c) => c[1] === 3), J([R('ql7'), st('ql7_s')]));
-  ok('⑭ link：1人4つ目 → full member_claims_user', ['ql8', 'ql9', 'ql10'].every((k) => isOk(k) && R(k).results?.[0]?.claimed === true) && isErr('ql11', 'full', { what: 'member_claims_user' }),
+  ok('⑭ link：1人4つ目も名乗れる（前の上限 3・caps v1.1）', ['ql8', 'ql9', 'ql10', 'ql11'].every((k) => isOk(k) && R(k).results?.[0]?.claimed === true),
     J(['ql8', 'ql9', 'ql10', 'ql11'].map(R)));
-  ok('⑭ link：部屋の cap → full member_claims', isErr('ql12', 'full', { what: 'member_claims' }), J([R('ql12'), out.qlc_err]));
+  ok('⑭ link：部屋の名乗り 200 を越えても名乗れる（前の上限 200・caps v1.1）', isOk('ql12') && R('ql12').results?.[0]?.claimed === true && Number(out.ql12_n) > 201, J([R('ql12'), out.ql12_n, out.qlc_err]));
   ok('⑭ link：使わない印の人・よその部屋の人 → bad member_id', isErr('ql13', 'bad', { at: 'member_id' }) && isErr('ql14', 'bad', { at: 'member_id' }), J([R('ql13'), R('ql14')]));
   ok('⑭ unlink：本人 → ok・履歴1', isOk('qu1') && st('qu_s').lu[0] === null && has('qu1', { hc: 1, h: 1 }), J([R('qu1'), d('qu1')]));
   ok('⑭ unlink：管が他人の → ok', isOk('qu2') && st('qu_s').lu[1] === null, J(R('qu2')));
@@ -1664,8 +1667,8 @@ function check(out, lib, say) {
   ok('⑭ relink：部屋に居ない人 → bad user_id', isErr('qe2', 'bad', { at: 'user_id' }), J(R('qe2')));
   ok('⑭ relink：出した人 → bad user_id', isErr('qe3', 'bad', { at: 'user_id' }), J(R('qe3')));
   ok('⑭ relink：持ち主（room_accounts の行が無くても）→ ok', isOk('qe4') && st('qe4_s').lu[3] === 1, J([R('qe4'), out.qeo_err]));
-  ok('⑭ role_set：管5（持ち主＋us3＋xu1〜3）まで通る・xu4 で full admins', ['qs1', 'qs2', 'qs3'].every(isOk) && isErr('qs4', 'full', { what: 'admins' })
-    && [8, 9, 10].every((i) => st('qs_s').ra[i] === 'kan') && st('qs_s').ra[11] === 'nyu', J([...['qs1', 'qs2', 'qs3', 'qs4'].map(R), st('qs_s').ra]));
+  ok('⑭ role_set：管6（持ち主＋us3＋xu1〜4）も通る（前の上限 5・caps v1.1）', ['qs1', 'qs2', 'qs3', 'qs4'].every(isOk)
+    && [8, 9, 10, 11].every((i) => st('qs_s').ra[i] === 'kan'), J([...['qs1', 'qs2', 'qs3', 'qs4'].map(R), st('qs_s').ra]));
   ok('⑭ role_set：同じ役 → ok・書かない', isOk('qs5') && has('qs5', { hc: 0, h: 0 }), J([R('qs5'), d('qs5')]));
   ok('⑭ role_set：持ち主へ・出した人 → bad user_id', isErr('qs6', 'bad', { at: 'user_id' }) && isErr('qs7', 'bad', { at: 'user_id' }), J([R('qs6'), R('qs7')]));
   ok("⑭ role_set：role 'boss' → bad at role", isErr('qs8', 'bad', { at: 'role' }), J(R('qs8')));
@@ -1677,7 +1680,7 @@ function check(out, lib, say) {
   ok('⑭ account_remove：持ち主 → bad reason owner・管 → reason kan', isErr('qx5', 'bad', { at: 'user_id', reason: 'owner' }) && isErr('qx6', 'bad', { at: 'user_id', reason: 'kan' }), J([R('qx5'), R('qx6')]));
   ok('⑭ account_remove：リーグの持ち主（取り消した行でも）→ reason league', isErr('qx7', 'bad', { at: 'user_id', reason: 'league' }), J([R('qx7'), out.qxl_err]));
   ok('⑭ account_remove：行も印も無い → bad user_id', isErr('qx8', 'bad', { at: 'user_id' }), J(R('qx8')));
-  ok('⑭ account_remove：room_bans の cap → full room_bans', isErr('qx9', 'full', { what: 'room_bans' }), J([R('qx9'), out.qxc_err]));
+  ok('⑭ account_remove：出した人の印 200 を越えても出せる（前の上限 200・caps v1.1）', isOk('qx9') && Number(out.qx9_n) > 200, J([R('qx9'), out.qx9_n, out.qxc_err]));
   /* ⑮ 2c-2c 部屋の op 4つ */
   const s15 = (k) => { const o = out[k] || {}; return { ...st(k), own: ui(o.own), del: o.del, ch: o.ch, url: o.url, lg: (o.lg || []).map(ui) }; };
   const raK = (x) => Object.keys(x.ra).map(Number).sort((a, b) => a - b);
@@ -1740,8 +1743,7 @@ function check(out, lib, say) {
   ok("⑯ H1' leagues：50本の部屋で league_create → ok（51本目・full にならない）", isOk('g2a') && Number(out.g2a_n) >= 51, J([R('g2a'), out.g2a_n, out.g2_err]));
   ok("⑯ H1' rule_sets：500 の部屋で作って 501・もう1本・league_save で版を足す → 全部 ok・名だけの save も ok", isOk('g3a') && Number(out.g3a_n) === 501
     && isOk('g3b') && isOk('g3c') && isOk('g3d'), J([R('g3a'), out.g3a_n, R('g3b'), R('g3c'), R('g3d'), out.g3_err]));
-  ok('⑯ 人ごと24時間5本：2部屋で5本は通る・6本目 → too_many what league_create・別の人は通る・25時間前の1本は数えない', ['g4a', 'g4b', 'g4c', 'g4d', 'g4e'].every(isOk)
-    && isErr('g4f', 'too_many', { what: 'league_create' }) && has('g4f', { rc: 0, hc: 0 }) && isOk('g4g') && isOk('g4h'), J(['g4a', 'g4b', 'g4c', 'g4d', 'g4e', 'g4f', 'g4g', 'g4h'].map(R).concat([out.g4_err])));
+  ok('⑯ 人ごと24時間の本数：2部屋で6本目・7本目も通る（前の上限 5・caps v1.1）・別の人も通る', ['g4a', 'g4b', 'g4c', 'g4d', 'g4e', 'g4f', 'g4g', 'g4h'].every(isOk), J(['g4a', 'g4b', 'g4c', 'g4d', 'g4e', 'g4f', 'g4g', 'g4h'].map(R).concat([out.g4_err])));
   ok('⑯ 消えた L：部屋に居る人の呼びで持ち主へ継ぐ（取り消したリーグも）・版+1・履歴は1リーグ1行で同じ group_id・数えに足す・居る L は変えない・2回目は継がない', isOk('g5a')
     && g('g5a_e').own === u[0] && g('g5a_e').v === 2 && g('g5a_f').own === u[0] && g('g5a_h').own === u[2] && g('g5a_h').v === 1
     && g('g5a_h2').n === 2 && g('g5a_h2').g === 1 && g('g5a_h2').same === true && g('g5a_h2').col === 'owner_user_id' && has('g5a', { hc: 3, h: 3 })
@@ -1819,7 +1821,8 @@ const WAZA = [
     "    perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);\n    v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);", ['  perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);\n  return v_ret;', '  return v_ret;'], '⑧ 後見の busy'],
   ['mj_tobi_ok が受け取りの席を見ない', 'mahjong_private.mj_tobi_ok', 'if x % 1 <> 0 or x < 0 or x >= p_players or x = k then return false; end if;', 'null;', null, '⑤ 自分の席・players 外'],
   ['チップの式（合計0でなくても ok）', 'mahjong_private.mj_w_tstate', "when v_c = 0 then 'ok'", "when v_c >= 0 then 'ok'", null, '⑦ c4 チップ +1 だけ（祝儀は使わない）：倉庫'],
-  ['mj_caps を見ない', 'public.mj_write', 'if v_cap is null or v_c is null or v_c > v_cap then', 'if false then', null, "⑧' members が上限"],
+  ['members の上限 300 を戻す', 'mahjong_private.mj_w_op', 'insert into mahjong.members (id, room_id, name, name_key, created_at) values (v_id, p_room, v_s, v_key, pg_catalog.clock_timestamp());',
+    "if (select pg_catalog.count(*) from mahjong.members x where x.room_id = p_room) >= 300 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'members')); end if;\n    insert into mahjong.members (id, room_id, name, name_key, created_at) values (v_id, p_room, v_s, v_key, pg_catalog.clock_timestamp());", null, "⑧' members："],
   ['一時の失敗を busy にしない', 'public.mj_write', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'lock'); v_n := 0;", "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '⑧ 一時の失敗（55P03）'],
   ['並びの顔ぶれを比べない（p_set）', 'mahjong_private.mj_w_people', '  elsif (select pg_catalog.array_agg((t.v', '  elsif false and (select pg_catalog.array_agg((t.v', null, "①' hanchan_order に席にいない人"],
   ['op_results を op_id の順で消す', 'public.mj_write', 'order by o.at, o.op_id limit v_c - v_cap', 'order by o.op_id limit v_c - v_cap', null, "⑧' op_results は at の古い物から消す"],
@@ -1933,7 +1936,14 @@ const WAZA = [
   ["grant を「いつも」入り直しにする", 'public.mj_write', "(v_re = 'grant' and (p_ops -> v_i ->> 'op') = 'role_set' and (p_ops -> v_i ->> 'role') is not distinct from 'kan')", "v_re = 'grant'", null, '⑭ 入り直し：amr 無しで nyu へ下げる'],
   ["名乗りを残さない", 'mahjong_private.mj_w_op', "insert into mahjong.member_claims (room_id, member_id, user_id) values (p_room, v_id, p_me);", "null;", null, '⑭ link：他人の人'],
   ["linked を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'linked', 'i', p_i, 'member_id', v_id2));", "null;", null, '⑭ link：別の人にもう一人'],
-  ["admins の +1（持ち主）を外す", 'mahjong_private.mj_w_op', "+ 1 + 1 > v_cap2", "+ 1 > v_cap2", null, '⑭ role_set：管5'],
+  ["admins の上限 5 を戻す", 'mahjong_private.mj_w_op', "    -- 管の数 5（full admins）はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）\n",
+    "    if (p_o ->> 'role') = 'kan' and (select pg_catalog.count(*) from mahjong.room_accounts a where a.room_id = p_room and a.role = 'kan' and a.user_id is distinct from v_own) + 1 + 1 > 5 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'admins')); end if;\n", null, '⑭ role_set：管6'],
+  ["名乗りの上限 1人3 を戻す", 'mahjong_private.mj_w_op', "        -- 名乗りの数（部屋 200・1人 3）はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）\n",
+    "        if (select pg_catalog.count(*) from mahjong.member_claims x where x.room_id = p_room and x.user_id = p_me) >= 3 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'member_claims_user')); end if;\n", null, '⑭ link：1人4つ目'],
+  ["名乗りの上限 部屋200 を戻す", 'mahjong_private.mj_w_op', "        -- 名乗りの数（部屋 200・1人 3）はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）\n",
+    "        if (select pg_catalog.count(*) from mahjong.member_claims x where x.room_id = p_room) >= 200 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'member_claims')); end if;\n", null, '⑭ link：部屋の名乗り 200'],
+  ["出した人の印の上限 200 を戻す", 'mahjong_private.mj_w_op', "    -- 出した人の印 200（full room_bans）はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）\n",
+    "    if (select pg_catalog.count(*) from mahjong.room_bans b where b.room_id = p_room) >= 200 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'full', 'what', 'room_bans')); end if;\n", null, '⑭ account_remove：出した人の印 200'],
   ["relink の付ける人の確かめを外す", 'mahjong_private.mj_w_op', "if not (coalesce(v_u = v_own, false) or exists (select 1 from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u))", "if not (true)", null, '⑭ relink：部屋に居ない人'],
   ["account_remove のリーグの持ち主の確かめを外す", 'mahjong_private.mj_w_op', "if exists (select 1 from mahjong.leagues l where l.room_id = p_room and l.owner_user_id = v_u) then", "if false then", null, '⑭ account_remove：リーグの持ち主'],
   ["account_remove で members.user_id を外さない", 'mahjong_private.mj_w_op', "m.user_id = v_u order by m.id for update loop", "m.user_id = v_u and false order by m.id for update loop", null, '⑭ account_remove：管が入を出す'],
@@ -1941,11 +1951,12 @@ const WAZA = [
   ["amr が空・字で通す", 'mahjong_private.mj_w_reauth_ok', "return v_max is not null and v_max >=", "return v_max is null or v_max >=", null, '⑭ 入り直し：amr 無し・空・字'],
   ["unlink で名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.member_id = v_id;", "null;", null, '⑭ link：[unlink L0, link L1]'],
   ["つながった時に名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.member_id = v_id or (x.room_id = p_room and x.user_id = p_me);", "null;", null, '⑭ link：名乗った人が空きへつながると'],
-  /* ⑯ 2c-2d1（write7_league_sadame_v11.md の waza・人の鍵は tests/league-lock.live.mjs --waza） */
+  /* ⑯ 2c-2d1（write7_league_sadame_v11.md の waza）。人ごと24時間5本と人の鍵は caps v1.1 でやめた＝tests/league-lock.live.mjs は消した */
   ["③' で who_league を見ずに全部の op を見る", 'public.mj_write', "v_need := case when v_wl = 'same' or v_wl = v_who then mahjong_private.mj_w_need(v_who, v_role) end;", "v_need := mahjong_private.mj_w_need(v_who, v_role);", null, '⑯ league_save：L は通る'],
   ["league_save の役の門を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_role(p_room, v_op, v_id, null, p_me, p_role, p_i);   -- L・取り消したリーグ＝bad at league", "null;", null, '⑯ league_save：L でない管'],
   ["session_add が rooms の版を写す", 'mahjong_private.mj_w_op', "select g.rule_set_id, g.rule_version, g.rule_set_id_alt, g.rule_version_alt into s;", "select x.rule_set_id, x.rule_version, null::uuid as rule_set_id_alt, null::int as rule_version_alt into s from mahjong.rooms x where x.id = p_room;", null, '⑯ league_save でルールを替えた後'],
-  ["24時間5本を6本にする", 'mahjong_private.mj_w_op', "x.created_at > pg_catalog.now() - interval '24 hours') >= 5 then", "x.created_at > pg_catalog.now() - interval '24 hours') >= 6 then", null, '⑯ 人ごと24時間5本'],
+  ["人ごと24時間5本を戻す", 'mahjong_private.mj_w_op', "    -- 人ごと24時間5本（too_many league_create）とその鍵はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）\n",
+    "    if (select pg_catalog.count(*) from mahjong.leagues x where x.created_by = p_me and x.created_at > pg_catalog.now() - interval '24 hours') >= 5 then perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'too_many', 'i', p_i, 'what', 'league_create')); end if;\n", null, '⑯ 人ごと24時間の本数'],
   ["消えた L を継がない", 'public.mj_write', "if v_role is not null then\n    for v_lg in", "if false then\n    for v_lg in", null, '⑯ 消えた L：部屋に居る人'],
   ["owner_or_sole_L で他の L を見ない", 'mahjong_private.mj_w_role', "elsif not exists (select 1 from mahjong.leagues l where l.id = any(v_ls) and l.owner_user_id is distinct from p_me) then v_need := null;", "elsif true then v_need := null;", null, '⑯ owner_or_sole_L'],
   /* ⑯' D2（d2_sadame v1.1 §4） */

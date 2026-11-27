@@ -12,11 +12,11 @@
  *  ⑦ P3：1人の外れ24時間50（join:ufail1d）→pass も url も busy:user_day（until）・別の人は止めない・49なら数えて50
  *  ⑦' P3：bf 1分20（join:ubf1m）→pass と無い番号は busy:user_min（数えない）・url は bf が無い＝通る・別の人は止めない・19なら通って20
  *  ⑧ 無い番号→wrong・ufail1d・ufail +1・ふりの bf も1回数える／在る部屋の外れと無い番号の時間（塊の中の clock_timestamp・各20回）の中央値の差が bf 1回の 25% 内
- *  ⑨ 消した部屋→gone（入っている人も）・行を作らない ⑩ 人数の上限→full ⑪ ok1h 60→busy:room・1時間より前の窓は数えず消える
+ *  ⑨ 消した部屋→gone（入っている人も）・行を作らない ⑩ caps v1.1：前の上限 200 人を越えても入れる ⑪ caps v1.1：前の ok1h 60 の窓が在っても入れる・ok1h を数えない・古い窓を消さない
  *  ⑫ room_bans に在る人→removed（数えない）・印を消すと入れる
  *  ⑬ anon は 401/403・捨てアカウントで外れ→wrong で数えが残る／GET と Prefer: tx=rollback で外れを送って「wrong なのに数えが残らない」道が無い
  *  ⑭ 平文のパス・token が rooms・room_accounts・limits の字に無い ⑮ 関数の権限（public.mj_* 3本・definer・search_path 空・authenticated だけ）
- *  --waza（P4・pbundle_sadame v2.1 §4）：素の塊の後、ok1h の 60 を 61 に上げた mj_room_join を塊の頭で当てて回す＝⑪ busy:room が赤になるか（塊ごと戻る）
+ *  --waza（caps v1.1）：素の塊の後、消した門を戻した mj_room_join を塊の頭で当てて回す＝W1 ok1h 60 の門→⑪ が赤／W2 200人の full の門→⑩ が赤（塊ごと戻る）
  *  ★wrong 以外の ok でない返しの後は数え（limits の join:*・fail_count・room_accounts）が1つも増えていない★
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋も全部戻る）。
  * ⑬ の捨てアカウントの数え（limits の join:*）は最後に消す（mahjong の limits を書くのは試験だけ＝khaw の客の行は0）。
@@ -249,15 +249,15 @@ begin
     ${T('dl_bad', JP(BADPASS))}
     ${asWho(2)}
     ${T('dl_in', JP(PASS))}`)}
-  /* ⑩ 人数の上限（上限を今の人数に下げる） */
-  ${undo('fu', `update mahjong.mj_caps set cap = (select count(*) from mahjong.room_accounts where room_id = rid) where tbl = 'room_accounts' and scope = 'room';
+  /* ⑩ caps v1.1：前の上限 200 人（仮の人 200 を足して 200 を越えた部屋）へも入れる */
+  ${undo('fu', `with nu as (insert into auth.users (id, email, aud, role, is_anonymous) select z.u, z.u::text || '@${MAIL}', 'authenticated', 'authenticated', false from (select gen_random_uuid() as u from generate_series(1, 200)) z returning id)
+      insert into mahjong.room_accounts (room_id, user_id, role, joined_via) select rid, nu.id, 'nyu', 'pass' from nu;
+    res := res || jsonb_build_object('fu_caps', (select count(*) from mahjong.mj_caps where tbl = 'room_accounts'));
     ${asWho(5)}
     ${T('fu', JP(PASS))}
+    res := res || jsonb_build_object('fu_n', (select count(*) from mahjong.room_accounts where room_id = rid));
     ${asWho(2)}
-    ${T('fu_in', JP(PASS))}
-    update mahjong.mj_caps set cap = cap + 1 where tbl = 'room_accounts' and scope = 'room';
-    ${asWho(5)}
-    ${T('fu_m1', JP(PASS))}`)}
+    ${T('fu_in', JP(PASS))}`)}
   /* ⑪ 部屋ごとの新しい入り 1時間60 */
   ${undo('br', `delete from mahjong.limits where kind = 'join:ok1h' and key = rid::text;
     insert into mahjong.limits (kind, key, window_start, count) values ('join:ok1h', rid::text, date_bin('5 minutes', now(), timestamptz '2000-01-01 00:00:00+00'), 60);
@@ -266,7 +266,7 @@ begin
     ${asWho(2)}
     ${T('br_in', JP(PASS))}
     update mahjong.limits set window_start = window_start - interval '65 minutes' where kind = 'join:ok1h' and key = rid::text;
-    ${asWho(5)}
+    ${asWho(6)}
     ${T('br_next', JP(PASS))}
     res := res || jsonb_build_object('br_old', (select count(*) from mahjong.limits where kind = 'join:ok1h' and key = rid::text and window_start <= now() - interval '1 hour'));`)}
   /* ⑫ 出した人の印 */
@@ -291,15 +291,19 @@ end ${q('rj')};`;
 
 const WAZA = process.argv.includes('--waza');
 let outBase = null;
-const OK1H = "if v_n >= 60 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'room'); end if;";
-function wazaPre() {
+const GONE = '  -- 1部屋の人 200（full）・1部屋1時間60人（busy room）はやめた（caps v1.1・司さん 11-27「上限いらん・リリースは課金の塩梅で決める」）';
+const WZ = [
+  ['W1 ok1h 60 の門を戻す', 'br', "  select coalesce(pg_catalog.sum(l.count), 0) into v_n from mahjong.limits l where l.kind = 'join:ok1h' and l.key = v_room::text and l.window_start > pg_catalog.now() - interval '1 hour';\n  if v_n >= 60 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'room'); end if;"],
+  ['W2 200人の full の門を戻す', 'fu', "  select pg_catalog.count(*) into v_n from mahjong.room_accounts a where a.room_id = v_room;\n  if v_n >= 200 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'full'); end if;"],
+];
+function wazaPre(add) {
   const S = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8').replace(/\r\n/g, '\n');
   const a = S.indexOf('create or replace function public.mj_room_join(');
   const b = S.indexOf('$fn$;', S.indexOf('$fn$', a) + 4);
   if (a < 0 || b < 0) throw new Error('mj_room_join が見つからない');
   const t = S.slice(a, b + 5);
-  if (t.split(OK1H).length !== 2) throw new Error('壊す字（ok1h 60）がちょうど1つでない');
-  return t.split(OK1H).join(OK1H.replace('>= 60', '>= 61')) + '\n';
+  if (t.split(GONE).length !== 2) throw new Error('壊す所（やめた門の注）がちょうど1つでない');
+  return t.split(GONE).join(add) + '\n';
 }
 async function getOut(pre) {
   const { text: t } = await mq(pre + sql);
@@ -322,7 +326,7 @@ const ok = (name, cond, why = '') => { if (cond) { p++; console.log('  ✓ ' + n
 if (!isTest) console.log('★中止★ test の倉庫でない');
 else {
   out = await getOut('');
-  if (WAZA && out) { outBase = out; out = await getOut(wazaPre()); }
+  if (WAZA && out) { outBase = out; out = []; for (const w of WZ) out.push(await getOut(wazaPre(w[2]))); }
 }
 const so = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).sort().map((k) => k + ':' + JSON.stringify(o[k])).join(',') : JSON.stringify(o));
 const same = (a, b) => so(a) === so(b);
@@ -336,16 +340,17 @@ const delta = (k) => dd(out[k + '_c0'], out[k + '_c1']);
 const okRet = (k, again, role = 'nyu') => { const r = R(k); return r.ok === true && r.again === again && r.role === role && r.room_id === out.rid
   && Object.keys(r).sort().join(',') === 'again,channel_key,name,ok,role,room_id,room_no'; };
 if (WAZA) {
-  const busyRoom = (o) => { const r = (o && o.br) || {}; return r.ok === false && r.err === 'busy' && r.what === 'room'; };
+  const joined = (o, k) => { const r = (o && o[k]) || {}; return r.ok === true && r.again === false; };
   const clean = (o) => !!o && !Object.keys(o).some((k) => k.endsWith('_err'));
-  const b = clean(outBase) && busyRoom(outBase);
-  const red = b && !!out && !busyRoom(out);
-  if (!b) console.log('★中止★ 壊す前の素の回りで ⑪ busy:room が緑でない（か塊の中の例外）＝--waza は数えない');
-  else if (!out) console.log('  ✗ P4 ok1h の上限 60 を 61 に：塊が回らなかった');
-  else console.log(red ? '  ✓ P4 ok1h の上限 60 を 61 に → 狙い ⑪ 部屋の新しい入り1時間60の後＝busy:room が赤（' + JSON.stringify(out.br).slice(0, 80) + '）'
-    : '  ✗ P4 ok1h の上限 60 を 61 に → ⑪ が赤にならない');
-  console.log(`\nroom-join --waza: ${red ? 1 : 0}/1 狙いが赤になった`);
-  process.exit(red ? 0 : 1);
+  const b = clean(outBase) && joined(outBase, 'br') && joined(outBase, 'fu');
+  let n = 0;
+  if (!b) console.log('★中止★ 壊す前の素の回りで ⑩ ⑪ が入れていない（か塊の中の例外）＝--waza は数えない');
+  else WZ.forEach((w, i) => {
+    const o = out[i]; const red = !!o && !joined(o, w[1]); if (red) n++;
+    console.log(!o ? '  ✗ ' + w[0] + '：塊が回らなかった' : (red ? '  ✓ ' : '  ✗ ') + w[0] + ' → 狙い ' + w[1] + (red ? ' が赤（' + JSON.stringify(o[w[1]]).slice(0, 80) + '）' : ' が赤にならない'));
+  });
+  console.log(`\nroom-join --waza: ${n}/${WZ.length} 狙いが赤になった`);
+  process.exit(b && n === WZ.length ? 0 : 1);
 }
 
 if (out) {
@@ -365,7 +370,7 @@ if (out) {
   ok('② パスで入れた＝again:false・nyu・返しの鍵7つ', okRet('p1', false), JSON.stringify(R('p1')));
   ok('② 返しの room_no・name・channel_key が部屋の物', R('p1').room_no === out.made.room_no && R('p1').name === RNAME && R('p1').channel_key === out.made.channel_key);
   ok('② room_accounts に nyu・pass の行', out.p1_row && out.p1_row.role === 'nyu' && out.p1_row.joined_via === 'pass' && out.p1_row.member_id === null, JSON.stringify(out.p1_row));
-  ok('② 入って room_accounts +1・ok1h +1・bf +1（P3）・外れの数えは増えない', same(delta('p1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 1, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('p1')));
+  ok('② 入って room_accounts +1・bf +1（P3）・ok1h は数えない（caps v1.1）・外れの数えは増えない', same(delta('p1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 1, uf: 0, ok1h: 0, bans: 0 }), JSON.stringify(delta('p1')));
   ok('② 同じ人＝again:true', okRet('p2', true), JSON.stringify(R('p2')));
   ok('② again で何も増えない（ok1h もそのまま）', still('p2'), JSON.stringify(delta('p2')));
   ok('② 外れのパスでも again:true（bf を回していない）', okRet('p3', true), JSON.stringify(R('p3')));
@@ -378,7 +383,7 @@ if (out) {
   ok('③ 部屋の url_token_hash は lib の hash', out.h_room === TOKH);
   ok('③ URL で入れた＝again:false', okRet('u1', false), JSON.stringify(R('u1')));
   ok('③ room_accounts に nyu・url の行', out.u1_row && out.u1_row.role === 'nyu' && out.u1_row.joined_via === 'url', JSON.stringify(out.u1_row));
-  ok('③ URL で入って ok1h +1・外れは増えない', same(delta('u1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 0, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('u1')));
+  ok('③ URL で入って ok1h は数えない（caps v1.1）・外れは増えない', same(delta('u1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 0, uf: 0, ok1h: 0, bans: 0 }), JSON.stringify(delta('u1')));
   ok('③ 別の 32 hex＝wrong', isErr('uw', 'wrong'), JSON.stringify(R('uw') || out.uw_err));
   ok('③ URL の外れは ufail +1・ufail1d +1（P3）・bf と fail_count は増えない', same(delta('uw'), { ra: 0, fail: 0, lock: 'false→false', ud: 1, bf: 0, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify(delta('uw')));
   /* ④ */
@@ -426,16 +431,16 @@ if (out) {
   ok('⑨ 消した部屋＝入っている人も gone', isErr('dl_in', 'gone'), JSON.stringify(R('dl_in')));
   ok('⑨ gone で行も数えも増えない', ['dl_p', 'dl_u', 'dl_bad', 'dl_in'].every(still), JSON.stringify(['dl_p', 'dl_u', 'dl_bad', 'dl_in'].map(delta)));
   /* ⑩ */
-  ok('⑩ 人数が上限＝full', isErr('fu', 'full'), JSON.stringify(R('fu') || out.fu_err));
-  ok('⑩ full で bf +1 の他は何も増えない', stillBf('fu'), JSON.stringify(delta('fu')));
-  ok('⑩ 上限でも入っている人は again', okRet('fu_in', true), JSON.stringify(R('fu_in')));
-  ok('⑩ 上限を1上げると入れる', okRet('fu_m1', false), JSON.stringify(R('fu_m1')));
+  ok('⑩ caps v1.1：前の上限 200 人を越えた部屋へも入れる', okRet('fu', false) && Number(out.fu_n) >= 202, JSON.stringify([R('fu'), out.fu_n, out.fu_err]));
+  ok('⑩ その時 room_accounts +1・bf +1 の他は何も増えない', same(delta('fu'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 1, uf: 0, ok1h: 0, bans: 0 }), JSON.stringify(delta('fu')));
+  ok('⑩ 入っている人は again', okRet('fu_in', true), JSON.stringify(R('fu_in')));
+  ok('⑩ mj_caps に room_accounts の行は無い（caps v1.1）', Number(out.fu_caps) === 0, String(out.fu_caps));
   /* ⑪ */
-  ok('⑪ 部屋の新しい入り1時間60の後＝busy:room', isErr('br', 'busy', { what: 'room' }), JSON.stringify(R('br') || out.br_err));
-  ok('⑪ busy:room で bf +1 の他は何も増えない', stillBf('br'), JSON.stringify(delta('br')));
-  ok('⑪ busy:room でも入っている人は again', okRet('br_in', true), JSON.stringify(R('br_in')));
-  ok('⑪ 1時間より前の窓は数えず入れる', okRet('br_next', false), JSON.stringify(R('br_next')));
-  ok('⑪ 1時間より前の窓は入った時に消える', Number(out.br_old) === 0, String(out.br_old));
+  ok('⑪ caps v1.1：前の上限（部屋の新しい入り1時間60）の窓が60でも入れる', okRet('br', false), JSON.stringify(R('br') || out.br_err));
+  ok('⑪ その時 room_accounts +1・bf +1 の他は何も増えない（ok1h も 60 のまま）', same(delta('br'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 1, uf: 0, ok1h: 0, bans: 0 }), JSON.stringify(delta('br')));
+  ok('⑪ 入っている人は again', okRet('br_in', true), JSON.stringify(R('br_in')));
+  ok('⑪ 1時間より前の窓の時も入れる', okRet('br_next', false), JSON.stringify(R('br_next')));
+  ok('⑪ caps v1.1：入る時に ok1h の古い窓を読まず消さない（1行残る）', Number(out.br_old) === 1, String(out.br_old));
   /* ⑫ */
   ok('⑫ 出した人＝removed（パス）', isErr('bn', 'removed') && Object.keys(R('bn')).length === 2, JSON.stringify(R('bn') || out.bn_err));
   ok('⑫ 出した人＝removed（URL）', isErr('bn_u', 'removed'), JSON.stringify(R('bn_u')));

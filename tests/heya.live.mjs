@@ -4,7 +4,7 @@
  * A＝1つの取引の塊（最後にわざと例外を投げて全部戻す＝倉庫に何も残さない）で §8 を見る：
  *   部屋なし：作る→番号・名前が出ない／番号・url・名前の3つで部屋なしと無い部屋の返しが同じ（例外0）／sweep を回しても（30日進めても）消えない
  *     ／持ち主の room_delete は7日後に消える／room_secret・room_close は bad kind／room_share で shared になり名前で入れる／mj_my_rooms に出る
- *   数え：create 5回の後の room_share が busy user・逆も／busy で数え・totals が変わらない／room_close→room_delete→物理の消しで rooms_all が1回だけ減る
+ *   数え（caps v1.1）：create 5回の後の room_share も6回目の create も ok・作るの数え（u1m・u1d・su1d）は書かない／room_close→room_delete→物理の消しで rooms_all が1回だけ減る
  *     ／数え直しと足し引きが同じ値／部屋なしをいくつ作っても R を見ない
  *   組：同じ名前・違うパスで2部屋・それぞれに入る／同じ組は dup／揺れでも同じ／終えた後は同じ組で作れ新しい方に入る／送り直しは ok で数えない
  *     ／名前ごと5回で止め（join・create・room_share から）・当たっても戻らない／room_secret 4回目 busy・塊が戻っても数えは残る・他の部屋と同じパスは dup
@@ -365,7 +365,7 @@ function checkA(o) {
   ok('部屋なし：作れる・kind solo・番号を返さない・channel_key は返す', sm.ok === true && sm.kind === 'solo' && !('room_no' in sm) && /^[0-9a-f]{32}$/.test(sm.channel_key || ''), J(sm));
   ok("部屋なし：行は name '対局'・pass_hash '!solo'・name_key null・番号は今の式（8桁）", o.s_row && o.s_row.name === '対局' && o.s_row.pass_hash === '!solo' && o.s_row.name_key === null && o.s_row.no8 === true && o.s_row.kind === 'solo', J(o.s_row));
   const sd = dl(o.s_c0, o.s_c1);
-  ok('部屋なし：R を見ない＝totals は増えない・P3 全体の 1m・1d は書かない・部屋なしの su1d +1・人ごと u1d は増えない', sd && sd.totals === 0 && sd.c1m === 0 && sd.c1d === 0 && sd.su === 1 && sd.u1d === 0 && sd.rooms === 1, J(sd));
+  ok('部屋なし：R を見ない＝totals は増えない・作るの数え（1m・1d・su1d・u1d）は書かない（caps v1.1）', sd && sd.totals === 0 && sd.c1m === 0 && sd.c1d === 0 && sd.su === 0 && sd.u1d === 0 && sd.rooms === 1, J(sd));
   ok('部屋なし：同じ op_id の送り直し＝同じ返し（番号なし）', same(o.s_again, sm), J(o.s_again));
   ok('部屋なし：同じ op_id で kind が違う送り直し＝bad kind・何も残さない', isErr(o.s_kind, 'bad', { what: 'kind' }) && zero(dl(o.s_c1, o.s_c2), ['rooms', 'totals', 'c1m', 'c1d', 'u1d', 'nf', 'creates']), J([o.s_kind, dl(o.s_c1, o.s_c2)]));
   ok('名前とパスの片方だけ null は bad', isErr(o.s_half1, 'bad', { what: 'pass' }) && isErr(o.s_half2, 'bad', { what: 'name' }), J([o.s_half1, o.s_half2]));
@@ -381,7 +381,7 @@ function checkA(o) {
   const shk = o.sh?.results?.[0]?.channel_key;
   ok('room_share：ok・新しい channel_key を返す・kind shared・名前と name_key・パスと url を作り直す', o.sh?.ok === true && /^[0-9a-f]{32}$/.test(shk || '') && o.sh_row && o.sh_row.kind === 'shared'
     && o.sh_row.name === P('sh') && o.sh_row.nk === true && o.sh_row.ch === shk && o.sh_row.no_solo === true && o.sh_row.url === true, J([o.sh, o.sh_row]));
-  ok('room_share：rooms_all +1・作るの数え u1d +1（P3 全体の 1m・1d は書かない・su1d は足さない）', shd && shd.totals === 1 && shd.c1m === 0 && shd.c1d === 0 && shd.u1d === 1 && shd.su === 0, J(shd));
+  ok('room_share：rooms_all +1・作るの数え（1m・1d・u1d・su1d）は書かない（caps v1.1）', shd && shd.totals === 1 && shd.c1m === 0 && shd.c1d === 0 && shd.u1d === 0 && shd.su === 0, J(shd));
   ok('room_share：履歴に pass・hash・channel_key を書かない', Array.isArray(o.sh_hist) && o.sh_hist.length === 1 && !J(o.sh_hist).includes(shk || 'x') && !J(o.sh_hist).includes('$2'), J(o.sh_hist));
   ok('room_share：op_results に channel_key を残さない', o.sh_opr && o.sh_opr.ok === true && !J(o.sh_opr).includes('channel_key'), J(o.sh_opr));
   ok('room_share の送り直し → ok で今の channel_key を読み直して返す（v10.2）', o.sh_again?.ok === true && o.sh_again.results?.[0]?.channel_key === crypto.createHash('md5').update('heya-ch').digest('hex'), J(o.sh_again));
@@ -398,11 +398,11 @@ function checkA(o) {
   ok('mj_my_rooms：limit 0・51 は bad limit・before の片方だけは bad before', isErr(o.my_b0, 'bad', { what: 'limit' }) && isErr(o.my_b51, 'bad', { what: 'limit' }) && isErr(o.my_bh, 'bad', { what: 'before' }), J([o.my_b0, o.my_b51, o.my_bh]));
   ok('mj_my_rooms：他の人の部屋は出ない', o.my_other?.ok === true && !(o.my_other.rooms || []).some((x) => x.room_id === sm.room_id || x.room_id === o.my_a?.room_id), J(o.my_other));
   /* 数え */
-  ok('create 5回の後の room_share は busy user', isErr(o.cu_share, 'busy', { what: 'user' }) && [1, 2, 3, 4, 5].every((i) => o['cu_c' + i]?.ok === true), J([o.cu_share, o.cu_c5]));
+  ok('caps v1.1：create 5回の後の room_share も ok（前の上限 人ごと24時間5）', o.cu_share?.ok === true && [1, 2, 3, 4, 5].every((i) => o['cu_c' + i]?.ok === true), J([o.cu_share, o.cu_c5]));
   ok('部屋なしは 5回作っても人ごとの数えに入らない（その後に shared を5つ作れる）', o.cu_solo?.ok === true && o.cu_c5?.ok === true, J([o.cu_solo, o.cu_c5]));
-  ok('busy user の room_share は数え・totals・部屋を変えない', zero(dl(o.cu_s0, o.cu_s1), ['totals', 'c1m', 'c1d', 'u1d', 'nf', 'rooms']), J(dl(o.cu_s0, o.cu_s1)));
-  ok('create 6回目（room_share が間に無くても）busy user・何も変えない', isErr(o.cu_c6, 'busy', { what: 'user' }) && zero(dl(o.cu_s1, o.cu_s2), ['totals', 'c1m', 'c1d', 'u1d', 'rooms', 'creates']), J([o.cu_c6, dl(o.cu_s1, o.cu_s2)]));
-  ok('逆も：create 4回＋room_share 1回の後の create は busy user・何も変えない', o.cr_share?.ok === true && isErr(o.cr_c5, 'busy', { what: 'user' }) && zero(dl(o.cr_s0, o.cr_s1), ['totals', 'c1m', 'c1d', 'u1d', 'rooms', 'creates']), J([o.cr_share, o.cr_c5]));
+  ok('その room_share は totals +1・部屋の数は同じ・作るの数えは書かない', dl(o.cu_s0, o.cu_s1)?.totals === 1 && zero(dl(o.cu_s0, o.cu_s1), [...['c1m', 'c1d', 'u1d', 'su'], 'nf', 'rooms']), J(dl(o.cu_s0, o.cu_s1)));
+  ok('caps v1.1：create 6回目も ok・部屋 +1・作るの数えは書かない', o.cu_c6?.ok === true && dl(o.cu_s1, o.cu_s2)?.rooms === 1 && zero(dl(o.cu_s1, o.cu_s2), ['c1m', 'c1d', 'u1d', 'su']), J([o.cu_c6, dl(o.cu_s1, o.cu_s2)]));
+  ok('caps v1.1：逆も：create 4回＋room_share 1回の後の create も ok・作るの数えは書かない', o.cr_share?.ok === true && o.cr_c5?.ok === true && dl(o.cr_s0, o.cr_s1)?.rooms === 1 && zero(dl(o.cr_s0, o.cr_s1), ['c1m', 'c1d', 'u1d', 'su']), J([o.cr_share, o.cr_c5, dl(o.cr_s0, o.cr_s1)]));
   ok('room_close：ok・closed_at・name_key null・rooms_all −1', o.cl_close?.ok === true && Number(o.cl_1) === -1 && o.cl_row && o.cl_row.closed === true && o.cl_row.nk === null, J([o.cl_close, o.cl_1, o.cl_row]));
   ok('終えた部屋：room_close は bad closed・member_add は bad closed（塊ごと）', isErr(o.cl_again, 'bad', { at: 'closed' }) && isErr(o.cl_ma, 'bad', { at: 'closed' }), J([o.cl_again, o.cl_ma]));
   ok('room_close→room_delete→物理の消しで rooms_all が1回だけ減る', o.cl_del?.ok === true && Number(o.cl_2) === -1 && o.cl_3 && Number(o.cl_3.left) === 0 && Number(o.cl_3.d) === -1, J([o.cl_del, o.cl_2, o.cl_3]));
@@ -451,7 +451,7 @@ function checkA(o) {
     J([o.fa_c, o.fa_sh, o.fa_solo, o.fa_other]));
   ok('P3：同じ名前の部屋20＝名前の道の1回で bf 20（wrong）・同じ分の次は busy user_min で何も増えない・他の人は入れる', isErr(o.ub_1, 'wrong') && Number(o.ub_n) === 20 && isErr(o.ub_2, 'busy', { what: 'user_min' })
     && Number(o.ub_n2) === 20 && same(o.ub_c0, o.ub_c1) && o.ub_other?.ok === true, J([o.ub_1, o.ub_n, o.ub_2, o.ub_n2, o.ub_other]));
-  ok('P3：room_share も人ごと1分5を見る（busy user_min・部屋なしのまま）', isErr(o.um_sh?.results ? o.um_sh : o.um_sh, 'busy', { what: 'user_min' }) && o.um_kind === 'solo', J([o.um_sh, o.um_kind]));
+  ok('caps v1.1：room_share は前の人ごと1分5の窓が5でも shared になる', o.um_sh?.ok === true && o.um_kind === 'shared', J([o.um_sh, o.um_kind]));
   return L;
 }
 
@@ -563,8 +563,9 @@ const WZ = [
     ['当たっても戻らない']],
   ['W6 room_secret が比べを通らない', () => brk('mahjong_private.mj_w_op', [[SECRET_PAIR, "v_j := '{\"busy\": false, \"hit\": false}'::jsonb;"]]),
     ['room_secret で他の部屋と同じ組 → dup']],
-  ['W7 room_share が create:u1d を見ない', () => brk('mahjong_private.mj_w_op', [['    if (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l   -- ★room_share の人ごとの数え★', '    if false and (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l']]),
-    ['create 5回の後の room_share は busy user']],
+  ['W7 caps v1.1：room_share の人ごと1分5の門を戻す', () => brk('mahjong_private.mj_w_op', [["    if mahjong_private.mj_day_until('join:ufail1d', p_me::text, 50) is not null then",
+    "    if (select coalesce(pg_catalog.sum(l.count), 0) from mahjong.limits l where l.kind = 'create:u1m' and l.key = p_me::text and l.window_start = pg_catalog.date_trunc('minute', pg_catalog.now())) + 1 > 5 then\n      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'i', p_i, 'what', 'user_min'));\n    end if;\n    if mahjong_private.mj_day_until('join:ufail1d', p_me::text, 50) is not null then"]]),
+    ['caps v1.1：room_share は前の人ごと1分5の窓が5でも']],
   ['W9 部屋なし潰しを外す', () => brk('public.mj_room_join', [["  if v_found and v_kind = 'solo' then v_found := false; end if;   -- ★部屋なし潰し★", '  null;']]),
     ['番号・url で部屋なしと無い部屋の返しが同じ']],
   ['W10 P4 room_secret の1日3回を4回に', () => brk('public.mj_write', [["interval '24 hours') >= 3 then", "interval '24 hours') >= 4 then"]]),
