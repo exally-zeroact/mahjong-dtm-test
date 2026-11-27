@@ -93,6 +93,10 @@ jobs:
         run: node tests/league-rank.test.mjs
       - name: リーグの途中経過の自己確認（lib をわざと壊して赤になるか）
         run: node tests/league-rank.test.mjs --self-test
+      - name: 自分の戦績（lib/my-stats.mjs・C2-2）＝期待値（pt／込み／点・4人と3人・出た部屋・出た後の印・全部読めた印）
+        run: node tests/my-stats.test.mjs
+      - name: 自分の戦績の自己確認（lib をわざと壊して赤になるか）
+        run: node tests/my-stats.test.mjs --self-test
       - name: 部屋の中の状態（lib/room-state.mjs）＝op を当てる・版の conflict・組ごと当てる・半荘の表・人ごとの窓・チップ祝儀・精算
         run: node tests/room-state.test.mjs
       - name: 続きの部屋のカードの数と終えた判じ（lib cardCounts・roomEnded）＝倉庫と同じ表 tests/fixtures/card-counts.json（a15_sadame §1.3）
