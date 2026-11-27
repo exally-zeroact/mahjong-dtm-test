@@ -1,7 +1,7 @@
 // L リーグの直し（l_sadame v1.3 §1 A22・A16・A24・A25 名簿）＝league.html の画面の分の自己確認（計算の席の持ち物・js/gamen-league.mjs）。
 // node gamen_l-e2e.cjs <作業木> [--self] [--chromium] [--shot=<dir>]
 // 台は gamen_d2-e2e.cjs の写し（本物の league.html に、ログインと sb()／rpc() だけ差し替えた gamen-core・偽の倉庫は lib/room-state.mjs の applyOps）。
-//   足し＝league_create を偽の倉庫で受ける（同じ部屋の取り消していないリーグと同じ名＝dup at name）。名簿の member_rename／member_active は lib の門のまま。
+//   足し＝league_create を偽の倉庫で受ける（本物と同じく同じ名の止めは無い＝11-27 A24）。名簿の member_rename／member_active は lib の門のまま。
 // 壊し（--self）は配る中身の字を1か所ずつ書き換える（作業木は触らない）・壊しごとに効く試しだけ回す（ONLY）。
 const http = require('http'), fs = require('fs'), path = require('path'), { pathToFileURL } = require('url');
 const pw = require('playwright');
@@ -126,7 +126,7 @@ function stPart(st, keep) { // keep(session)＝出す開催
   o.hanchans = o.hanchans.filter((h) => tids.has(h.table_id)); o.extras = o.extras.filter((x) => tids.has(x.table_id)); o.settles = (o.settles || []).filter((x) => sids.has(x.session_id));
   return o;
 }
-const lgOut = (R, l, uid) => ({ league_id: l.league_id, name: l.name, date_from: l.date_from, date_to: l.date_to, rank_by: l.rank_by, min_games: l.min_games, players_main: l.players_main, rules: l.rules, rules_alt: l.rules_alt, version: l.version, voided: l.voided, l: l.l_uid === uid });
+const lgOut = (R, l, uid) => ({ league_id: l.league_id, name: l.name, date_from: l.date_from, date_to: l.date_to, rank_by: l.rank_by, min_games: l.min_games, players_main: l.players_main, rules: l.rules, rules_alt: l.rules_alt, version: l.version, voided: l.voided, ...(l.created_at ? { created_at: l.created_at } : {}), l: l.l_uid === uid });
 function mjRead(uid, a) {
   const R = DB.get(a.p_room_id);
   if (!R || !roleOf(R, uid)) return { ok: false, err: 'gone' };
@@ -188,7 +188,7 @@ const tb = (tid, sid, label, alt) => ({ op: 'table_add', table_id: tid, session_
 const seats = (tid, s) => ({ op: 'table_seats', table_id: tid, seats: s });
 const H = (hid, tid, s, cells) => ({ op: 'hanchan_start', hanchan_id: hid, table_id: tid, seats: s, cells });
 
-/* ── L の偽の倉庫の足し（league_create の dup の門・名簿の op は lib のまま） ── */
+/* ── L の偽の倉庫の足し（league_create・名簿の op は lib のまま） ── */
 const mjWriteD2 = mjWrite;
 mjWrite = async function (dev, uid, a) {
   const R = DB.get(a.p_room_id);
@@ -196,8 +196,7 @@ mjWrite = async function (dev, uid, a) {
   if (R && !c.forceWrite.length && a.p_ops.length === 1 && a.p_ops[0].op === 'league_create') {
     if (R.results.has(a.p_op_id)) return R.results.get(a.p_op_id);
     const o = a.p_ops[0];
-    if (R.leagues.some((l) => !l.voided && l.league_id !== o.league_id && String(l.name).trim() === String(o.name).trim())) { const r = { ok: false, err: 'dup', at: 'name' }; R.results.set(a.p_op_id, r); return r; }
-    R.leagues.push({ league_id: o.league_id, name: o.name, date_from: o.date_from, date_to: o.date_to, rank_by: o.rank_by, min_games: o.min_games, players_main: o.players_main, rules: o.rules, rules_alt: o.rules_alt, version: 1, l_uid: uid, voided: false });
+    R.leagues.push({ league_id: o.league_id, name: o.name, date_from: o.date_from, date_to: o.date_to, rank_by: o.rank_by, min_games: o.min_games, players_main: o.players_main, rules: o.rules, rules_alt: o.rules_alt, version: 1, l_uid: uid, voided: false, created_at: '2026-11-27T23:00:00+09:00' });
     R.read_ver++;
     const r = { ok: true, read_ver: R.read_ver }; R.results.set(a.p_op_id, r); return r;
   }
@@ -271,27 +270,22 @@ async function run(br, port) {
       ok('L1 作れたらそのリーグの対局の頁へ', u.pathname.endsWith('/taikyoku.html') && u.searchParams.get('room') === 'ra' && !!cr && u.searchParams.get('league') === cr.league_id, A.pg.url());
     } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
 
-    // L2 A24① 同じ部屋の取り消していないリーグと同じ名は作れない（送らずに字・倉庫の dup at name も同じ字）・取り消したリーグと同じ名は通る
+    // L2 A24（11-27 23時 司さん）同じ名前のリーグも作れる（送る）・一覧で同じ名が並ぶ時は作った日時で見分ける・違う名には日時を出さない
     if (want('L2')) try { NM = 'L2';
-      DB.clear(); mkRoom('ra'); mkLeague('ra', { league_id: LID, name: '金曜リーグ', rules: LR4 });
-      const dead = mkLeague('ra', { league_id: LID_ALT, name: '土曜リーグ', rules: LR4 }); dead.voided = true;
+      DB.clear(); mkRoom('ra'); const lg1 = mkLeague('ra', { league_id: LID, name: '金曜リーグ', rules: LR4 }); lg1.created_at = '2026-11-20T10:05:00+09:00';
+      const other = mkLeague('ra', { league_id: LID_ALT, name: '土曜リーグ', rules: LR4 }); other.created_at = '2026-11-21T10:00:00+09:00';
       const A = await device('A2', 'u1');
       await openList(A.pg); await openForm(A.pg);
       await A.pg.fill('#fName', ' 金曜リーグ ');
       await A.pg.click('#fGo');
-      await waitFor(async () => ((await txt(A.pg, '#fMsg')) || '').length > 0, 3000);
-      ok('L2 同じ名は「同じ名前のリーグがもうあります」', ((await txt(A.pg, '#fMsg')) || '').includes('同じ名前のリーグがもうあります'), await txt(A.pg, '#fMsg'));
-      ok('L2 同じ名は送らない', opsOf('A2', 'league_create').length === 0);
-      ctl('A2').forceWrite.push({ ok: false, err: 'dup', at: 'name' });
-      await A.pg.fill('#fName', '日曜リーグ');
-      await A.pg.click('#fGo');
-      await waitFor(async () => writes('A2').length >= 1 && ((await txt(A.pg, '#fMsg')) || '').length > 0, 5000);
-      ok('L2 倉庫の dup at name も同じ字', ((await txt(A.pg, '#fMsg')) || '').includes('同じ名前のリーグがもうあります'), await txt(A.pg, '#fMsg'));
-      ok('L2 dup の後も作る頁のまま', await A.pg.isVisible('#vForm'));
-      await A.pg.fill('#fName', '土曜リーグ');
-      await A.pg.click('#fGo');
       await A.pg.waitForURL(/taikyoku\.html/, { timeout: SELF ? 6000 : 15000 }).catch(() => {});
-      ok('L2 取り消したリーグと同じ名は作れる', DB.get('ra').leagues.filter((l) => l.name === '土曜リーグ' && !l.voided).length === 1, DB.get('ra').leagues.map((l) => l.name));
+      ok('L2 同じ名でも league_create を送る', opsOf('A2', 'league_create').length === 1 && opsOf('A2', 'league_create')[0].name === '金曜リーグ', opsOf('A2', 'league_create'));
+      ok('L2 同じ名のリーグが2つになる', DB.get('ra').leagues.filter((l) => l.name === '金曜リーグ' && !l.voided).length === 2, DB.get('ra').leagues.map((l) => l.name));
+      DB.get('ra').leagues.find((l) => l.league_id !== LID && l.name === '金曜リーグ').created_at = '2026-11-27T23:10:00+09:00';
+      await openList(A.pg);
+      const subs = await A.pg.evaluate(() => [...document.querySelectorAll('.lg-row')].map((r) => r.querySelector('.row-name').textContent + '|' + r.querySelector('.row-sub').textContent));
+      ok('L2 同じ名の2つは作った日時で分かる', subs.some((t) => t.startsWith('金曜リーグ|') && t.includes('作った 11/20 10:05')) && subs.some((t) => t.startsWith('金曜リーグ|') && t.includes('作った 11/27 23:10')), subs);
+      ok('L2 違う名には作った日時を出さない', subs.some((t) => t.startsWith('土曜リーグ|') && !t.includes('作った')), subs);
     } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
 
     // L3 A24③ 一覧の見出しは「部屋 ○○」と小さく・行の主はリーグの名
@@ -382,9 +376,9 @@ const MUT = [
   { file: G, from: "  $('fAlt').innerHTML = h + keypadHtml({ sp: false });", to: "  $('fAlt').innerHTML = h;", name: 'もう一方の箱にアプリの鍵盤を付けない（L1）', only: 'L1' },
   { file: G, from: "{ neg: true, dec: false, max: 3 } : { neg: false, dec: false, max: 6 }), sp: $('fKpSp') });", to: "{ neg: true, dec: false, max: 3 } : { neg: true, dec: false, max: 6 }), sp: $('fKpSp') });", name: '持ち点でも − が効く（L1）', only: 'L1' },
   { file: G, from: "    if (made) { form = null; location.href =", to: "    if (false) { form = null; location.href =", name: '作れたら一覧に戻す（L1）', only: 'L1' },
-  { file: G, from: "if (x && x.read && x.read.leagues.some((l) => !l.voided &&", to: "if (x && x.read && x.read.leagues.some((l) => false &&", name: '同じ名の先回りをしない（L2）', only: 'L2' },
-  { file: G, from: "if (x && x.read && x.read.leagues.some((l) => !l.voided && l.league_id", to: "if (x && x.read && x.read.leagues.some((l) => l.league_id", name: '取り消したリーグの名でも止める（L2）', only: 'L2' },
-  { file: G, from: "  if (e === 'dup' && at === 'name') t = LG_DUP;\n", to: '', name: '倉庫の dup at name に字を出さない（L2）', only: 'L2' },
+  { file: G, from: "const twin = live.some((o) => o !== l && nk(o) === nk(l));", to: 'const twin = false;', name: '同じ名に作った日時を出さない（L2）', only: 'L2' },
+  { file: G, from: "const twin = live.some((o) => o !== l && nk(o) === nk(l));", to: 'const twin = true;', name: '違う名にも作った日時を出す（L2）', only: 'L2' },
+  { file: G, from: "  return { val: { name, date_from, date_to, rank_by: form.rank,", to: "  if (rooms.get(form.rid).read.leagues.some((l) => !l.voided && String(l.name).trim() === name)) return { err: 'x' }; return { val: { name, date_from, date_to, rank_by: form.rank,", name: '同じ名の止めを戻す（L2）', only: 'L2' },
   { file: G, from: 'data-heya>部屋 \' + esc(roomName(x))', to: 'data-heya>\' + esc(roomName(x))', name: '見出しに「部屋」を付けない（L3）', only: 'L3' },
   { file: 'css/gamen.css', from: '.lg-heya { font-size: 12px;', to: '.lg-heya { font-size: 18px;', name: '見出しをリーグの名より大きくする（L3）', only: 'L3' },
   { file: G, from: "rosterSend(b.dataset.r, b.dataset.rnok, 'rename', { op: 'member_rename', member_id: b.dataset.rnok, name: nm });", to: '', name: '名前を直すを送らない（L4）', only: 'L4' },

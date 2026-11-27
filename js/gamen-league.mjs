@@ -12,7 +12,7 @@
  * 合図＝読んだ部屋の channel_key に入り、受けたらその部屋を since なしで読み直す（倉庫が league の op でも read_ver を上げて合図を出す）。
  * D2（d2_sadame v1.1 §3）：取り消していないリーグ（終えていない部屋）に［このリーグで対局を始める］→ taikyoku.html?room=<id>&league=<league_id>。
  * L（l_sadame v1.3 §1）：A22 規定の半荘数は無し（min_games は 0 で送る）・A16 もう一方の打ち方の箱は js/kenban（− はウマだけ・端末の鍵盤は出さない）・
- *   A24 同じ部屋の取り消していないリーグと同じ名は作らない（倉庫 dup at name）・作れたらそのリーグの対局の頁へ・見出しは「部屋 ○○」と小さく・
+ *   A24 同じ名前のリーグも作れる（11-27 23時 司さん・同名が並ぶ時は作った日時を添える）・作れたらそのリーグの対局の頁へ・見出しは「部屋 ○○」と小さく・
  *   名簿＝人ごとに［名前を直す］［外す］・下に「外した人」［戻す］（A25・member_rename／member_active・何も消さない）。
  * 作らない物：リーグを取り消すボタン・順位表（D3）。
  */
@@ -45,6 +45,7 @@ const okInt = (v) => Number.isInteger(v);
 const n0 = (v) => (okInt(v) ? v.toLocaleString('ja-JP') : '—');
 const bv = (v) => (okInt(v) ? (v < 0 ? '−' + -v : String(v)) : '');
 const ymd = (d) => (d ? Number(d.slice(0, 4)) + '/' + Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : '');
+const mdhm = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const period = (lg) => (lg.date_from || lg.date_to ? ymd(lg.date_from) + '〜' + ymd(lg.date_to) : '');
 const playersText = (lg) => lg.players_main + '人' + (lg.rules_alt ? '・' + (7 - lg.players_main) + '人' : '');
 function show(id) { for (const v of VIEWS) $(v).hidden = v !== id; window.scrollTo(0, 0); }
@@ -181,8 +182,12 @@ function renderList() {
     liveAll += live.length;
     if (!live.length && !dead.length) continue;
     h += '<section class="lg-room" data-room="' + esc(rid) + '"><h3 class="sec lg-heya" data-heya>部屋 ' + esc(roomName(x)) + (closed ? '<small class="lg-owari" data-owari>終わった部屋</small>' : '') + '</h3><div class="list">';
+    const nk = (l) => String(l.name || '').trim();
     for (const l of live) {
-      const sub = [period(l), playersText(l)].filter(Boolean).join(' ・ ');
+      // A24（11-27 23時）：同じ部屋に同じ名前が2つ以上並ぶ時は作った日時を添えて見分ける（倉庫が created_at を返す時だけ）
+      const twin = live.some((o) => o !== l && nk(o) === nk(l));
+      const made = twin && l.created_at ? '作った ' + mdhm(l.created_at) : '';
+      const sub = [period(l), playersText(l), made].filter(Boolean).join(' ・ ');
       h += '<div class="li lg-row" data-lg="' + esc(l.league_id) + '"><span class="lg-l"><span class="row-name">' + esc(l.name) + '</span><span class="row-sub">' + esc(sub) + '</span></span><span class="lg-btns">';
       if (owner && !closed && l.l !== true) h += '<button class="btn-s" type="button" data-own="' + esc(l.league_id) + '" data-r="' + esc(rid) + '">自分を L にする</button>';
       if (!closed) h += '<button class="btn-s" type="button" data-edit="' + esc(l.league_id) + '" data-r="' + esc(rid) + '"' + (l.l === true ? '' : ' disabled') + '>設定を変える</button>';
@@ -227,7 +232,6 @@ function wireMsg(pre, m) {
  * 外す前の確かめ＝点の回数（部屋の半荘＋各リーグの半荘・取り消していない回と卓）と、締めていないリーグの日で次の席（baseSeats）に居る卓。
  *   リーグの半荘は mj_read 'room' に来ない＝名簿を開いた時に各リーグを mj_read 'league' で読む（読めない間は［外す］を押せない）。 */
 const ROSTER_ERR = { dup: '同じ名前の人がもういます', left: 'この人は部屋を出ています。名前は直せません。', role: 'この人はほかのリーグにも出ているので、部屋の持ち主だけが直せます' };
-const LG_DUP = '同じ名前のリーグがもうあります';
 async function rosterLoad(rid) {
   const x = rooms.get(rid); if (!x || !x.read) return;
   const seq = (x.rseq = (x.rseq || 0) + 1);
@@ -456,9 +460,7 @@ function readForm() {
     if (!c2.ok) return { err: RULE_ERR[c2.err] || ('ルールの「' + c2.err + '」が入れられません。') };
     rules_alt = c2.rules;
   }
-  // A24①：同じ部屋の取り消していないリーグと同じ名（前後の空白を除いた字）は作らない（直す時は自分を除く）＝倉庫の dup at name の先回り
-  const x = rooms.get(form.rid);
-  if (x && x.read && x.read.leagues.some((l) => !l.voided && l.league_id !== form.lid && String(l.name || '').trim() === name)) return { err: LG_DUP };
+  // A24①（司さん 11-27 23時で取り消し）：同じ名前のリーグも作れる・直せる（打つ人・日付・時間で分かる）＝名の重なりは止めない
   return { val: { name, date_from, date_to, rank_by: form.rank, min_games: 0, players_main: chk.rules.players, rules: chk.rules, rules_alt } };
 }
 async function submit() {
@@ -533,7 +535,6 @@ async function afterWrite(res, rid, kind, lid) {
     form = null; listMsg = { text }; renderList(); return;
   }
   let t = text;
-  if (e === 'dup' && at === 'name') t = LG_DUP;
   if (e === 'bad' && (at === 'rules' || at === 'rules_alt') && res.key && RULE_ERR[res.key]) t = RULE_ERR[res.key];
   say({ text: t });
 }
