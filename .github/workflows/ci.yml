@@ -93,6 +93,10 @@ jobs:
         run: node tests/league-rank.test.mjs
       - name: リーグの途中経過の自己確認（lib をわざと壊して赤になるか）
         run: node tests/league-rank.test.mjs --self-test
+      - name: リーグの次の対局と次の半荘の人（lib/league-round.mjs・A23）＝期待値（卓の席が正しくない時は前の半荘に戻らない・他の卓との重なり・ふつうの部屋は前の半荘・全部の卓で重なり・足りない卓・打ち途中の回）
+        run: node tests/league-round.test.mjs
+      - name: リーグの次の対局の自己確認（lib をわざと壊して赤になるか）
+        run: node tests/league-round.test.mjs --self-test
       - name: 自分の戦績（lib/my-stats.mjs・C2-2）＝期待値（pt／込み／点・4人と3人・出た部屋・出た後の印・全部読めた印）
         run: node tests/my-stats.test.mjs
       - name: 自分の戦績の自己確認（lib をわざと壊して赤になるか）
