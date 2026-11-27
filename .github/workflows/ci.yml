@@ -186,12 +186,7 @@ jobs:
       - name: 端末の控えを本物の SW で（webkit・初めての claim・ネット無しで開く・/r/・版上げの帯・押した1枚だけ読み直す・入れ替えた直後に進んでも1つの版・start_url は素の道）
         timeout-minutes: 10
         run: node tests/e2e/sw.e2e.mjs
-      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を21か所壊して全部赤になるか・作業木は触らない）
-        timeout-minutes: 30
-        shell: bash
-        run: |
-          node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
-          sh scripts/ci-yuka.sh sw-e2e-self.out 21
+      # 本物の SW の試験の自己確認は下の job sw-self（3組に割って並べる）
 
       # ★公開 repo に 実在の 字を 戻さない★（正本＝nomiya-app b3dfea3）
       #   一覧は repo に 置かない＝secret KINSHI_JI。無ければ「未測定」で 赤。指紋（変数 KINSHI_JI_FINGER）と 違えば 赤。
@@ -233,6 +228,35 @@ jobs:
         run: |
           sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
           sh scripts/ci-yuka.sh yuka-self.out 20
+
+  # ── 本物の SW の試験の自己確認（tests/e2e/sw.e2e.mjs --self-test）──────
+  #   ★test の job と分けて3組に割って並べる★（21か所を test の job で回したら 20 分の枠に当たった＝CI 45947921947・前の run の段 78秒→6分14秒で打ち切り）
+  #   壊しの名簿 BREAKS を i % 3 で割る。床は組ごと＝7（21÷3）。名簿を減らすとどれかの組が床を割って赤
+  sw-self:
+    runs-on: ubuntu-24.04  # test の job と同じ（playwright 1.60.0 の WebKit）
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    name: 本物の SW の自己確認 ${{ matrix.shard }}/3（webkit）
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 画面の試験の道具を入れる（playwright 1.60.0 と WebKit）
+        run: |
+          npm i --no-save playwright@1.60.0
+          npx playwright install --with-deps webkit
+      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を21か所壊して全部赤になるか・3組の1つ・作業木は触らない）
+        timeout-minutes: 25
+        shell: bash
+        env:
+          SW_SHARD: ${{ matrix.shard }}/3
+        run: |
+          node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
+          sh scripts/ci-yuka.sh sw-e2e-self.out 7
 
   # ── 画面の試験（gamen_*-e2e.cjs・本物の WebKit・自分の http で配る＝倉庫に触らない）──────
   #   ★本番前の WebKit の画面の数はここで取る★（手元は WebKit の残りが消せない＝回さない・11-26）

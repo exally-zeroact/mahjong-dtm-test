@@ -579,7 +579,11 @@ try {
       fast = true;
       let red = 0;
       // 手元で1つだけ見る時＝SW_BREAK=<名の一部>（CI は付けない＝全部）
-      const only = process.env.SW_BREAK ? BREAKS.filter(([nm]) => nm.includes(process.env.SW_BREAK)) : BREAKS;
+      // CI は SW_SHARD=k/n で壊しを n 組に割って並べて回す（21か所を1本で回すと test job の20分に当たった＝CI 45947921947）。k 組目＝i % n === k-1
+      const sh = /^(\d+)\/(\d+)$/.exec(process.env.SW_SHARD || '');
+      if (process.env.SW_SHARD && !(sh && +sh[1] >= 1 && +sh[1] <= +sh[2])) { process.exitCode = 1; throw new Error('SW_SHARD の形が違う：' + process.env.SW_SHARD); }
+      const all = sh ? BREAKS.filter((_, i) => i % +sh[2] === +sh[1] - 1) : BREAKS;
+      const only = process.env.SW_BREAK ? all.filter(([nm]) => nm.includes(process.env.SW_BREAK)) : all;
       for (const [name, file, fn] of only) {
         try {
           const r = await runFresh(() => { const d = copyRoot(); fs.writeFileSync(path.join(d, file), fn(rd(d, file))); rewrite(d); return d; });
