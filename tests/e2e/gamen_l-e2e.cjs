@@ -209,7 +209,7 @@ async function run(br, port) {
   DB.clear(); LOG.length = 0; for (const k of Object.keys(CTL)) delete CTL[k];
   const ctxs = [];
   const device = async (dev, uid) => {
-    const ctx = await br.newContext({ viewport: { width: 390, height: 844 } }); ctxs.push(ctx);
+    const ctx = await br.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Tokyo' }); ctxs.push(ctx);   // 作った日時は端末の時刻で出す＝CI（UTC）でも日本の端末と同じに
     await ctx.addInitScript(([dev, uid]) => { window.__dev = dev; window.__uid = uid; }, [dev, uid]);
     const pg = await ctx.newPage(); pg.setDefaultTimeout(SELF ? 6000 : 20000);
     pg.on('pageerror', (e) => bad.push('頁の例外 ' + dev + ': ' + String(e.message || e).slice(0, 200)));
@@ -282,6 +282,7 @@ async function run(br, port) {
       ok('L2 同じ名でも league_create を送る', opsOf('A2', 'league_create').length === 1 && opsOf('A2', 'league_create')[0].name === '金曜リーグ', opsOf('A2', 'league_create'));
       ok('L2 同じ名のリーグが2つになる', DB.get('ra').leagues.filter((l) => l.name === '金曜リーグ' && !l.voided).length === 2, DB.get('ra').leagues.map((l) => l.name));
       DB.get('ra').leagues.find((l) => l.league_id !== LID && l.name === '金曜リーグ').created_at = '2026-11-27T23:10:00+09:00';
+      await A.pg.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});   // 対局の頁の読みが走り中に移ると WebKit が打ち切りを頁の例外で出す（客の害は無い）
       await openList(A.pg);
       const subs = await A.pg.evaluate(() => [...document.querySelectorAll('.lg-row')].map((r) => r.querySelector('.row-name').textContent + '|' + r.querySelector('.row-sub').textContent));
       ok('L2 同じ名の2つは作った日時で分かる', subs.some((t) => t.startsWith('金曜リーグ|') && t.includes('作った 11/20 10:05')) && subs.some((t) => t.startsWith('金曜リーグ|') && t.includes('作った 11/27 23:10')), subs);
