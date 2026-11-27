@@ -2,7 +2,7 @@
 // node gamen_c4-e2e.cjs <作業木> [--self] [--chromium]
 // 形は gamen_b3b-e2e.cjs の写し：本物の taikyoku.html・index.html に、ログインと sb()／rpc() だけ差し替えた gamen-core を噛ませる（倉庫へは行かない）。
 // mj_read・mj_write は★この台の中の偽の倉庫★（node 側で lib/room-state.mjs の applyOps を当てる＝follow・鎖・split_same・正味の門は lib の答え＝倉庫と同じ答えの試験は tests の lib 試験）。
-// 区切りは偽の倉庫に table_rules を直に当てて作る（他の端末が［ルール］で変えた真似）か、画面の［次の回からこのルールにする］から。
+// 区切りは偽の倉庫に table_rules を直に当てて作る（他の端末が［ルール］で変えた真似）か、画面の［このルールにする］（A20 で「次の回から」を消した）から。
 // 壊し（--self）は配る中身の字を1か所ずつ書き換える（作業木は触らない）・壊しごとに効く試しだけ回す（ONLY）。
 const http = require('http'), fs = require('fs'), path = require('path'), { pathToFileURL } = require('url');
 const pw = require('playwright');
@@ -153,7 +153,7 @@ async function run(br, port) {
   // 回の pt（卓のルールで）＝lib の hanchanView（画面は同じ物を出す）
   const ptOf = (rules, cells, seat) => LIB.hanchanView(rules, { cells, lost: 0, ton_order: null, seats: M4 }).pt10[seat];
   try {
-    // C1 送る hanchan_start・extra_add（± のまとめ）に follow:true が付いている（区切っていない卓）
+    // C1 送る extra_add（± のまとめ）に follow:true・hanchan_start は A20 §1-1 から follow:false（押した時に見えていた卓）
     if (want('C1')) {
       mkRoom('a1', [...base(), H1]);
       const A = await device('A1', 'u1', seedOf('u1', 'a1'));
@@ -164,7 +164,7 @@ async function run(br, port) {
       await waitFor(() => opsOf('A1', 'hanchan_start').length >= 1, 8000);
       const xa = opsOf('A1', 'extra_add'), hs = opsOf('A1', 'hanchan_start');
       ok('C1 extra_add に follow:true', xa.length >= 1 && xa.every((o) => o.follow === true), xa);
-      ok('C1 hanchan_start に follow:true', hs.length === 1 && hs[0].follow === true, hs);
+      ok('C1 hanchan_start に follow:false（A20）', hs.length === 1 && hs[0].follow === false, hs);
       ok('C1 倉庫に入った（2回目・チップ +1）', DB.get('a1').st.hanchans.length === 2 && DB.get('a1').st.extras.some((x) => x.member_id === 'm1' && x.value === 1));
     }
 
@@ -199,7 +199,7 @@ async function run(br, port) {
       await enterNew(A.pg, ['35000', '30000', '20000', '15000']);
       await waitFor(() => DB.get('b1').st.hanchans.length === 3, 8000);
       const h3 = DB.get('b1').st.hanchans.find((h) => !['h1', 'h2'].includes(h.hanchan_id));
-      ok('C2 新しい回は鎖の最後の卓（follow:true）', h3 && h3.table_id === T2 && opsOf('A2', 'hanchan_start')[0].follow === true, h3);
+      ok('C2 新しい回は鎖の最後の卓（A20：follow:false で鎖の最後を指す）', h3 && h3.table_id === T2 && opsOf('A2', 'hanchan_start')[0].table_id === T2 && opsOf('A2', 'hanchan_start')[0].follow === false, h3);
       await waitFor(async () => (await rowNos(A.pg)).length === 3, 4000);
       ok('C2 新しい回は通し番号3', JSON.stringify(await rowNos(A.pg)) === JSON.stringify(['1回', '2回', '3回']), await rowNos(A.pg));
       // ホームの「n回目まで」も鎖で数える
@@ -275,15 +275,15 @@ async function run(br, port) {
       ok('C5 倉庫の答え bad at table_id', res.err === 'bad' && res.at === 'table_id', res);
     }
 
-    // C6 ［ルール］で変える（kan）＝人数は変えられない・table_rules が送られる・次の回は新しい卓・前の回は前のルールで数えたまま・帯
+    // C6 ［ルール］で変える（kan）＝A20 から人数も押せる（覚えを読んだ後）・table_rules が送られる・次の回は新しい卓・前の回は前のルールで数えたまま・帯
     if (want('C6')) {
       mkRoom('f1', [...base(), H1]);
       const A = await device('A6', 'u1', seedOf('u1', 'f1'));
       await openR(A.pg, 'f1'); await A.pg.waitForSelector(PM('m1')); await sleep(300);
       const pt0 = await cellBig(A.pg, 0, 0);
       await A.pg.click('#barR'); await A.pg.waitForSelector('#rRules');
-      ok('C6 kan には［次の回からこのルールにする］（主ボタン）', (await txt(A.pg, '#rRuleGo')) === '次の回からこのルールにする' && ((await A.pg.getAttribute('#rRuleGo', 'class')) || '').includes('btn-main'));
-      ok('C6 人数は変えられない（4人/3人の押しボタンが無い）', !(await has(A.pg, '#rRules [data-players]')));
+      ok('C6 kan には［このルールにする］（主ボタン）', (await txt(A.pg, '#rRuleGo')) === 'このルールにする' && ((await A.pg.getAttribute('#rRuleGo', 'class')) || '').includes('btn-main'));
+      ok('C6 人数を押せる（A20・覚えを読んだ後に 4人/3人の押しボタン）', (await waitFor(() => has(A.pg, '#rRules [data-players]'), 8000)) >= 0);
       await A.pg.click('#rRules [data-open="uma"]'); await A.pg.waitForSelector('[data-uma="0"]');
       for (const [i, v] of [[0, '30'], [1, '10'], [2, '−10'], [3, '−30']]) await kpPut(A.pg, '[data-uma="' + i + '"]', v);
       await A.pg.click('#rRuleGo');
@@ -320,7 +320,7 @@ async function run(br, port) {
       const A = await device('A8', 'u2', seedOf('u2', 'h8', ctlRoom('h8', { role: 'nyu', owner: undefined })));
       await openR(A.pg, 'h8'); await sleep(300);
       await A.pg.click('#barR'); await A.pg.waitForSelector('#rRules');
-      ok('C8 nyu には［次の回からこのルールにする］も打つ箱も無い', !(await has(A.pg, '#rRuleGo')) && !(await has(A.pg, '#rRules .box')) && !(await has(A.pg, '#rRules [data-open]')));
+      ok('C8 nyu には［このルールにする］も打つ箱も無い', !(await has(A.pg, '#rRuleGo')) && !(await has(A.pg, '#rRules .box')) && !(await has(A.pg, '#rRules [data-open]')));
     }
   } catch (e) { fail++; bad.push('止まった: ' + String(e.message || e).split('\n').slice(0, 6).join(' | ')); }
   for (const c of ctxs) await c.close().catch(() => {});
@@ -329,7 +329,7 @@ async function run(br, port) {
 
 const G = 'js/gamen-room.mjs', L = 'lib/room-state.mjs';
 const MUT = [
-  { file: G, from: "cells: e.num, lost: e.lostNum, follow: true, seen_n:", to: 'cells: e.num, lost: e.lostNum, seen_n:', name: 'hanchan_start に follow を付けない（C1・C2）', only: 'C1,C2' },
+  { file: G, from: "cells: e.num, lost: e.lostNum, follow: false, seen_n:", to: 'cells: e.num, lost: e.lostNum, follow: true, seen_n:', name: 'hanchan_start を follow:true のまま（C1・C2）', only: 'C1,C2' },
   { file: G, from: "ops.push({ op: 'extra_add', table_id: tid, member_id: mid, kind, add, follow: true }); }", to: "ops.push({ op: 'extra_add', table_id: tid, member_id: mid, kind, add }); }", name: '± のまとめに follow を付けない（C1）', only: 'C1' },
   { file: L, from: "rows.push({ ...r, no: rows.length + 1, tno: r.no, table_id: p.table_id, late: at > cut });", to: 'rows.push({ ...r, tno: r.no, table_id: p.table_id, late: at > cut });', name: '通し番号をやめる（卓の中の no）（C2）', only: 'C2' },
   { file: G, from: "const v = table ? chainView(st, table.table_id) :", to: 'const v = table ? tableView(st, table.table_id) :', name: '対局の頁を鎖でなく自分の卓だけ（C2）', only: 'C2' },
@@ -340,9 +340,9 @@ const MUT = [
   { file: G, from: "    if (was && table && table.table_id !== was && tableChain(st, table.table_id).includes(was)) ruleNote", to: '    if (false) ruleNote', name: '区切られた時に帯を出さない（C4）', only: 'C4' },
   { file: G, from: "      else if (hi.why === 'bad' && outbox[0].held.at === 'table_id' && outbox[0].ops.some((o) => o.op === 'extra_add')) h +=", to: '      else if (false) h +=', name: 'bad at table_id の帯を出さない（C5）', only: 'C5' },
   { file: G, from: "    return needOf(WHO.table_rules, room.role) === null;", to: '    return true;', name: 'nyu にも打てる形を出す（C8）', only: 'C8' },
-  { file: G, from: "{ rules: draft, readOnly: !edit, lockPlayers: true }", to: '{ rules: draft, readOnly: !edit }', name: '人数を変えられる（C6）', only: 'C6' },
+  { file: G, from: "{ rules: draft, readOnly: !edit, lockPlayers: !memOk,", to: '{ rules: draft, readOnly: !edit, lockPlayers: true,', name: '人数を押せない（C6）', only: 'C6' },
   { file: G, from: "  const ruleErrText = (r) => (r && r.err === 'bad' && r.at === 'extras' ?", to: '  const ruleErrText = (r) => (false ?', name: 'bad at extras の帯の字を出さない（C7）', only: 'C7' },
-  { file: G, from: "const R1 = (entry && entry.R) || R;", to: 'const R1 = R;', name: '前の回を鎖の最後の卓のルールで数える（C2）', only: 'C2' },
+  { file: G, from: "const R1 = (t && t.rules) || (entry && entry.R) || R;", to: 'const R1 = R;', name: '前の回を鎖の最後の卓のルールで数える（C2）', only: 'C2' },
   { file: L, from: "const ch = tableChain(st, head.table_id), inChain = new Set(ch);", to: "const ch = [head.table_id], inChain = new Set(ch);", name: 'ホームを鎖で数えない（C2）', only: 'C2' },
   { file: G, from: "    ruleNote = table.table_id !== was ? ruleChangedText(chainView(st, table.table_id)) : null;", to: '    ruleNote = null;', name: '［ルール］で変えた後に帯を出さない（C6）', only: 'C6' },
 ];

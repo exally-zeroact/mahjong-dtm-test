@@ -300,6 +300,7 @@ jobs:
           - { name: c23, script: tests/e2e/gamen_c23-e2e.cjs, yuka: 17 }
           - { name: l, script: tests/e2e/gamen_l-e2e.cjs, yuka: 20 }
           - { name: p1g, script: tests/e2e/gamen_p1g-e2e.cjs, yuka: 5 }
+          - { name: a20, script: tests/e2e/gamen_a20-e2e.cjs, yuka: 11 }
     name: 画面 ${{ matrix.name }}（webkit）
     steps:
       - uses: actions/checkout@v4

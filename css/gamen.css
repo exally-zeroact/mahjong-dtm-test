@@ -76,6 +76,7 @@
 .r-void > * { opacity: .45; text-decoration: line-through; }
 .r-na { color: var(--c-ji-usui); }
 .r-why td { padding: 6px 8px; font-size: 13px; text-align: left; color: var(--c-aka); background: var(--c-aka-usui); }
+.r-late td { padding: 2px 8px 6px; font-size: 12px; text-align: left; color: var(--c-ji-usui); } /* A20 §1-1 ルールを変える前に保存した回 */
 .r-add { min-height: 56px; font-size: 18px; border-radius: 12px; }
 /* 人ごとの窓 2×2 */
 .r-mado { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }

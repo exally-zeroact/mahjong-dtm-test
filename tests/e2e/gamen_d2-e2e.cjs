@@ -494,7 +494,7 @@ const MUT = [
   { file: G, from: "      if (cur && cur.session_id === sid && !cur.voided) { setTable(cur); return; }\n", to: '', name: '読み直しで選んだ卓を残さない（T2・T8）', only: 'T2,T8' },
   { file: G, from: "table_id: e.tid, seats: e.seats,", to: 'table_id: table.table_id, seats: e.seats,', name: '保存を開いた時の卓でなく今の卓へ（T8）', only: 'T8' },
   { file: G, from: "ops.push({ op: 'extra_add', table_id: tid, member_id: mid,", to: "ops.push({ op: 'extra_add', table_id: table.table_id, member_id: mid,", name: '± を流す時に今の卓へ（T3）', only: 'T3' },
-  { file: G, from: "      if (!nonL(t) && !st.hanchans.some(", to: '      if (!st.hanchans.some(', name: 'L でない人の1回目にも table_seats（T4）', only: 'T4' },
+  { file: G, from: "      if (!nonL(t) && (none(ch) ||", to: '      if ((none(ch) ||', name: 'L でない人の1回目にも table_seats（T4）', only: 'T4' },
   { file: G, from: "picking = pickOf({ seats: preSeats() || [], only: !nonL(table) });", to: 'picking = pickOf({ seats: preSeats() || [], only: true });', name: 'L でない人の名前の列を「決める」だけにする（T4）', only: 'T4' },
   { file: G, from: "    const canAdd = isL() && !room.closed", to: '    const canAdd = !room.closed', name: 'L でない人にも［＋卓］（T6）', only: 'T6' },
   { file: G, from: "(isL() ? (outOfTerm() ? 'term' : null) : 'wait')", to: "(true ? (outOfTerm() ? 'term' : null) : 'wait')", name: 'L でない入も日を作る（T6）', only: 'T6' },

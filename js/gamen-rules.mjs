@@ -62,7 +62,8 @@ export function umaText(uma) {
 }
 
 // memory＝A14g（tataki/a14g_sadame_v1_1.md）新しい対局だけ：{3,4}＝rules-memory.mjs の fromMemory の返し（覚えの形／null＝無し／'bad'＝崩れ）。
-//   人数を押した時、覚えが在ればそれを全部出す・'bad' は既定（rate 100）＋onBad(n)・null は今の動き（4鍵だけ既定）。途中の変え・リーグは渡さない
+//   人数を押した時、覚えが在ればそれを全部出す・'bad' は既定（rate 100）＋onBad(n)・null は今の動き（4鍵だけ既定）。リーグは渡さない
+//   途中の変え（midGame・A20 §1-7）も渡す＝その人数の覚えから PLAYERS_KEYS だけ写す（swapPlayers）。full()＝画面に出ない鍵も入れた今の rules の写し（aka・kita など＝read() に無い鍵を前の人数のまま送らない）
 export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers, memory, onBad, midGame, sp }) {
   const LB = { sec: '人数とレート', players: '人数', ...(labels || {}) };
   const r = JSON.parse(JSON.stringify(rules || defaultRules(4)));
@@ -178,5 +179,6 @@ export function mountRules(el, { rules, readOnly, lockPlayers, labels, onPlayers
       for (const d of DETAIL) out[d.key] = r[d.key];
       return out;
     },
+    full() { readBoxes(); return JSON.parse(JSON.stringify(r)); },
   };
 }

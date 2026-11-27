@@ -38,6 +38,7 @@ import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した
 import { nameKey } from '../lib/name-key.mjs';
 import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
+import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
 import { rulesOk } from '../lib/rules.mjs';
 import { mulS } from '../lib/safe-int.mjs'; // A18 §2：画面で掛けない（safe の外は null）
 import { wireKeypad } from './kenban.mjs'; // A17：点の鍵盤も A8 の部品（−→1→0 で −10・入っている数は最初の数で置き換え・他の釦を押しても下の空きを残す）
@@ -144,14 +145,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let dropAllAsk = false; // P6g §3：［全部捨てる］の確かめの段
   const HELD_GATE = '止まっている点を先に片付けてください'; // P6g §4 書きの門の字
   let ruleNote = null;    // C4 §3：開いていた卓が区切られて鎖の最後へ移った時の帯（次に書くまで出す）
-  let ruleMsg = null;     // C4 §2：［次の回からこのルールにする］が通らなかった時の帯（ルールの頁）
+  let ruleMsg = null;     // C4 §2：［このルールにする］（A20 で「次の回から」を消した）が通らなかった時の帯（ルールの頁）
   let ruleCtl = null;     // ルールの頁の打てる形（読み直しで描き直す時に打ちかけを残す）
+  let ruleMem = null, ruleMemSeq = 0, ruleMemo = false; // A20 §1-7：覚えの読み（null＝まだ・'loading'・{memory}）・古い返しを捨てる番号・「読めない」帯を出す印
   let meBusy = false, meOp = null, meMsg = null, meRead = false; // C2-0（c20_sadame v2.1）［これは私］の直送（返りが切れた時は同じ組だけ同じ op_id）
   let ruleBusy = false, ruleOp = null, pendingRule = null; // table_rules の直送（返りが切れた時は同じ op_id）・並びを送り切ってから送る続き
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
   let fixing = null;      // C4 §3b：精算の内訳で［直す］を開いている前の卓の枚 { t, m, kind }
-  const toRoom = () => { endAsk = false; page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; render(); };
+  const toRoom = () => { endAsk = false; page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; ruleMem = null; ruleMemSeq++; ruleMemo = false; render(); };
 
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
@@ -475,6 +477,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (dead) return;
     const ln = loadNote;
     const k = takeRead(res);
+    if (k === 'ok') entryFollow(); // A20 §1-2：入力中の読み直し＝鎖の最後の人数・ルールに付いて行く
     if (k === 'ok' || ln !== loadNote) rerender(); else refreshTag(); // P5：「読み込み中」の帯が立った・消えた時も描き直す
     if (meRead) { meRead = false; if (page === 'me') renderMe(); } // C2-0：taken・linked・dup の後の読み直しで名前の頁を描き直す（打ちかけの名前は残す）
     kick();
@@ -817,6 +820,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         h += '<td>' + big + '<small>' + small + '</small></td>';
       }
       h += '</tr>';
+      if (r.late) h += '<tr class="r-late"><td colspan="' + (ppl.length + 1) + '">ルールを変える前に保存した回</td></tr>'; // A20 §1-1
       if (!r.ok && !r.voided) h += '<tr class="r-why"><td colspan="' + (ppl.length + 1) + '">' + esc(whyText(r)) + '</td></tr>';
     }
     h += '</tbody><tfoot><tr><th>計</th>' + ppl.map((p) => '<td><b class="' + sign(v.total10[p.member_id]) + '">' + fmtPt(v.total10[p.member_id]) + '</b></td>').join('') + '</tr></tfoot></table></div>';
@@ -885,7 +889,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     return '<p class="r-check ok">✓ ' + okParts.join('・') + '</p>';
   }
 
-  // C4 §2：次の回から変えられる時＝部屋を作れる立場（WHO table_rules＝kan）・終えていない部屋・卓が在り取り消していない・リーグの日でない
+  // C4 §2・A20：ルールを変えられる時（変えた時点から＝A20 §1-1）＝部屋を作れる立場（WHO table_rules＝kan）・終えていない部屋・卓が在り取り消していない・リーグの日でない
   function canRule() {
     if (room.closed || !table || table.voided || stopped) return false;
     const s = st.sessions.find((x) => x.session_id === table.session_id);
@@ -898,16 +902,20 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     shownTag = tagKey();
     const edit = canRule();
     const cur = { ...R, rate: table ? tableView(st, table.table_id).rate : room.rules.rate ?? null };
-    const draft = edit && ruleCtl ? { ...cur, ...ruleCtl.read() } : cur; // 読み直しで描き直しても打ちかけを残す
-    el.innerHTML = (ruleMsg ? '<div class="r-red" id="rRuleMsg"><b>' + esc(ruleMsg) + '</b></div>' : '') + '<div id="rRules"></div>' +
-      (edit ? '<p class="err" id="rRuleErr"></p><button class="btn btn-main" id="rRuleGo"' + (ruleBusy || closingOn() ? ' disabled' : '') + ' aria-busy="' + (ruleBusy ? 'true' : 'false') + '">次の回からこのルールにする</button>' : '') +
+    if (edit && ruleMem === null) loadRuleMem(); // A20 §1-7：人数を押す前に覚えを読む（読み中は人数を押せない）
+    const memOk = edit && ruleMem && ruleMem !== 'loading';
+    const draft = edit && ruleCtl ? { ...cur, ...ruleCtl.full() } : cur; // 読み直しで描き直しても打ちかけを残す（full＝人数で替えた aka・kita も）
+    el.innerHTML = (ruleMsg ? '<div class="r-red" id="rRuleMsg"><b>' + esc(ruleMsg) + '</b></div>' : '') +
+      (edit ? '<div class="obi obi-warn" id="rMemo"' + (ruleMemo ? '' : ' hidden') + '>前のルールが読めないので、いつものルールで出しています。</div>' : '') + '<div id="rRules"></div>' +
+      (edit ? '<p class="err" id="rRuleErr"></p><button class="btn btn-main" id="rRuleGo"' + (ruleBusy || closingOn() ? ' disabled' : '') + ' aria-busy="' + (ruleBusy ? 'true' : 'false') + '">このルールにする</button>' : '') +
       (showShare ? '<button class="btn btn-line" id="rShare">部屋名と URL</button>' : '') + close + delHtml(); // A27 §2：［部屋を消す］は［部屋を終える］の下
     el.insertAdjacentHTML('beforeend', '<div class="kp-sp" id="rKpSp" hidden></div>'); // KPSP：鍵盤の下の空きは釦（［部屋を消す］まで）より下
-    ruleCtl = mountRules(el.querySelector('#rRules'), Object.assign({ rules: draft, readOnly: !edit, lockPlayers: true }, { sp: el.querySelector('#rKpSp') }));
+    const onBad = () => { ruleMemo = true; const b = el.querySelector('#rMemo'); if (b) b.hidden = false; }; // A14g と同じ帯（黙らない）
+    ruleCtl = mountRules(el.querySelector('#rRules'), { rules: draft, readOnly: !edit, lockPlayers: !memOk, midGame: true, memory: memOk ? ruleMem.memory : undefined, onBad, sp: el.querySelector('#rKpSp') });
     if (!edit) ruleCtl = null;
     if (showShare) el.querySelector('#rShare').onclick = showShare;
     if (edit) el.querySelector('#rRuleGo').onclick = () => {
-      const rr = { ...R, ...ruleCtl.read(), players: R.players };
+      const rr = { ...R, ...ruleCtl.full(), ...ruleCtl.read() }; // A20 §1-7：人数も送る（full＝画面に出ない鍵も人数で替えた値）
       const err = (t) => { el.querySelector('#rRuleErr').textContent = t; };
       if (rr.yakitori === true && !(Number.isInteger(rr.yakitori_pt) && rr.yakitori_pt >= 1 && rr.yakitori_pt <= 999)) return err('やきとり1枚の pt は 1〜999 です（整数）。');
       const chk = rulesOk(rr);
@@ -916,6 +924,19 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       sendRules(chk.rules);
     };
     wireClose(); wireDel();
+  }
+  // A20 §1-7：覚え（mj_my_rules）を読む＝gamen-taikyoku と同じ（5秒で切る・読めない／崩れは 'bad'＝押した時に既定＋帯）
+  async function loadRuleMem() {
+    ruleMem = 'loading';
+    const seq = ++ruleMemSeq;
+    let timer, res;
+    try { res = await Promise.race([rpc('mj_my_rules', {}), new Promise((ok) => { timer = setTimeout(() => ok({ ok: false, err: 'timeout' }), 5000); })]); }
+    catch (e) { res = { ok: false, err: 'net' }; }
+    clearTimeout(timer);
+    if (dead || seq !== ruleMemSeq) return; // 頁を離れた後の古い返し
+    const s = pickStart(res);
+    ruleMem = { memory: s.unread ? { 3: 'bad', 4: 'bad' } : { 3: s.bad.includes(3) ? 'bad' : s.memory[3], 4: s.bad.includes(4) ? 'bad' : s.memory[4] } };
+    if (page === 'rules') render();
   }
   /* C4 §2 table_rules＝並びに積まず直に送る（direct）。送る前に ± のまとめと並びを空にする（startShared と同じ・送り切ってから続き）。
    * ok＝写しに当てて鎖の最後へ移り帯／同じ rules＝何も変わらない／bad at extras＝帯だけ（変えない）／conflict at next＝読み直して鎖の最後で開き直す */
@@ -964,7 +985,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const was = table.table_id;
     st = next; save(KEYR, st);
     setTable(st.tables.find((t) => t.table_id === was));
-    ruleCtl = null; ruleMsg = null; page = 'room';
+    ruleCtl = null; ruleMsg = null; page = 'room'; ruleMem = null; ruleMemSeq++; ruleMemo = false; // 送った人数は倉庫が覚えた＝次に開く時に読み直す
     ruleNote = table.table_id !== was ? ruleChangedText(chainView(st, table.table_id)) : null; // 同じ rules＝区切らない＝何も変わらない
     render();
   }
@@ -1213,14 +1234,16 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const n = p.n; // D2 止め2：開いた時の卓の人数（読み直しで今の卓が替わっても）
     const act = st.members.filter((m) => m.active);
     const hist = histNames();
-    let h = meHtml() + '<div id="pBase">';
+    let h = meHtml() + (p.reN ? '<div class="r-red" id="pReN"><b>今の回から' + n + '人打ちです。打つ人を選び直してください（打った点は残っています）。</b></div>' : '') + '<div id="pBase">';
     if (act.length) h += '<p class="sec">この部屋の人（名簿）・この半荘の' + n + '人を押す　<b class="kon">' + p.seats.length + '／' + n + '</b></p><div class="chips">' + act.map((m) => '<button data-pick="' + esc(m.member_id) + '" aria-pressed="' + p.seats.includes(m.member_id) + '">' + esc(m.name) + (m.me === true ? '<small class="r-me-tag">あなた</small>' : '') + '</button>').join('') + '</div>';
     if (hist.length) h += '<p class="sec">この端末で前に使った名前（ほかの部屋）</p><div class="chips">' + hist.map((nm) => '<button data-hist="' + esc(nm) + '">' + esc(nm) + '</button>').join('') + '</div>';
     if (act.length || hist.length) h += '<p class="r-hint">押すだけでこの半荘に入る。ほかの部屋の名前を押すと、この部屋の名簿にも足される。</p>';
     h += '</div><p class="sec">新しい人</p><label class="r-in"><span>名前</span><input id="pNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
     h += '<div id="pCand"></div><p class="err" id="pErr"></p>';
+    // A20 §3：外した人の打った点は保存するまで見せ続ける（押し直せば戻る）
+    const out = Object.keys(p.carry || {}).filter((m) => !p.seats.includes(m));
     h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で' + (p.only ? '決める' : '始める') + '</button>' +
-      '<p class="r-hint">席（東南西北）は選ばない。</p></div>';
+      '<p class="r-hint">席（東南西北）は選ばない。</p>' + (out.length ? '<p class="r-hint" id="pOut">外した人：' + out.map((m) => esc(nameOf(m)) + ' ' + esc(p.carry[m])).join('・') + '</p>' : '') + '</div>';
     el.innerHTML = h;
     wirePick();
   }
@@ -1298,12 +1321,40 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     } else {
       const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
+      if (seats.length !== n) { picking = pickOf({ seats, carry: {}, tobiM: [], reN: true }); page = 'pick'; render(); return; } // A20 §1-2・§3：前の回と人数が違う＝打つ人を選び直す
       entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', marks: [], tobiR: [] }; // D2 止め2：保存は開いた時の卓へ
     }
     page = 'edit'; render();
   }
   // その回の卓のルール（C4 §5a：前の回は前の卓のルールで数える・新しい回は鎖の最後の卓）
-  const eRules = () => { const R1 = (entry && entry.R) || R; return { R: R1, n: R1.players, kieru: R1.kyotaku_end === 'kieru' }; };
+  // A20 §4・§9 任意1：新しい回は描く時・押す時に毎回、結んだ卓の今の鎖の最後を引く（entry.tid・no も付いて行く）。直す回は今まで通りその回の卓
+  function eFollow() {
+    const e = entry;
+    if (!e || e.hanchan_id) return null;
+    const t = tOf(e.tid);
+    if (t) { e.tid = t.table_id; e.no = chainView(st, t.table_id).nextNo; }
+    return t;
+  }
+  const eRules = () => { const t = eFollow(); const R1 = (t && t.rules) || (entry && entry.R) || R; return { R: R1, n: R1.players, kieru: R1.kyotaku_end === 'kieru' }; };
+  const needReN = () => { const t = eFollow(); return !!(t && t.rules.players !== entry.seats.length); };
+  // A20 §3：人数が替わった＝打つ人を選び直す（点は人ごとに残す・［飛び賞］の印も人に付ける）。呼ぶ前に readCells（edit の頁の時）
+  function reNPick() {
+    const e = entry, t = eFollow();
+    const carry = { ...(e.carry || {}) };
+    e.seats.forEach((m, i) => { if (String(e.cells[i]).trim() !== '') carry[m] = e.cells[i]; else delete carry[m]; });
+    picking = { seats: e.seats.slice(), tid: t.table_id, n: t.rules.players, carry, tobiM: e.tobiR.map((i) => e.seats[i]), reN: true };
+    entry = null; page = 'pick'; render();
+  }
+  // A20 §1-2：入力中の読み直し（sync の後）＝人数が違えば選び直し・同じ人数でルールが替わったら見えている数えを替える（送る卓と揃える）
+  //   箱の形（［飛び賞］釦・［消えた供託］の欄）が同じなら描き直さず合計と［上家］の字だけ（打っている途中で鍵盤を閉じない）
+  const eShape = () => String(tobiBtnOn()) + String(eRules().kieru);
+  function entryFollow() {
+    if (page !== 'edit' || !entry || entry.hanchan_id) return;
+    if (needReN()) { readCells(); reNPick(); return; }
+    if (entry.shownR === cn(eRules().R)) return;
+    if (eShape() !== entry.shownK) { readCells(); render(); return; }
+    entry.shownR = cn(eRules().R); liveUpdate();
+  }
   function liveCalc() {
     const e = entry;
     const { R, n, kieru } = eRules();
@@ -1329,7 +1380,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const sugText = (c, i) => (c.sug === i ? boxNum(c.rest) : '');
   function renderEdit() {
     const e = entry;
+    if (needReN()) return reNPick(); // A20 §1-2
     const { n, kieru } = eRules();
+    e.shownR = cn(eRules().R); e.shownK = eShape();
     bar({ back: '対局', onBack: toRoom, title: e.no + '回目の点を' + (e.hanchan_id ? '直す' : '入れる') });
     let h = '';
     {
@@ -1380,6 +1433,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const err = (t) => { el.querySelector('#eErr').textContent = t; };
     {
       readCells();
+      if (needReN()) return reNPick(); // A20 §1-2：［保存］を押した時も人数を見る（古い長さのまま送らない）
       const cells = e.cells.map(toInt);
       // E2 §1（11-26 司さん＝代表1人でも各自でも）：1つでも入っていれば入れる（空いた席は null）・全部空は止める
       const blank = e.cells.map((v) => String(v).trim() === '');
@@ -1407,7 +1461,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const e = entry;
     let ops;
     if (!e.hanchan_id) {
-      const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: true, seen_n: seenN(e.tid) }; // E2 §5 seen_n＝この端末が持つ鎖の回の数（取り消しも数える）・C4 §3 U1：新しい版はいつも follow:true（区切られた卓なら倉庫が鎖の最後へ）
+      eFollow(); // A20 §1-1：押した時に見えていた卓＝この端末の鎖の最後
+      const op = { op: 'hanchan_start', hanchan_id: uuid(), table_id: e.tid, seats: e.seats, cells: e.num, lost: e.lostNum, follow: false, seen_n: seenN(e.tid) }; // E2 §5 seen_n＝この端末が持つ鎖の回の数（取り消しも数える）・A20 §1-1：follow:false＝倉庫に届いた時に区切られていてもその卓に入る（押した時のルール）
       if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); }
       if (tobiBtnOn() && e.tobiR.length) op.tobi_to = { r: tobiRSorted(e.tobiR) }; // E1 §6 // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
       ops = [op];
@@ -1704,16 +1759,20 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     q('#pGo').onclick = () => {
       const seats = picking.seats.slice(), only = picking.only, t = tOf(picking.tid);
       if (!t) { el.querySelector('#pErr').textContent = 'この卓は無くなりました。戻って卓を選んでください。'; return; }
+      if (t.rules.players !== picking.n) { picking.tid = t.table_id; picking.n = t.rules.players; picking.reN = true; if (!picking.carry) picking.carry = {}; if (!picking.tobiM) picking.tobiM = []; renderPick(); return; } // A20 §1-2：選んでいる間に人数が替わった
       const ch = tableChain(st, t.table_id);
       // 取り消していない半荘が0本の卓だけ、卓の席を倉庫へ（op table_seats・only でも同じ）。半荘が在る時は送らない（entry.seats＝半荘の席）
+      // A20 §4：鎖に回が在っても、鎖の最後の卓に自分の回が無く席が違えば送る（3→4 で4人目のチップ・lib と倉庫は通す）
       // D2 §3 止め1：リーグの日で L でない人は送らない（table_seats は L だけ＝送ると held）
-      if (!nonL(t) && !st.hanchans.some((h) => ch.includes(h.table_id) && !h.voided)) {
+      const none = (ids) => !st.hanchans.some((h) => ids.includes(h.table_id) && !h.voided);
+      if (!nonL(t) && (none(ch) || (none([t.table_id]) && cn(t.seats || []) !== cn(seats)))) {
         const r = commit([{ op: 'table_seats', table_id: t.table_id, seats }]);
         if (!r.ok) { el.querySelector('#pErr').textContent = r.msg || '卓の席を残せませんでした。もう一度押してください。'; return; }
       }
+      const carry = picking.carry || {}, tobiM = picking.tobiM || [];
       picking = null;
       if (only) { toRoom(); return; }
-      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: new Array(t.rules.players).fill(''), lost: '0', marks: [], tobiR: [] }; // E1：［飛び賞］の印（1200 と同じ形・無いと描く所の e.tobiR.includes で落ちる＝CI 45891321404 d2 B4）
+      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: seats.map((m) => (Object.prototype.hasOwnProperty.call(carry, m) ? carry[m] : '')), lost: '0', marks: [], tobiR: seats.map((m, i) => (tobiM.includes(m) ? i : -1)).filter((i) => i >= 0), carry }; // A20 §3：点は人ごとに戻す（外した人の点は carry に残る＝送らない）・E1：［飛び賞］の印（1200 と同じ形・無いと描く所の e.tobiR.includes で落ちる＝CI 45891321404 d2 B4）
       page = 'edit'; render();
     };
   }
@@ -1742,7 +1801,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (q('#eLost')) q('#eLost').addEventListener('input', liveUpdate);
     // 数字鍵盤（A17＝kenban.mjs の wireKeypad）：箱に入った時の最初の数の鍵は中身を置き換える（勧めた残りも打ち直せる）・入ってすぐ − 1 0 は −10
     if (q('#eKp')) wireKeypad(el, { boxes: () => [...el.querySelectorAll('[data-c]'), ...(q('#eLost') ? [q('#eLost')] : [])], spec: () => KP_SPEC, onChange: liveUpdate });
-    if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); const t = tOf(entry.tid); picking = { seats: entry.seats.slice(), tid: entry.tid, n: t ? t.rules.players : n }; entry = null; page = 'pick'; render(); };
+    if (q('#ePeople')) q('#ePeople').onclick = () => { readCells(); if (!tOf(entry.tid)) return; reNPick(); picking.reN = false; render(); }; // A20 §3：人を替えても打った点は人ごとに残す
     if (q('#eVoid')) q('#eVoid').onclick = () => { const r = commit([{ op: entry.voided ? 'hanchan_unvoid' : 'hanchan_void', hanchan_id: entry.hanchan_id }]); if (r && r.msg) { el.querySelector('#eErr').textContent = r.msg; return; } toRoom(); }; // P6g §4：門で止めたら部屋へ戻らず字
     // E1［飛び賞］：押せばもらう印・もう1回で外す（何人でも）。鍵盤は閉じない（［上家］と同じ）
     for (const b of el.querySelectorAll('[data-tobi]')) {
