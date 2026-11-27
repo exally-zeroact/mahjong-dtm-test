@@ -155,11 +155,11 @@ jobs:
       # ── 端末に控える（sw.js・js/sw-reg.js・scripts/sw-assets.mjs）
       - name: 端末の控え（sw.js）＝名簿の道と sha が今の中身と同じ・VER と version.json・全画面に sw-reg の1行・/v/ と素の道・install の失敗で控えを残さない・続きの置き場（mj-part→mj-conf→使い捨て）・締め切り・取り直しは1本・supa-config の3秒
         run: node tests/sw.test.mjs
-      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json を39か所壊して全部赤になるか）
+      - name: 端末の控えの見張りの自己確認（sw.js・sw-reg.js・html・名簿の中身・version.json・MJ_STATE の答えを41か所壊して全部赤になるか）
         shell: bash
         run: |
           node tests/sw.test.mjs --self-test | tee sw-self.out
-          sh scripts/ci-yuka.sh sw-self.out 39
+          sh scripts/ci-yuka.sh sw-self.out 41
       - name: 帯「新しい版があります」の取りこぼし（sw-reg.js・updatefound が来ないまま waiting が出来る形・update は1本ずつ・mj-part を作る）
         run: node tests/sw-reg.test.mjs
       - name: 帯の取りこぼしの見張りの自己確認（sw-reg.js を8か所壊して全部赤になるか）
@@ -231,7 +231,7 @@ jobs:
 
   # ── 本物の SW の試験の自己確認（tests/e2e/sw.e2e.mjs --self-test）──────
   #   ★test の job と分けて3組に割って並べる★（21か所を test の job で回したら 20 分の枠に当たった＝CI 45947921947・前の run の段 78秒→6分14秒で打ち切り）
-  #   壊しの名簿 BREAKS を i % 3 で割る。床は組ごと＝7（21÷3）。名簿を減らすとどれかの組が床を割って赤
+  #   壊しの名簿 BREAKS を i % 3 で割る。床は組ごと＝9（27÷3・11-27 v1.4.1 で 21→27）。名簿を減らすとどれかの組が床を割って赤
   sw-self:
     runs-on: ubuntu-24.04  # test の job と同じ（playwright 1.60.0 の WebKit）
     timeout-minutes: 30
@@ -249,14 +249,14 @@ jobs:
         run: |
           npm i --no-save playwright@1.60.0
           npx playwright install --with-deps webkit
-      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を21か所壊して全部赤になるか・3組の1つ・作業木は触らない）
+      - name: 本物の SW の試験の自己確認（写しの sw.js・sw-reg.js を27か所壊して全部赤になるか・3組の1つ・作業木は触らない）
         timeout-minutes: 25
         shell: bash
         env:
           SW_SHARD: ${{ matrix.shard }}/3
         run: |
           node tests/e2e/sw.e2e.mjs --self-test | tee sw-e2e-self.out
-          sh scripts/ci-yuka.sh sw-e2e-self.out 7
+          sh scripts/ci-yuka.sh sw-e2e-self.out 9
 
   # ── 画面の試験（gamen_*-e2e.cjs・本物の WebKit・自分の http で配る＝倉庫に触らない）──────
   #   ★本番前の WebKit の画面の数はここで取る★（手元は WebKit の残りが消せない＝回さない・11-26）

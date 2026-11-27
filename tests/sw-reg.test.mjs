@@ -150,8 +150,8 @@ const BREAKS = [
   ['押した時の update の後に waiting を見ない', rep('upd(reg).then(check, function () {});', 'upd(reg).catch(function () {});')],
   ['update を並べてよい', rep('    if (inflight) return inflight;\n', '')],
   ['画面が mj-part を作らない', rep("caches.open('mj-part')", 'Promise.resolve()')],
-  ['帯の判じで controller を見ない', rep('reg.waiting !== reg.active && sw.controller && !swapping', 'reg.waiting !== reg.active && !swapping')],
-  ['帯の判じで active と同じかを見ない', rep('reg.waiting && reg.active && reg.waiting !== reg.active && sw.controller', 'reg.waiting && reg.active && sw.controller')],
+  ['帯の判じで controller を見ない', rep('wt !== reg.active && sw.controller && !swapping', 'wt !== reg.active && !swapping')],
+  ['帯の判じで active と同じかを見ない', rep('wt && reg.active && wt !== reg.active && sw.controller', 'wt && reg.active && sw.controller')],
 ];
 
 if (process.argv.includes('--self-test')) {

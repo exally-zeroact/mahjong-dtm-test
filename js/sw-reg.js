@@ -6,6 +6,8 @@
  *   それ以外は帯「別の画面で新しい版に入れ替えました［読み直す］」（入力の途中で勝手に読み直さない）。
  * ・版の知らせ：控えから開いた画面（meta mj-ver が在る）だけ、見えた時に /version.json を no-store で取り、違えば update→waiting で帯。
  * ・update は1本ずつ（upd）＝見えた時と版の知らせが2本並べると install が2本走る（swupd v1.3.1 §3・11-27 測った）。時間の区切りは付けない（止まった update の後ろには次の update も並ぶ＝画面からは解けない・F10）。
+ * ・固まった installing（swupd_sadame v1.4.1）：WebKit は install が済んだ直後に開いた画面に installing のまま動かない登録を渡す（statechange も来ない・11-27 CI 測った）。
+ *   installing を見たら SW 本人に MJ_STATE で訊き、済んでいれば待っている版として帯を出す（frozen）。答えが2回返らなければ update を打つ。
  * ・続きの置き場 mj-part を画面が作る（作るだけ・消さない）＝install の外で作った控えは落ちた install の書き込みを残す（v1.3.1 §1 F4・F9）。
  */
 (function () {
@@ -18,10 +20,25 @@
   // 続きの置き場（install は作らない）。試験の knob MJ_NO_PART で外す（u6・u8b・u12）
   if (!window.MJ_NO_PART && window.caches) { try { caches.open('mj-part').catch(function () {}); } catch (_) {} }
   var inflight = null, tracked = null;
+  var frozen = null, probeTimer = null, nullRun = 0, latestVer = null;
   // update は1本ずつ（走っている間はその約束を返す）。もう取り込み中（installing）なら update を打たずそれを追う（札を出す＝開いた時にもう走っていた取り込みも・e2e u5）
   function upd(reg) {
     if (inflight) return inflight;
-    if (reg.installing) { track(reg, reg.installing); return Promise.resolve(); }
+    if (reg.installing) {
+      var w = reg.installing;
+      track(reg, w);
+      return probe(w).then(function (r) {
+        if (r === true) { nullRun = 0; markFrozen(reg, w); return; }
+        if (r === false) { nullRun = 0; return; }
+        if (++nullRun < 2) return;
+        nullRun = 0;
+        return doUpdate(reg);   // 答えない installing が2回続いた＝止まった job かもしれない＝それでも update を打つ（他に解ける道が無い）
+      });
+    }
+    return doUpdate(reg);
+  }
+  function doUpdate(reg) {
+    if (inflight) return inflight;
     var p = reg.update().catch(function () {}).then(function () { if (inflight === p) inflight = null; });
     inflight = p;
     return p;
@@ -95,8 +112,10 @@
       swapping = true;
       try { sessionStorage.setItem('mj.swap', '1'); } catch (_) {}
       w.postMessage({ type: 'SKIP_WAITING' });
+      // 固まった画面は controllerchange も届かない事がある＝5秒で読み直す（読み直すと新しい見え方になる・押した時だけ）
+      setTimeout(function () { if (swapping) location.reload(); }, window.MJ_SWAP_RELOAD_MS || 5000);
     };
-    if (reg.waiting) { go(reg.waiting); return; }
+    if (reg.waiting || frozen) { go(reg.waiting || frozen); return; }
     show('取り込み中', null);
     waitInstalled(reg, 30000).then(go); // update は waitInstalled の中（返った後に waiting を見る）
   }
@@ -104,7 +123,45 @@
   function offerSwap() { show('新しい版があります', '入れ替える', swap); }
   // 本当に待っている版の時だけ（前の版が動いていて、これがそれと別）。初めての取り込みは installed の知らせが claim の後に届く事がある（webkit）＝controller だけ見ると偽の帯
   function maybeOffer(reg) {
-    if (reg.waiting && reg.active && reg.waiting !== reg.active && sw.controller && !swapping) offerSwap();
+    var wt = reg.waiting || frozen;
+    if (wt && reg.active && wt !== reg.active && sw.controller && !swapping) offerSwap();
+  }
+
+  // SW 本人に「install は済んだか」を訊く：true＝済んだ・false＝まだ／落ちた・null＝答え無し（ms）か版が違う（新しい版の名を知っている時だけ照らす）
+  function probe(w, ms) {
+    return new Promise(function (res) {
+      var t = setTimeout(function () { res(null); }, ms || 2000);
+      try {
+        var ch = new MessageChannel();
+        ch.port1.onmessage = function (ev) {
+          clearTimeout(t);
+          var d = ev.data || {};
+          if (latestVer && d.ver && d.ver !== latestVer) { res(null); return; }
+          res(d.done === true);
+        };
+        w.postMessage({ type: 'MJ_STATE' }, [ch.port2]);
+      } catch (_) { clearTimeout(t); res(null); }
+    });
+  }
+  function stopProbe() { if (probeTimer) { clearInterval(probeTimer); probeTimer = null; } }
+  // 画面には installing と見えるが本人は済んでいる＝待っている版として扱う（取り込み中の札を消して帯）
+  function markFrozen(reg, w) {
+    stopProbe();
+    if (w.state !== 'installing' || frozen === w) return;
+    frozen = w;
+    if (busyTimer) { clearTimeout(busyTimer); busyTimer = null; }
+    maybeOffer(reg);
+  }
+  // installing を追っている間、3秒ごとに本人に訊く（最大 40 回＝2分。statechange が来たら・帯を押したら止める）
+  function startProbe(reg, w) {
+    stopProbe();
+    var n = 0;
+    var tick = function () {
+      if (w.state !== 'installing' || frozen || swapping || ++n > 40) { stopProbe(); return; }
+      probe(w).then(function (r) { if (r === true) markFrozen(reg, w); });
+    };
+    probeTimer = setInterval(tick, 3000);
+    tick();
   }
 
   // 取り込み中の1本を追う（同じ物は1回だけ）
@@ -112,7 +169,9 @@
     if (!w || w === tracked) return;
     tracked = w;
     maybeBusy(reg, w);
+    if (w.state === 'installing') startProbe(reg, w);
     w.addEventListener('statechange', function () {
+      stopProbe();
       if (w.state === 'redundant' && !swapping) { if (reg.waiting) maybeOffer(reg); else if (isBusy()) failBand(); return; }
       // w を見る判じは残す（webkit は reg の欄を遅れて写す＝waiting より先に installed が来る事がある）・maybeOffer は足すだけ
       if (w.state === 'installed' && reg.active && reg.active !== w && sw.controller && !swapping) offerSwap(); else maybeOffer(reg);
@@ -133,8 +192,9 @@
     fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
+        if (j && j.ver) latestVer = j.ver;
         if (!j || j.ver === PAGE_VER) return;
-        if (reg.waiting) { maybeOffer(reg); return; }
+        if (reg.waiting || frozen) { maybeOffer(reg); return; }
         (p || upd(reg)).then(function () { maybeOffer(reg); }, function () {});
       })
       .catch(function () {});

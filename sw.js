@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'c4bd54eb0ceb';
+const VER = '4e1efccbfb82';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '9f64c91331245c370b4e478a7670dd7c597a77be0a703098f87f9f770d7db26c'],
@@ -30,7 +30,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/kenban.mjs', 'ad7e1f231d24f51d6517e904f1d81fefe883f396a8b0123b1c049b9094715a7a'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/rules-memory.mjs', '38dc35121e4c63683a3a2ff658803d73368436990a20f121540d9b25b4391495'],
-  ['/js/sw-reg.js', 'd6f454be54cfeaa50c9b45ea337dd02582ebb1b0ca2bc988db659153a8d524cb'],
+  ['/js/sw-reg.js', '175c262793f9402a85417459d3f939c6af34137c9eade7ac8ad487c91ed010c7'],
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
   ['/league.html', '9025ac356cebce04924c803955b73999bcfc198e866fc7136ec2bb2298430150'],
@@ -231,8 +231,23 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
+/** 画面からの「install は済んだか」（swupd_sadame v1.4.1 §2）。WebKit は install が済んだ直後に開いた画面に installing のまま動かない登録を渡す
+ *  （11-27 CI で測った・statechange も来ない）＝画面は w.state を信じられない＝本人に訊く。答えは SW が止まって起こされても残る物だけで作る
+ *  （自分の state・完了印）。redundant（落ちた・捨てられた）は済んでいない。 */
+async function myState() {
+  const st = self.serviceWorker ? self.serviceWorker.state : null;
+  if (st === 'installed' || st === 'activating' || st === 'activated') return true;
+  if (st === 'redundant') return false;
+  try { return await isDone(C); } catch (_) { return false; }
+}
+
 self.addEventListener('message', (e) => {
-  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  const d = e.data;
+  if (d && d.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
+  if (d && d.type === 'MJ_STATE' && e.ports && e.ports[0] && !self.MJ_STATE_OFF) {
+    const port = e.ports[0];
+    e.waitUntil(myState().then((done) => port.postMessage({ done, ver: VER })));
+  }
 });
 
 let refilling = null, refillFailAt = 0;

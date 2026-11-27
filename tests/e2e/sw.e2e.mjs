@@ -506,6 +506,82 @@ async function run(d) {
     // u8a 画面が mj-part を作る（MJ_NO_PART を外して開く）
     await noPart(u, false); await dropCache(u, 'mj-part'); await u.reload();
     ok('u8a 画面を開くと mj-part が出来る', await waitFor(u, async () => caches.has('mj-part'), null, 5000));
+    // u13〜u15 固まった installing（swupd_sadame v1.4.1）：WebKit は install が済んだ直後に開いた画面に、installing のまま動かない登録を渡す
+    // （statechange も来ない・getRegistration でも同じ・11-27 CI 45966141190 で測った）。CI でも滅多に起きない＝画面の中だけで同じ見え方を作る：
+    // 旗（sessionStorage e2e.freeze）の立った画面は、新しい版の worker を installing に見せ（waiting は null）・その statechange を飲む。e2e.freezecc は controllerchange も飲む。
+    for (const c of ctxs.splice(0)) await c.close().catch(() => {});
+    const ctxF = await newCtx(); ctxs.push(ctxF);
+    await ctxF.addInitScript(() => {
+      if (sessionStorage.getItem('e2e.freeze') !== '1' || !('serviceWorker' in navigator)) return;
+      const SWp = ServiceWorker.prototype, Rp = ServiceWorkerRegistration.prototype;
+      const dS = Object.getOwnPropertyDescriptor(SWp, 'state'), dI = Object.getOwnPropertyDescriptor(Rp, 'installing'), dW = Object.getOwnPropertyDescriptor(Rp, 'waiting');
+      const real = (w) => dS.get.call(w);
+      let fz = null;
+      Object.defineProperty(Rp, 'installing', { configurable: true, get() { const i = dI.get.call(this), w = dW.get.call(this); if (!fz && (i || w)) fz = i || w; return fz && (i === fz || w === fz) ? fz : i; } });
+      Object.defineProperty(Rp, 'waiting', { configurable: true, get() { const w = dW.get.call(this); return fz && w === fz ? null : w; } });
+      Object.defineProperty(SWp, 'state', { configurable: true, get() { const s = real(this); return this === fz && (s === 'installing' || s === 'installed') ? 'installing' : s; } });
+      const add = EventTarget.prototype.addEventListener;
+      SWp.addEventListener = function (t, fn, o) {
+        if (t !== 'statechange') return add.call(this, t, fn, o);
+        const me = this;
+        return add.call(this, t, function (e) { const s = real(me); if (me === fz && (s === 'installing' || s === 'installed')) return; return fn.call(this, e); }, o);
+      };
+      if (sessionStorage.getItem('e2e.freezecc') === '1') {
+        const cadd = ServiceWorkerContainer.prototype.addEventListener;
+        ServiceWorkerContainer.prototype.addEventListener = function (t, fn, o) { if (t === 'controllerchange') return; return cadd.call(this, t, fn, o); };
+      }
+      window.__fz = () => (fz ? real(fz) : null);
+    });
+    const freeze = (p, on, cc) => p.evaluate(([a, b]) => { if (a) sessionStorage.setItem('e2e.freeze', '1'); else sessionStorage.removeItem('e2e.freeze'); if (b) sessionStorage.setItem('e2e.freezecc', '1'); else sessionStorage.removeItem('e2e.freezecc'); }, [on, cc]);
+    const fg = await ctxF.newPage();          // 旗の無い画面（取り込みを始める・見届ける）
+    const f = await ctxF.newPage();           // 固まった見え方の画面
+    const ef = errsOf(f);
+    await fg.goto(base + 'index.html'); await ctlReady(fg); await fg.reload();
+    await f.goto(base + 'index.html'); await ctlReady(f);
+
+    // u13 済んだ版が固まって見える（controllerchange も来ない）→ 本人に訊いて帯「新しい版があります」→ 押すと（5秒の読み直しで）新しい版
+    const V13 = bump(d);
+    await vis(fg);
+    ok('u13 旗の無い画面で V13 の取り込みが済む', await doneReady(fg, V13));
+    await idle(fg);
+    await freeze(f, true, true); await f.reload();
+    await waitFor(f, () => !!window.__fz && window.__fz() === 'installed', null, 10000);
+    const fz13 = await f.evaluate(async () => { const r = await navigator.serviceWorker.getRegistration(); const s = (w) => (w ? w.scriptURL.split('/').pop() + ':' + w.state : '-'); return (window.__fz ? window.__fz() : 'no-freeze') + ' | i=' + s(r && r.installing) + ' w=' + s(r && r.waiting) + ' a=' + s(r && r.active); });
+    ok('u13 固まった見え方が出来た（本当は installed）', fz13.startsWith('installed'), fz13);
+    ok('u13 固まった画面にも帯「新しい版があります」', await bandHas(f, NEWV), JSON.stringify(await look(f)));
+    await freeze(f, false, false);
+    L = await tapReload(f, 'u13');
+    ok('u13 入れ替えて V13', L.ver === V13, L.ver + ' / ' + V13);
+
+    // u14 本当に取り込み中（本人は「まだ」）→ 偽の帯を出さない → 通った後は帯 → 押すと V14
+    st.stall.add(X);
+    const V14 = bump(d);
+    await fg.reload(); await vis(fg);
+    ok('u14 X で止まっている', await until(() => st.held.length > 0, 15000));
+    await freeze(f, true, false); await f.reload();
+    await f.waitForTimeout(7000);              // 訊くのは3秒ごと＝2回は訊いた
+    const B14 = await f.evaluate(() => { const b = document.querySelector('.mj-swband'); return b && !b.hidden ? b.textContent : ''; });
+    ok('u14 取り込み中は帯「新しい版があります」を出さない', !B14.includes(NEWV), B14);
+    st.stall.clear(); st.release();
+    ok('u14 通った後は固まった画面にも帯', await bandHas(f, NEWV), JSON.stringify(await look(f)));
+    await freeze(f, false, false);
+    L = await tapReload(f, 'u14');
+    ok('u14 入れ替えて V14', L.ver === V14, L.ver + ' / ' + V14);
+
+    // u15 本人が答えない（SW 側の knob MJ_STATE_OFF）→ 見えた時の update が止まらない（答え無しが2回で update を打つ）
+    knobs(d, { MJ_STATE_OFF: 1 });
+    const V15 = bump(d);
+    await fg.reload(); await vis(fg);
+    ok('u15 旗の無い画面で V15 の取り込みが済む', await doneReady(fg, V15));
+    await idle(fg);
+    await freeze(f, true, false); await f.reload();
+    await f.waitForTimeout(3000);
+    const s15 = swCount();
+    await vis(f); await f.waitForTimeout(2500); await vis(f); await f.waitForTimeout(2500);
+    ok('u15 答えが無いままでも update を打つ', swCount() > s15, String(swCount() - s15));
+    await freeze(f, false, false);
+    knobs(d, {}); rewrite(d);
+    ok('u13〜u15 画面の err 0', ef.length === 0, ef.join(' / '));
     st.release();
     ok('u 画面の err 0', eu.length === 0, eu.join(' / '));
   } catch (e) {
@@ -523,7 +599,7 @@ const BREAKS = [
   ['初めての claim でも帯を出す', 'js/sw-reg.js', rep('if (!hadCtl && changes === 1 && !swapping) return;', '')],
   ['押した画面を読み直さない', 'js/sw-reg.js', rep('if (swapping) { swapping = false; location.reload(); return; }', 'if (swapping) { swapping = false; return; }')],
   ['押していない画面も読み直す', 'js/sw-reg.js', rep("show('別の画面で新しい版に入れ替えました', '読み直す', function () { location.reload(); });", 'location.reload();')],
-  ['SKIP_WAITING を受けない', 'sw.js', rep("if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();", '')],
+  ['SKIP_WAITING を受けない', 'sw.js', rep("if (d && d.type === 'SKIP_WAITING') { self.skipWaiting(); return; }", '')],
   ['名簿の画面もネットだけ', 'sw.js', rep('if (PATHS.has(p) && p.endsWith(\'.html\')) {\n    const hit = await fromCache(VER, p);\n    if (hit) return hit;\n  }', '')],
   ['控えの html に mj-ver を足さない', 'sw.js', rep(".replace(/<head\\b[^>]*>/i, (h) => h + '<meta name=\"mj-ver\" content=\"' + VER + '\">')", '')],
   ['/r/ を対局にしない', 'sw.js', rep("else if (TOKEN_RE.test(p)) p = '/taikyoku.html';", '')],
@@ -544,6 +620,14 @@ const BREAKS = [
   // u（11-27 e2e で見つけた sw-reg の直し）。e2e で赤にできない壊し＝画面の mj-part（activate も作る）・v1.1 の古い取り込み（WebKit は落ちた worker を止める）・update を並べる（WebKit の job の列が並べる）は単体の試験（sw-reg.test h・g／sw.test）で見る・待っている版が在る時の札の守り（WebKit の u4 では取り込みの知らせが画面に届かず、両方外しても緑＝11-27 測った・帯が出れば札はすぐ消える）
   ['register だけ待つ（開いた時もう取り込み中なら札が出ない）', 'js/sw-reg.js', rep("  try { sw.getRegistration('/').then(start, function () {}); } catch (_) {}\n", '')],
   ['使い捨てを消さない（死んだ控えに続ける）', 'sw.js', rep('    await caches.delete(FB);', '    //')],
+  // u13〜u15（swupd v1.4.1 固まった installing）
+  ['固まった installing を本人に訊かない', 'js/sw-reg.js', rep("    if (w.state === 'installing') startProbe(reg, w);\n", '')],
+  ['本人の答えを聞き捨てる', 'js/sw-reg.js', rep('          res(d.done === true);', '          res(false);')],
+  ['入れ替えは reg.waiting だけ', 'js/sw-reg.js', rep('    if (reg.waiting || frozen) { go(reg.waiting || frozen); return; }', '    if (reg.waiting) { go(reg.waiting); return; }')],
+  ['本当に取り込み中でも済んだと答える', 'sw.js', rep("  if (st === 'redundant') return false;", "  if (st === 'redundant') return false;\n  if (st) return true;")],
+  ['答えが無いまま2回でも update を打たない', 'js/sw-reg.js', rep('        return doUpdate(reg);   // 答えない', '        return;   // 答えない')],
+  ['押した後5秒で読み直さない', 'js/sw-reg.js', rep('      setTimeout(function () { if (swapping) location.reload(); }, window.MJ_SWAP_RELOAD_MS || 5000);\n', '')],
+  // 「済んだかを覚えだけで答える」は本物の画面では SW を起こし直せない＝tests/sw.test.mjs の壊し「MJ_STATE を覚え（メモリの旗）で答える」で見る
 ];
 
 const t0 = Date.now();

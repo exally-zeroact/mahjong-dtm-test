@@ -59,7 +59,7 @@ function serverFrom(root) {
 }
 
 function makeEnv(swText, opt = {}) {
-  const caches = new FakeCaches();
+  const caches = opt.caches || new FakeCaches();
   const files = opt.files || serverFrom(ROOT);
   const log = [];
   const net = { delay: {}, hold: {}, fail: new Set(), status: {}, body: {}, statusN: {}, bodyN: {}, live: 0, peak: 0 };
@@ -94,6 +94,8 @@ function makeEnv(swText, opt = {}) {
   };
   if (opt.installMs) self.MJ_INSTALL_MS = opt.installMs;
   if (opt.fetchMs) self.MJ_FETCH_MS = opt.fetchMs;
+  if (opt.swState) self.serviceWorker = { state: opt.swState };
+  if (opt.stateOff) self.MJ_STATE_OFF = true;
   const ctx = { self, caches, fetch: fetchFn, Request, Response, Headers, URL, TextDecoder, crypto: globalThis.crypto, setTimeout, clearTimeout, console, Date, Promise, Uint8Array, AbortController, CustomEvent: undefined, DOMException };
   vm.runInNewContext(swText, ctx, { filename: 'sw.js' });
   const bg = [];
@@ -103,6 +105,13 @@ function makeEnv(swText, opt = {}) {
     async install() { const ps = []; listeners.install({ waitUntil: (p) => ps.push(p) }); try { await Promise.all(ps); return true; } catch (_) { return false; } },
     async activate() { const ps = []; listeners.activate({ waitUntil: (p) => ps.push(p) }); await Promise.all(ps); },
     message(data) { listeners.message({ data }); },
+    /** 画面からの MJ_STATE（swupd v1.4.1）。返り＝SW の答え（来なければ null） */
+    async ask(withPort = true) {
+      let got = null; const ps = [];
+      listeners.message({ data: { type: 'MJ_STATE' }, ports: withPort ? [{ postMessage: (m) => { got = m; } }] : [], waitUntil: (x) => ps.push(x) });
+      await Promise.all(ps); return got;
+    },
+    set swState(v) { self.serviceWorker.state = v; },
     /** 取り。返り＝Response か null（素通し） */
     async get(p, o = {}) {
       const request = { url: new URL(p, o.origin || ORIGIN).href, method: o.method || 'GET', mode: o.mode || 'no-cors', cache: 'default' };
@@ -411,6 +420,27 @@ async function run(t) {
     e.net.body['/js/supa-config.js'] = 'window.SUPA={newer:1}';
     ok('l ok ならネットの答え', (await text(await e.get('/js/supa-config.js'))).includes('newer:1'));
   }
+  {
+    // q MJ_STATE（swupd_sadame v1.4.1 §2・§4）：本人の state か完了印で答える。SW が止まって起こされても（覚えの無い新しい実行）同じ答え
+    const e = makeEnv(swText, { swState: 'installing' });
+    const a0 = await e.ask();
+    ok('q 取り込み中で完了印が無い＝done false', !!a0 && a0.done === false && a0.ver === cur.ver, JSON.stringify(a0));
+    ok('q 取り込みが済む', await e.install());
+    const a1 = await e.ask();
+    ok('q 完了印が在れば state が installing でも done true', !!a1 && a1.done === true, JSON.stringify(a1));
+    const r = makeEnv(swText, { swState: 'installing', caches: e.caches });
+    const a2 = await r.ask();
+    ok('q 起こし直し（覚えの無い新しい実行）でも完了印で done true', !!a2 && a2.done === true, JSON.stringify(a2));
+    const r2 = makeEnv(swText, { swState: 'installed' });
+    const a3 = await r2.ask();
+    ok('q state installed なら done true', !!a3 && a3.done === true, JSON.stringify(a3));
+    r.swState = 'redundant';
+    const a4 = await r.ask();
+    ok('q redundant は done false', !!a4 && a4.done === false, JSON.stringify(a4));
+    ok('q 口（port）が無ければ答えない', (await e.ask(false)) === null);
+    const o = makeEnv(swText, { swState: 'installed', stateOff: true });
+    ok('q MJ_STATE_OFF なら答えない', (await o.ask()) === null);
+  }
   return { p, f };
 }
 
@@ -462,6 +492,8 @@ const BREAKS = [
   ['sw-reg の installed で前の版を見ない', { file: ['js/sw-reg.js', rep('reg.active && reg.active !== w && sw.controller', 'sw.controller')] }],
   ['名簿の js に import( を足す', { file: ['lib/score.mjs', (s) => s + '\nexport const later = () => import("./tiles.mjs");\n'] }],
   ['css に url( を足す', { file: ['css/app.css', (s) => s + '\n.x { background: url(/icons/icon-192.png); }\n'] }],
+  ['MJ_STATE を覚え（メモリの旗）で答える', { sw: rep('  try { return await isDone(C); } catch (_) { return false; }', '  return !!self.__mjDone;') }],
+  ['MJ_STATE が redundant も済みにする', { sw: rep("  if (st === 'redundant') return false;", '') }],
   ['version.json をずらす', { file: ['version.json', () => '{"ver":"eeeeeeeeeeee"}\n'], raw: true }],
 ];
 
