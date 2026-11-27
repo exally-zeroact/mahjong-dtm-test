@@ -3,7 +3,8 @@
  * 手元・鍵が要る（tests-no-ci.json）。倉庫は khaw だけ（ref の指紋で照らす・read.live:25-27 と同じ門）。1つの取引の塊（最後にわざと例外＝全部戻す＝realtime.messages の行も戻る）。
  * 見る物：ok の返しに read_ver（＝rooms.read_ver）／ok の組の後に topic＝channel_key・event 'w'・payload.v＝read_ver の行が1つ／弾かれた組と送り直しは0／
  *   room_secret・room_share は古い名と新しい名に1つずつ／K-3 の継ぎで1つ（＋その組の ok で1つ）／mj_read の room.channel_key＝今の名。
- * --waza：Z1 送りを外す／Z2 包みを外して無い関数を呼ぶ（書きが internal）／Z3 古い名を外す → それぞれ狙いが赤。
+ *   P1（pbundle_sadame.md v2.1 §3）：account_remove・room_leave は channel_key を新しくし、古い名と新しい名に1つずつ・その後の書きは古い名に来ない。
+ * --waza：Z1 送りを外す／Z2 包みを外して無い関数を呼ぶ（書きが internal）／Z3 古い名を外す／Z4 account_remove の付け替えを外す／Z5 room_leave の付け替えを外す → それぞれ狙いが赤。
  * 使い方: node tests/rt.live.mjs [--waza]
  */
 import fs from 'node:fs';
@@ -22,7 +23,7 @@ if (crypto.createHash('sha256').update(ref).digest('hex').slice(0, 16) !== '3f9e
 const raw = fs.readFileSync(path.join(os.homedir(), '.supabase-token'), 'utf8').trim();
 let token = raw; try { token = JSON.parse(raw).token; } catch (_) { /* 素の字 */ }
 const WAZA = process.argv.includes('--waza');
-const SCHEMA = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8');
+const SCHEMA = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8').split('\r\n').join('\n');   // 作業木の CRLF でも壊す字が当たる
 
 async function mq(query) {
   const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
@@ -54,13 +55,13 @@ const MA = (name) => `jsonb_build_array(jsonb_build_object('op', 'member_add', '
 const OPW = U();
 
 const mkSql = (prefix = '') => `do ${q('rt')} declare res jsonb := '{}'; r jsonb; i int;
-  us uuid[] := '{}'; ss uuid[] := '{}'; rg uuid; rs uuid; ck0 text; ck1 text; cs0 text; cs1 text;
+  us uuid[] := '{}'; ss uuid[] := '{}'; rg uuid; rs uuid; ck0 text; ck1 text; cs0 text; cs1 text; ca1 text; cl1 text;
 begin
   ${prefix}
   delete from mahjong.limits where kind like 'create:%' or kind like 'join:%' or kind like 'secret:%';
-  for i in 1..3 loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
+  for i in 1..5 loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
   insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
-  insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, 3) k;
+  insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, 5) k;
 
   /* 部屋 G（shared・持ち主 1・管 2） */
   ${asWho(1)}
@@ -104,6 +105,26 @@ begin
   cs1 := ${CK('rs')};
   ${RV('wsh_rv', 'rs')} ${MSG('msh_old', 'cs0')} ${MSG('msh_new', 'cs1')}
   res := res || jsonb_build_object('cs_changed', cs1 is distinct from cs0);
+  /* P1 §3：4 と 5 が G に入る（パスは room_secret の後の PASS2）→ 管 2 が 4 を出す（account_remove）→ 5 が抜ける（room_leave） */
+  ${asWho(4)} ${T('j4', `public.mj_room_join('name', null, null, ${lit(PASS2)}, ${lit(NB + 'g')})`)}
+  ${asWho(5)} ${T('j5', `public.mj_room_join('name', null, null, ${lit(PASS2)}, ${lit(NB + 'g')})`)}
+  ck1 := ${CK('rg')};
+  ${asWho(2)} ${RS}
+  ${T('wa', `public.mj_write(rg, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', 'account_remove', 'user_id', us[4])))`)}
+  ca1 := ${CK('rg')};
+  ${RV('wa_rv', 'rg')} ${MSG('ma_old', 'ck1')} ${MSG('ma_new', 'ca1')}
+  res := res || jsonb_build_object('ca_changed', ca1 is distinct from ck1, 'ca_hex', ca1 ~ '^[0-9a-f]{32}$');
+  ${asWho(5)} ${RS}
+  ${T('wl', `public.mj_write(rg, gen_random_uuid(), jsonb_build_array(jsonb_build_object('op', 'room_leave')))`)}
+  cl1 := ${CK('rg')};
+  ${RV('wl_rv', 'rg')} ${MSG('ml_old', 'ca1')} ${MSG('ml_new', 'cl1')}
+  res := res || jsonb_build_object('cl_changed', cl1 is distinct from ca1 and cl1 is distinct from ck1, 'cl_hex', cl1 ~ '^[0-9a-f]{32}$');
+  /* その後の書き（管 2）＝新しい名に1つ・古い2つの名には来ない */
+  ${asWho(2)} ${RS}
+  ${T('wz', `public.mj_write(rg, gen_random_uuid(), ${MA('丙')})`)}
+  ${RV('wz_rv', 'rg')} ${MSG('mz_ck1', 'ck1')} ${MSG('mz_ca1', 'ca1')} ${MSG('mz_cl1', 'cl1')}
+  ${T('rd2', `public.mj_read(rg, 'room', null)`)}
+  res := res || jsonb_build_object('cl1_ok', (r -> 'room' ->> 'channel_key') = cl1);
   raise exception 'MJRESULT%', res::text;
 end ${q('rt')};`;
 
@@ -133,6 +154,13 @@ function check(o) {
   ok('§3-1 room_secret は古い名と新しい名に1つずつ', isOk(o.ws) && o.ck_changed === true && eqv(o.ms_old, [...o.m1, o.ws_rv]) && eqv(o.ms_new, [o.ws_rv]), J([o.ws, o.ws_rv, o.ms_old, o.ms_new]));
   ok('§3-1 K-3 の継ぎで1つ＋その組の ok で1つ', isOk(o.wk) && eqv(o.mk, [o.ws_rv, o.k3_rv0 + 1, o.k3_rv]) && o.k3_rv === o.k3_rv0 + 2 && o.wk.read_ver === o.k3_rv, J([o.wk, o.k3_rv0, o.k3_rv, o.mk]));
   ok('§3-1 room_share は古い名と新しい名に1つずつ', isOk(o.wsh) && o.cs_changed === true && eqv(o.msh_old, [o.wsh_rv]) && eqv(o.msh_new, [o.wsh_rv]), J([o.wsh, o.wsh_rv, o.msh_old, o.msh_new]));
+  ok('P1 4・5 が入れた', isOk(o.j4) && isOk(o.j5), J([o.j4, o.j5]));
+  ok('P1 account_remove は channel_key を新しくする（32字の hex）', isOk(o.wa) && o.ca_changed === true && o.ca_hex === true, J([o.wa, o.ca_changed, o.ca_hex]));
+  ok('P1 account_remove は古い名と新しい名に1つずつ', isOk(o.wa) && Array.isArray(o.ma_old) && o.ma_old[o.ma_old.length - 1] === o.wa_rv && eqv(o.ma_new, [o.wa_rv]), J([o.wa_rv, o.ma_old, o.ma_new]));
+  ok('P1 room_leave は channel_key を新しくする（32字の hex）', isOk(o.wl) && o.cl_changed === true && o.cl_hex === true, J([o.wl, o.cl_changed, o.cl_hex]));
+  ok('P1 room_leave は古い名と新しい名に1つずつ', isOk(o.wl) && eqv(o.ml_old, [o.wa_rv, o.wl_rv]) && eqv(o.ml_new, [o.wl_rv]), J([o.wl_rv, o.ml_old, o.ml_new]));
+  ok('P1 その後の書きは今の名だけに来る（出した人・抜けた人の名に来ない）', isOk(o.wz) && eqv(o.mz_cl1, [o.wl_rv, o.wz_rv]) && eqv(o.mz_ca1, o.ml_old) && J(o.mz_ck1) === J(o.ma_old), J([o.wz_rv, o.mz_ck1, o.mz_ca1, o.mz_cl1]));
+  ok('P1 残った人の mj_read は新しい名を返す', o.cl1_ok === true, J(o.cl1_ok));
   return L;
 }
 
@@ -142,7 +170,10 @@ const fnText = (name) => {
   if (a < 0 || b < 0) throw new Error('関数が見つからない: ' + name);
   return SCHEMA.slice(a, b + '$fn$;'.length);
 };
-const SIG = { 'mahjong_private.mj_w_signal': '(text, bigint)' };
+/* P1 の付け替えの行（schema.sql と同じ字＝無ければ brk が投げる） */
+const P1A = "    update mahjong.rooms x set channel_key = pg_catalog.encode(extensions.gen_random_bytes(16), 'hex') where x.id = p_room;   -- P1 §3：出した人の名を捨てる（account_remove）\n";
+const P1L = "    update mahjong.rooms x set channel_key = pg_catalog.encode(extensions.gen_random_bytes(16), 'hex') where x.id = p_room;   -- P1 §3：抜けた人の名を捨てる（room_leave）\n";
+const SIG = { 'mahjong_private.mj_w_signal': '(text, bigint)', 'mahjong_private.mj_w_op': '(uuid, uuid, text, uuid, int, jsonb)' };
 const brk = (fn, pairs) => {
   let t = fnText(fn);
   for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error(`壊す字が無い（${fn}）: ${from.slice(0, 80)}`); t = t.split(from).join(to); }
@@ -157,6 +188,8 @@ const WZ = [
     ['§3-1 ok の返しに read_ver']],
   ['Z3 古い名を外す', () => brk('public.mj_write', [['perform mahjong_private.mj_w_signal(v_ch0, v_rv);', 'perform mahjong_private.mj_w_signal(v_ch1, v_rv);']]),
     ['§3-1 room_secret は古い名と新しい名', '§3-1 room_share は古い名と新しい名']],
+  ['Z4 account_remove の付け替えを外す', () => brk('mahjong_private.mj_w_op', [[P1A, '']]), ['P1 account_remove は channel_key']],
+  ['Z5 room_leave の付け替えを外す', () => brk('mahjong_private.mj_w_op', [[P1L, '']]), ['P1 room_leave は channel_key']],
 ];
 
 let pass = 0, fail = 0;

@@ -3729,6 +3729,7 @@ begin
     end if;
     insert into mahjong.room_bans (room_id, user_id) values (p_room, v_u) on conflict (room_id, user_id) do nothing;
     delete from mahjong.room_accounts a where a.room_id = p_room and a.user_id = v_u;
+    update mahjong.rooms x set channel_key = pg_catalog.encode(extensions.gen_random_bytes(16), 'hex') where x.id = p_room;   -- P1 §3：出した人の名を捨てる（account_remove）
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_accounts',
       pg_catalog.jsonb_build_object('room_id', p_room, 'user_id', v_u), null,
       pg_catalog.jsonb_build_object('role', c.role, 'joined_via', c.joined_via, 'joined_at', c.joined_at), null, null);
@@ -3769,6 +3770,7 @@ begin
     -- 自分の外し（決めた事2・S3＝まとめ1行・S4＝member_id でも名乗りを消す）
     select a.role, a.joined_via, a.joined_at into c from mahjong.room_accounts a where a.room_id = p_room and a.user_id = p_me for update;
     delete from mahjong.room_accounts a where a.room_id = p_room and a.user_id = p_me;
+    update mahjong.rooms x set channel_key = pg_catalog.encode(extensions.gen_random_bytes(16), 'hex') where x.id = p_room;   -- P1 §3：抜けた人の名を捨てる（room_leave）
     -- C2-1 §1a：つないだ名は外さない（抜けた人の名＝left）・自分の名乗りだけ消す（他の人が自分の名に名乗った行は残す）
     delete from mahjong.member_claims x where x.room_id = p_room and x.user_id = p_me;
     insert into mahjong.room_leaves (room_id, user_id, left_at, left_hist_id) values (p_room, p_me, pg_catalog.now(), v_hid)
