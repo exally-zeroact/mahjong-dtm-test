@@ -45,6 +45,8 @@ function run(step, drop = dropHead) {
   ok('dup は stop で member_id を添える', d.kind === 'stop' && d.err === 'dup' && d.member_id === 'm9', JSON.stringify(d));
   const l = step({ data: { ok: false, err: 'linked', i: 0, member_id: 'm8' } });
   ok('linked は stop で member_id を添える（2c-2b）', l.kind === 'stop' && l.err === 'linked' && l.member_id === 'm8', JSON.stringify(l));
+  const lf = step({ data: { ok: false, err: 'left', i: 0, member_id: 'm7' } });
+  ok('left は stop で member_id を添える（C2-3・出た人の名は直せない）', lf.kind === 'stop' && lf.err === 'left' && lf.member_id === 'm7', JSON.stringify(lf));
   const m = step({ data: { ok: false, err: 'mj_role', i: 0, need: 'kan' } });
   ok('mj_role は名の在る stop（known）', m.kind === 'stop' && m.known === true, JSON.stringify(m));
   // ── 2d（2d_sadame.md v2.1 §3）──
@@ -148,6 +150,8 @@ if (!self) {
     ['2d bad closed を stop にする（［捨てる］の帯に倒す）', wrap((res, r) => (r.kind === 'closed' ? { kind: 'stop', err: 'bad' } : r))],
     ['2d at の無い bad も closed にする', wrap((res, r) => (r.kind === 'stop' && r.err === 'bad' ? { kind: 'closed', err: 'bad', at: 'closed' } : r))],
     ['2d stop の at を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, at: undefined } : r))],
+    ['C2-3 left を stop にしない（retry で回し続ける）', wrap((res, r) => (r.err === 'left' ? { kind: 'retry', err: 'net' } : r))],
+    ['C2-3 left の member_id を落とす', wrap((res, r) => (r.err === 'left' ? { ...r, member_id: undefined } : r))],
     ['2d stop の what を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, what: undefined } : r))],
     ['2d 403 を retry にする（回し続ける）', wrap((res, r) => (r.err === 'server' ? { kind: 'retry', err: 'net' } : r))],
     ['2d held closed も［捨てる］で外す', outboxStep, (ob) => ob.slice(1).map((it) => ({ ...it, held_after_drop: true }))],

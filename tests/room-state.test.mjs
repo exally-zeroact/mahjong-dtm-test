@@ -865,6 +865,24 @@ console.log('■ 2c-2b 人の op 5つ・役の門・入り直しの門（正本�
     ["③'' が中身より先：role_set kan（reauth 無し）の後ろの op の中身の誤り → mj_reauth", [{ op: 'role_set', user_id: U1, role: 'kan' }, { op: 'member_link', member_id: 'zz' }], { reauthAt: undefined }, 'mj_reauth#0'],
   ];
   for (const [name, ops, o, want] of cases) { const r = D(ops, o); ok(name, E(r) === want && (r.ok ? J(r.state) === keep : r.state === s0) && J(s0) === keep, E(r)); }
+  // C2-3 err left（倉庫 schema.sql:2739 と同じ）：出た人（members の left:true）への rename・relink・link・unlink は left・持ち主の unlink だけ通す・left でない人と member_active は今のまま
+  const sL = structuredClone(s0); sL.members.find((m) => m.member_id === 'p1').left = true; const keepL = J(sL);
+  const EL = (r) => (r.ok ? 'ok' : r.res.err + (r.res.member_id ? '@' + r.res.member_id : '') + '#' + r.res.i);
+  for (const [name, ops, o, want] of [
+    ['left の人の member_rename → left@p1', [{ op: 'member_rename', member_id: 'p1', name: '一郎' }], {}, 'left@p1#0'],
+    ['left の人の member_link → left@p1', [{ op: 'member_link', member_id: 'p1' }], {}, 'left@p1#0'],
+    ['left の人の member_relink → left@p1', [{ op: 'member_relink', member_id: 'p1', user_id: U1 }], {}, 'left@p1#0'],
+    ['left の人の member_unlink（管）→ left@p1', [{ op: 'member_unlink', member_id: 'p1' }], {}, 'left@p1#0'],
+    ['left の人の member_unlink（持ち主）→ ok', [{ op: 'member_unlink', member_id: 'p1' }], { role: 'owner' }, 'ok'],
+    ['left の人の member_active → ok（門は4つの op だけ）', [{ op: 'member_active', member_id: 'p1', active: false }], {}, 'ok'],
+    ['組の2つ目が left → 組ごと弾く #1', [{ op: 'member_rename', member_id: 'p2', name: '二郎' }, { op: 'member_rename', member_id: 'p1', name: '一郎' }], {}, 'left@p1#1'],
+    ['left が true でない（"true"）→ 今のまま ok', [{ op: 'member_rename', member_id: 'p1', name: '一郎' }], { st: 'str' }, 'ok'],
+  ]) {
+    const base = o.st === 'str' ? (() => { const x = structuredClone(s0); x.members.find((m) => m.member_id === 'p1').left = 'true'; return x; })() : sL;
+    const { st: _x, ...oo } = o;
+    const r = applyOps(base, ops, { now: NOW, direct: true, role: 'kan', reauthAt: NS, ...oo });
+    ok(name, EL(r) === want && (r.ok || r.state === base) && J(sL) === keepL, EL(r));
+  }
   const gl = applyOps(s0, [{ op: 'member_link', member_id: 'p1' }], { now: NOW, direct: true, role: 'kan', reauthAt: NS, roomRules: { zzz: 1 } });
   ok('roomGate が門より先（newer の部屋は人の op も newer）', !gl.ok && gl.res.err === 'newer');
 }
