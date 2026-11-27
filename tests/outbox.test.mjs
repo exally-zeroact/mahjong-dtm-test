@@ -19,8 +19,8 @@ const CASES = [
   ['40P01 は retry', { error: { code: '40P01', message: 'deadlock detected' } }, 'retry', '40P01'],
   ['busy（what 無し）は retry', { data: { ok: false, err: 'busy' } }, 'retry', 'busy'],
   // P6g §1（p6g_sadame v1.1）：分の窓と lock だけ retry・1日の窓と知らない名は stop
-  ...['write:rn1m', 'write:u1m', 'write:ur1m', 'lock'].map((w) => ['P6g busy ' + w + ' は retry', { data: { ok: false, err: 'busy', what: w } }, 'retry', 'busy']),
-  ...['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d', 'write:all1d', 'write:all1m', 'write:zz1m', 'secret', 'name'].map((w) => ['P6g busy ' + w + ' は stop', { data: { ok: false, err: 'busy', what: w } }, 'stop', 'busy']),
+  ...['write:rn1m', 'write:u1m', 'write:ur1m', 'lock', 'user_min'].map((w) => ['P6g busy ' + w + ' は retry', { data: { ok: false, err: 'busy', what: w } }, 'retry', 'busy']),
+  ...['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d', 'write:all1d', 'write:all1m', 'write:zz1m', 'secret', 'name', 'user_day', 'solo_day'].map((w) => ['P6g busy ' + w + ' は stop', { data: { ok: false, err: 'busy', what: w } }, 'stop', 'busy']),
   ['conflict は conflict', { data: { ok: false, err: 'conflict', i: 0 } }, 'conflict'],
   ['E2 conflict の at（open・new）は振り分けに残す', { data: { ok: false, err: 'conflict', at: { what: 'open', hanchan_id: 'h1' } } }, 'conflict'],
   ['gone は reload', { data: { ok: false, err: 'gone' } }, 'reload'],

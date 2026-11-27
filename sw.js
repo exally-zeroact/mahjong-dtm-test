@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '4e1efccbfb82';
+const VER = 'add0c8277e4d';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '9f64c91331245c370b4e478a7670dd7c597a77be0a703098f87f9f770d7db26c'],
@@ -38,7 +38,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
-  ['/lib/outbox.mjs', 'e82567cb9fd2dfb95b9e27e0c26ec9705544010f5e3f0eef6e32353a6ea29b97'],
+  ['/lib/outbox.mjs', 'ac1f21f8bc3f4df4dcc83dd72c10be772722d80e51dbe95ae94bf892a4651aa1'],
   ['/lib/room-state.mjs', '98216b9dba96d22d937ad28241d118b3e2f23961d87aded234de3885c5672baf'],
   ['/lib/rules.mjs', 'e389644031b87167e7f9f5fec6b20d997e6d93fee5862e4ba66677856d034f36'],
   ['/lib/safe-int.mjs', 'c3d97c57acb9e2308a2e0e827a715a18b39659985877044b8c5b8d4379fb6b83'],
