@@ -3404,6 +3404,14 @@ begin
     if (v_s, v_mode, v_rate, v_b) is not distinct from (t.label, t.rate_mode, t.rate, t.voided) then
       return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', t.version), 'made', 0, 'hist', 0);
     end if;
+    -- L §2①（l_sadame v1.3）：リーグの日の卓の voided が変わる時だけ・その日に締め（settle_snap）が在れば settled（ふつうの部屋の日は今のまま）
+    --   段②の rooms の鍵で settle_snap とは並ばないが、重ねの守りとして日の行を for share で読んでから締めを見る
+    if v_b is distinct from t.voided then
+      select x.* into v_ss from mahjong.sessions x where x.id = t.session_id for share;
+      if v_ss.league_id is not null and exists (select 1 from mahjong.settle_snaps z where z.session_id = t.session_id) then
+        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'settled', 'i', p_i, 'table_id', t.id, 'session_id', t.session_id));
+      end if;
+    end if;
     update mahjong.tables x set label = v_s, rate_mode = v_mode, rate = v_rate, voided = v_b, version = x.version + 1 where x.id = t.id;
     get diagnostics v_rc = row_count;
     if v_rc <> 1 then raise exception 'mj_write: table_edit の更新が % 行', v_rc; end if;
