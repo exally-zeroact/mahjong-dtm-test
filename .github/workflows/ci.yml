@@ -111,6 +111,10 @@ jobs:
         run: node tests/fullji.test.mjs
       - name: full の字の見張りの自己確認（字を前に戻す・league の枝を消すと赤になるか）
         run: node tests/fullji.test.mjs --self-test
+      - name: 返しの字の busy（errText）＝P3 の人ごとの窓 user_min・solo_day・user_day の字・all の分かれ道なし（pbundle_sadame v2.1 §2 S5・P3g）
+        run: node tests/busyji.test.mjs
+      - name: busy の字の見張りの自己確認（枝を1つずつ壊すと赤になるか）
+        run: node tests/busyji.test.mjs --self-test
 
       # ── 計算の道具（早見表）＝画面と同じ lib/score-table.mjs を正解表と突き合わせる ──────
       - name: 早見表（lib/score-table.mjs）が正解表の 605 マスと同じか（4翻以下 176・満貫から上・切り上げ・数え・役満・3人）

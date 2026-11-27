@@ -118,7 +118,10 @@ export function errText(res, way) {
       if (w === 'user') return join ? '打ち間違いが続いたので、1分待ってもう一度。' : '1人が1日に作れる部屋は5つまでです。明日もう一度。';
       if (w === 'name') return 'その名前の部屋が多すぎます。別の名前にしてください。';
       if (w === 'room') return 'この部屋は今混んでいます。1分待ってもう一度。';
-      if (w === 'all' && way === 'create') return '今は混んでいます。少し待ってからもう一度押してください。';
+      // P3g（pbundle_sadame v2.1 §2 S5）：人ごとの窓。'all'（全体の窓）は倉庫がもう返さない＝分かれ道を消した
+      if (w === 'user_min') return '少し待ってからもう一度押してください。';
+      if (w === 'solo_day') return '24時間で始められる対局の数を越えました（100）。' + (untilOk(res.until) ? '時刻 ' + hhmm(res.until) + ' から始められます。' : '時間をおいてもう一度押してください。');
+      if (w === 'user_day') return '入る試しが多すぎます。' + (untilOk(res.until) ? hhmm(res.until) + ' からもう一度押してください。' : '時間をおいてもう一度押してください。');
       // P6g §5（p6g_sadame v1.1）：書きの窓（write:*）は what で字を分ける＝1日の窓で「1分待って」を出さない・頼める人がいない道もあるので「他の人に」は言わない
       if (typeof w === 'string' && w.startsWith('write:')) {
         if (['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d'].includes(w)) return '24時間に書ける数を越えたので、今は送れません。時間をおいてもう一度押してください。';
@@ -135,6 +138,7 @@ export function errText(res, way) {
     default: return '止まりました（' + (e || '?') + '）。';
   }
 }
+const untilOk = (t) => t !== undefined && t !== null && t !== '' && !isNaN(new Date(t)); // until が読めない時は時刻を出さない
 function hhmm(t) {
   const d = new Date(t);
   if (isNaN(d)) return 'しばらく';
