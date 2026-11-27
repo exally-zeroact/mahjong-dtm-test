@@ -298,6 +298,11 @@ async function run(br, port) {
       ok('L3 見出しは「部屋 会ra」', hd && hd.t.startsWith('部屋 会ra'), hd);
       ok('L3 見出しはリーグの名より小さい', hd && hd.hs < hd.ns, hd);
       await shot(A.pg, 'list');
+      // 11-27 23時 司さん：部屋の名が無い時の既定は「do the math」（見出しの「部屋 」は変えない）
+      DB.get('ra').name = null; DB.get('ra').read_ver++;
+      await openList(A.pg);
+      const hd2 = await A.pg.evaluate(() => { const h = document.querySelector('[data-heya]'); return h ? h.textContent : null; });
+      ok('L3 名の無い部屋の見出しは「部屋 do the math」', !!hd2 && hd2.startsWith('部屋 do the math'), hd2);
     } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
 
     // L4 A25 名前を直す（member_rename・同じ名は dup の字・点は人に付いたまま）
@@ -381,6 +386,7 @@ const MUT = [
   { file: G, from: "const twin = live.some((o) => o !== l && nk(o) === nk(l));", to: 'const twin = true;', name: '違う名にも作った日時を出す（L2）', only: 'L2' },
   { file: G, from: "  return { val: { name, date_from, date_to, rank_by: form.rank,", to: "  if (rooms.get(form.rid).read.leagues.some((l) => !l.voided && String(l.name).trim() === name)) return { err: 'x' }; return { val: { name, date_from, date_to, rank_by: form.rank,", name: '同じ名の止めを戻す（L2）', only: 'L2' },
   { file: G, from: 'data-heya>部屋 \' + esc(roomName(x))', to: 'data-heya>\' + esc(roomName(x))', name: '見出しに「部屋」を付けない（L3）', only: 'L3' },
+  { file: G, from: "const ROOM_DEFAULT = 'do the math';", to: "const ROOM_DEFAULT = '部屋';", name: '名の無い部屋を「部屋」と出す（L3）', only: 'L3' },
   { file: 'css/gamen.css', from: '.lg-heya { font-size: 12px;', to: '.lg-heya { font-size: 18px;', name: '見出しをリーグの名より大きくする（L3）', only: 'L3' },
   { file: G, from: "rosterSend(b.dataset.r, b.dataset.rnok, 'rename', { op: 'member_rename', member_id: b.dataset.rnok, name: nm });", to: '', name: '名前を直すを送らない（L4）', only: 'L4' },
   { file: G, from: "  if (e === 'dup') return ROSTER_ERR.dup;\n", to: '', name: '名の dup に字を出さない（L4）', only: 'L4' },

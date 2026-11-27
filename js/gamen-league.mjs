@@ -156,7 +156,8 @@ function leaveChan(rid) {
 }
 
 /* ── 一覧 ── */
-function roomName(x) { return (x.read && x.read.room && x.read.room.name) || (x.my && x.my.name) || '部屋'; }
+const ROOM_DEFAULT = 'do the math'; // 11-27 23時 司さん「デフォで入ってる名前ださいから do the math にしろ」＝名前が無い時だけ（見出しの「部屋 」等の題は変えない）
+function roomName(x) { return (x.read && x.read.room && x.read.room.name) || (x.my && x.my.name) || ROOM_DEFAULT; }
 function msgHtml(m, pre) {
   if (!m) return '';
   return '<div class="obi obi-warn" id="' + pre + 'Msg"><span id="' + pre + 'MsgT">' + esc(m.text) + '</span>' +
