@@ -1230,6 +1230,26 @@ console.log('■ D2 リーグの頁の写し scope（d2_sadame v1.1 §2）');
   const c3 = applyOps(a.state, [hs('h1', [10000, 20000, 30000, 40000], { table_id: 'u1' }), { op: 'extra_add', table_id: 'u1', member_id: 'm1', kind: 'chip', add: 1 }, { op: 'extra_add', table_id: 'u1', member_id: 'm2', kind: 'chip', add: -1 }], { scope: nl });
   ok('D2 isL 偽でも hanchan_start・extra_add（nyu）は ok＝1回目の点が入る', c3.ok && c3.state.hanchans.some((h) => h.hanchan_id === 'h1' && h.table_id === 'u1'), ER(c3));
   ok('D2 scope でない写しのリーグの session_add は今のまま err direct', ER(applyOps(m4, [sa()])) === 'direct');
+  // L A25 err settled（l_sadame v1.3 §1・倉庫 table_edit の締めの門と同じ）：リーグの日で締め（settles）が在る日の卓は voided が変わる時だけ settled・同じ値／他の欄だけは今のまま・ふつうの部屋の日は今のまま
+  const scD = { ...sc, days: a.days };
+  const shut = (st, sid) => { const x = structuredClone(st); x.settles = [...(x.settles || []), { session_id: sid, rev: 1, at: '2026-11-23T20:00:00+09:00', content: {}, used: {}, missing: [] }]; return x; };
+  const ES = (r) => (r.ok ? 'ok' : r.res.err + (r.res.table_id ? '@' + r.res.table_id + '/' + r.res.session_id : '') + '#' + r.res.i);
+  const sd = shut(a.state, 'd1'); const keepSd = J(sd);
+  const sdV = (() => { const x = structuredClone(sd); x.tables.find((t) => t.table_id === 'u1').voided = true; return x; })();
+  const lgS = (() => { const x = shut(base(), 's1'); x.sessions.find((y) => y.session_id === 's1').league_id = LG; return x; })();
+  for (const [name, st, ops, o, want] of [
+    ['A25 締める前のリーグの日の卓を消す → ok', a.state, [{ op: 'table_edit', table_id: 'u1', voided: true }], { scope: scD }, 'ok'],
+    ['A25 締めたリーグの日の卓を消す → settled@u1/d1', sd, [{ op: 'table_edit', table_id: 'u1', voided: true }], { scope: scD }, 'settled@u1/d1#0'],
+    ['A25 締めたリーグの日の消した卓を戻す → settled@u1/d1', sdV, [{ op: 'table_edit', table_id: 'u1', voided: false }], { scope: scD }, 'settled@u1/d1#0'],
+    ['A25 締めた後でも voided が同じ値（false→false）→ ok', sd, [{ op: 'table_edit', table_id: 'u1', voided: false }], { scope: scD }, 'ok'],
+    ['A25 締めた後でも名だけ直す → ok（門は voided だけ）', sd, [{ op: 'table_edit', table_id: 'u1', label: '東卓' }], { scope: scD }, 'ok'],
+    ['A25 組の2つ目が締めた日の消す → 組ごと弾く #1', sd, [{ op: 'table_edit', table_id: 'u2', label: '西卓' }, { op: 'table_edit', table_id: 'u1', voided: true }], { scope: scD }, 'settled@u1/d1#1'],
+    ['A25 ふつうの部屋の日は締めた後も消せる（今のまま）', shut(base(), 's1'), [{ op: 'table_edit', table_id: 't1', voided: true }], {}, 'ok'],
+    ['A25 scope でなくても日に league_id が在れば締めた日は settled', lgS, [{ op: 'table_edit', table_id: 't1', voided: true }], {}, 'settled@t1/s1#0'],
+  ]) {
+    const r = applyOps(st, ops, { now: '2026-11-23T21:00:00+09:00', ...o });
+    ok(name, ES(r) === want && (r.ok || r.state === st) && J(sd) === keepSd, ES(r));
+  }
 }
 console.log('■ P5 分けた読み（p5_sadame v1.3 §3＝loaded・unloaded・readArgs）');
 {

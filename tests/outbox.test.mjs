@@ -45,6 +45,8 @@ function run(step, drop = dropHead) {
   ok('dup は stop で member_id を添える', d.kind === 'stop' && d.err === 'dup' && d.member_id === 'm9', JSON.stringify(d));
   const l = step({ data: { ok: false, err: 'linked', i: 0, member_id: 'm8' } });
   ok('linked は stop で member_id を添える（2c-2b）', l.kind === 'stop' && l.err === 'linked' && l.member_id === 'm8', JSON.stringify(l));
+  const se = step({ data: { ok: false, err: 'settled', i: 0, table_id: 't3', session_id: 's2' } });
+  ok('settled は stop で known・table_id と session_id を添える（L A25・締めたリーグの日の卓）', se.kind === 'stop' && se.err === 'settled' && se.known === true && se.table_id === 't3' && se.session_id === 's2', JSON.stringify(se));
   const lf = step({ data: { ok: false, err: 'left', i: 0, member_id: 'm7' } });
   ok('left は stop で member_id を添える（C2-3・出た人の名は直せない）', lf.kind === 'stop' && lf.err === 'left' && lf.member_id === 'm7', JSON.stringify(lf));
   const m = step({ data: { ok: false, err: 'mj_role', i: 0, need: 'kan' } });
@@ -152,6 +154,8 @@ if (!self) {
     ['2d stop の at を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, at: undefined } : r))],
     ['C2-3 left を stop にしない（retry で回し続ける）', wrap((res, r) => (r.err === 'left' ? { kind: 'retry', err: 'net' } : r))],
     ['C2-3 left の member_id を落とす', wrap((res, r) => (r.err === 'left' ? { ...r, member_id: undefined } : r))],
+    ['L A25 settled を stop にしない（retry で回し続ける）', wrap((res, r) => (r.err === 'settled' ? { kind: 'retry', err: 'net' } : r))],
+    ['L A25 settled の table_id を落とす', wrap((res, r) => (r.err === 'settled' ? { ...r, table_id: undefined } : r))],
     ['2d stop の what を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, what: undefined } : r))],
     ['2d 403 を retry にする（回し続ける）', wrap((res, r) => (r.err === 'server' ? { kind: 'retry', err: 'net' } : r))],
     ['2d held closed も［捨てる］で外す', outboxStep, (ob) => ob.slice(1).map((it) => ({ ...it, held_after_drop: true }))],
