@@ -4,13 +4,14 @@
  *  ⓪ 人＝mj_me で弾く（claims 無し・匿名・session 無し・他人の session_id）＝mj_session・何も増えない
  *  ① 形の違い＝bad:what・何も増えない
  *  ② pass で入る→again:false・nyu・pass／同じ人→again:true・行1つ・ok1h そのまま／外れのパスでも again（bf を見ていない）・時間も測る
- *  ③ url で入る（lib/url-token.mjs の newToken・tokenHash で作った部屋）／hash の字＝bad:key／別の 32 hex＝wrong・ufail+1・fail1m そのまま
+ *  ③ url で入る（lib/url-token.mjs の newToken・tokenHash で作った部屋）／hash の字＝bad:key／別の 32 hex＝wrong・ufail+1・ufail1d +1（P3＝どの道も）・bf は数えない
  *     倉庫の hash と lib の hash が同じ
  *  ④ 外れ4回→fail_count 4／5回目→locked 15分・fail_count 0／locked に正しいパス＝locked（数えない）／url は入れる／入っている人は again
  *  ⑤ パスで新しく入ると fail_count 0・url と again では戻らない
  *  ⑥ 人ごと1分10→busy:user（pass・url とも・数えない）・窓を前の分にずらすと通る
- *  ⑦ 全体1分100→pass は busy:all・url は通る・窓が明けたら通る
- *  ⑧ 無い番号→wrong・fail1m・ufail +1／在る部屋の外れと無い番号の時間（塊の中の clock_timestamp・各20回）の中央値の差が bf 1回の 25% 内
+ *  ⑦ P3：1人の外れ24時間50（join:ufail1d）→pass も url も busy:user_day（until）・別の人は止めない・49なら数えて50
+ *  ⑦' P3：bf 1分20（join:ubf1m）→pass と無い番号は busy:user_min（数えない）・url は bf が無い＝通る・別の人は止めない・19なら通って20
+ *  ⑧ 無い番号→wrong・ufail1d・ufail +1・ふりの bf も1回数える／在る部屋の外れと無い番号の時間（塊の中の clock_timestamp・各20回）の中央値の差が bf 1回の 25% 内
  *  ⑨ 消した部屋→gone（入っている人も）・行を作らない ⑩ 人数の上限→full ⑪ ok1h 60→busy:room・1時間より前の窓は数えず消える
  *  ⑫ room_bans に在る人→removed（数えない）・印を消すと入れる
  *  ⑬ anon は 401/403・捨てアカウントで外れ→wrong で数えが残る／GET と Prefer: tx=rollback で外れを送って「wrong なのに数えが残らない」道が無い
@@ -63,7 +64,8 @@ const N_U = 8;                                // 1＝持ち主 2＝pass で入�
 const CNT = `jsonb_build_object('ra', (select count(*) from mahjong.room_accounts where room_id = rid),
   'fail', (select fail_count from mahjong.rooms where id = rid),
   'lock', (select locked_until is not null from mahjong.rooms where id = rid),
-  'f1m', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:fail1m'),
+  'ud', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1d'),   -- P3：全体の fail1m はやめた＝1人の外れ24時間50
+  'bf', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ubf1m'),     -- P3：bf の数え（1人1分20）
   'uf', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1m'),
   'ok1h', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ok1h'),
   'bans', (select count(*) from mahjong.room_bans where room_id = rid))`;
@@ -110,7 +112,7 @@ const SESS = [
 ];
 
 /* ⑧ の時間：in_room＝在る部屋の外れ／ghost＝無い番号／bf＝crypt 1回（各20回・毎回 fail と数えを0に戻して locked・busy に当てない） */
-const RESET = `update mahjong.rooms set fail_count = 0, locked_until = null where id = rid; delete from mahjong.limits where kind in ('join:fail1m', 'join:ufail1m');`;
+const RESET = `update mahjong.rooms set fail_count = 0, locked_until = null where id = rid; delete from mahjong.limits where kind in ('join:ufail1d', 'join:ufail1m', 'join:ubf1m');`;
 const timing = `
     for i in 1..20 loop
       ${RESET}
@@ -205,16 +207,35 @@ begin
     ${T('bu_u', JU(OTHER))}
     update mahjong.limits set window_start = v_min - interval '1 minute' where kind = 'join:ufail1m' and key = us[4]::text;
     ${T('bu_next', JP(BADPASS))}`)}
-  /* ⑦ 全体1分100（pass だけ） */
-  ${undo('ba', `delete from mahjong.limits where kind = 'join:fail1m';
-    insert into mahjong.limits (kind, key, window_start, count) values ('join:fail1m', 'all', v_min, 100);
+  /* ⑦ P3 1人の外れ24時間50（join:ufail1d・どの道も）：23時間前に30・今の時に20＝50 */
+  ${undo('ba', `delete from mahjong.limits where kind = 'join:ufail1d' and key = us[4]::text;
+    insert into mahjong.limits (kind, key, window_start, count) values ('join:ufail1d', us[4]::text, date_trunc('hour', now()) - interval '23 hours', 30),
+      ('join:ufail1d', us[4]::text, date_trunc('hour', now()), 20);
+    res := res || jsonb_build_object('ba_until', date_trunc('hour', now()) + interval '1 hour');
     ${asWho(4)}
     ${T('ba_p', JP(BADPASS))}
-    ${asWho(5)}
+    ${T('ba_ok', JP(PASS))}
     ${T('ba_u', JU(TOK))}
+    ${asWho(5)}
+    ${T('ba_other', JP(BADPASS))}
+    ${asWho(4)}
+    update mahjong.limits set count = 19 where kind = 'join:ufail1d' and key = us[4]::text and window_start = date_trunc('hour', now());
+    ${T('ba_49', JP(BADPASS))}
+    ${T('ba_50', JP(BADPASS))}`)}
+  /* ⑦' P3 bf 1分20（join:ubf1m）：入っていない人4 に 20 */
+  ${undo('bf', `insert into mahjong.limits (kind, key, window_start, count) values ('join:ubf1m', us[4]::text, v_min, 20)
+      on conflict (kind, key, window_start) do update set count = 20;
+    ${asWho(4)}
+    ${T('bf_p', JP(PASS))}
+    ${T('bf_gh', J(L('pass'), 'v_ghost', 'null', L(PASS)))}
+    ${T('bf_u', JU(TOK))}
+    ${asWho(5)}
+    ${T('bf_other', JP(PASS))}
     ${asWho(6)}
-    update mahjong.limits set window_start = v_min - interval '1 minute' where kind = 'join:fail1m';
-    ${T('ba_next', JP(PASS))}`)}
+    insert into mahjong.limits (kind, key, window_start, count) values ('join:ubf1m', us[6]::text, v_min, 19)
+      on conflict (kind, key, window_start) do update set count = 19;
+    ${T('bf_19', JP(PASS))}
+    res := res || jsonb_build_object('bf_19n', (select sum(count) from mahjong.limits where kind = 'join:ubf1m' and key = us[6]::text));`)}
   /* ⑧ 無い番号 */
   ${undo('gh', `${asWho(4)}
     ${T('gh', J(L('pass'), 'v_ghost', 'null', L(PASS)))}
@@ -309,6 +330,8 @@ const dd = (a, b) => (a && b ? Object.fromEntries(Object.keys(a).map((k) => [k, 
 const R = (k) => (out && out[k]) || {};
 const isErr = (k, err, extra = {}) => { const r = R(k); return r.ok === false && r.err === err && Object.entries(extra).every(([x, v]) => r[x] === v); };
 const still = (k) => same(out[k + '_c0'], out[k + '_c1']);
+/* P3：bf を済ませた後で止まる道（full・busy:room・removed）は bf を1つ数える（定め v2.1 §2.5＝bf の前に数える）＝他は増えない */
+const stillBf = (k) => { const x = delta(k); return !!x && x.bf === 1 && same({ ...out[k + '_c0'], bf: 0 }, { ...out[k + '_c1'], bf: 0 }); };
 const delta = (k) => dd(out[k + '_c0'], out[k + '_c1']);
 const okRet = (k, again, role = 'nyu') => { const r = R(k); return r.ok === true && r.again === again && r.role === role && r.room_id === out.rid
   && Object.keys(r).sort().join(',') === 'again,channel_key,name,ok,role,room_id,room_no'; };
@@ -342,7 +365,7 @@ if (out) {
   ok('② パスで入れた＝again:false・nyu・返しの鍵7つ', okRet('p1', false), JSON.stringify(R('p1')));
   ok('② 返しの room_no・name・channel_key が部屋の物', R('p1').room_no === out.made.room_no && R('p1').name === RNAME && R('p1').channel_key === out.made.channel_key);
   ok('② room_accounts に nyu・pass の行', out.p1_row && out.p1_row.role === 'nyu' && out.p1_row.joined_via === 'pass' && out.p1_row.member_id === null, JSON.stringify(out.p1_row));
-  ok('② 入って room_accounts +1・ok1h +1・外れの数えは増えない', same(delta('p1'), { ra: 1, fail: 0, lock: 'false→false', f1m: 0, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('p1')));
+  ok('② 入って room_accounts +1・ok1h +1・bf +1（P3）・外れの数えは増えない', same(delta('p1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 1, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('p1')));
   ok('② 同じ人＝again:true', okRet('p2', true), JSON.stringify(R('p2')));
   ok('② again で何も増えない（ok1h もそのまま）', still('p2'), JSON.stringify(delta('p2')));
   ok('② 外れのパスでも again:true（bf を回していない）', okRet('p3', true), JSON.stringify(R('p3')));
@@ -355,9 +378,9 @@ if (out) {
   ok('③ 部屋の url_token_hash は lib の hash', out.h_room === TOKH);
   ok('③ URL で入れた＝again:false', okRet('u1', false), JSON.stringify(R('u1')));
   ok('③ room_accounts に nyu・url の行', out.u1_row && out.u1_row.role === 'nyu' && out.u1_row.joined_via === 'url', JSON.stringify(out.u1_row));
-  ok('③ URL で入って ok1h +1・外れは増えない', same(delta('u1'), { ra: 1, fail: 0, lock: 'false→false', f1m: 0, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('u1')));
+  ok('③ URL で入って ok1h +1・外れは増えない', same(delta('u1'), { ra: 1, fail: 0, lock: 'false→false', ud: 0, bf: 0, uf: 0, ok1h: 1, bans: 0 }), JSON.stringify(delta('u1')));
   ok('③ 別の 32 hex＝wrong', isErr('uw', 'wrong'), JSON.stringify(R('uw') || out.uw_err));
-  ok('③ URL の外れは ufail +1・fail1m と fail_count は増えない', same(delta('uw'), { ra: 0, fail: 0, lock: 'false→false', f1m: 0, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify(delta('uw')));
+  ok('③ URL の外れは ufail +1・ufail1d +1（P3）・bf と fail_count は増えない', same(delta('uw'), { ra: 0, fail: 0, lock: 'false→false', ud: 1, bf: 0, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify(delta('uw')));
   /* ④ */
   ok('④ 外れ4回は wrong', [1, 2, 3, 4].every((i) => (out['lk_w' + i] || {}).err === 'wrong'), JSON.stringify([1, 2, 3, 4].map((i) => out['lk_w' + i])));
   ok('④ 外れ4回で fail_count 4', Number(out.lk_f4) === 4, String(out.lk_f4));
@@ -378,14 +401,22 @@ if (out) {
   ok('⑥ busy:user で数えが増えない', still('bu_p') && still('bu_ok') && still('bu_u'), JSON.stringify([delta('bu_p'), delta('bu_ok'), delta('bu_u')]));
   ok('⑥ 窓を前の分にずらすと通る（wrong＝bf まで行った）', isErr('bu_next', 'wrong'), JSON.stringify(R('bu_next')));
   /* ⑦ */
-  ok('⑦ 全体1分100の後＝pass は busy:all', isErr('ba_p', 'busy', { what: 'all' }), JSON.stringify(R('ba_p') || out.ba_err));
-  ok('⑦ busy:all で数えが増えない', still('ba_p'), JSON.stringify(delta('ba_p')));
-  ok('⑦ 全体1分100でも URL は通る', okRet('ba_u', false), JSON.stringify(R('ba_u')));
-  ok('⑦ 窓が明けたらパスで入れる', okRet('ba_next', false), JSON.stringify(R('ba_next')));
+  const untilIs = (k) => R(k)?.until && Date.parse(R(k).until) === Date.parse(out.ba_until);
+  ok('⑦ P3：1人の外れ24時間50の後＝外れのパスは busy:user_day・until＝一番古い窓が抜ける時', isErr('ba_p', 'busy', { what: 'user_day' }) && untilIs('ba_p'), JSON.stringify([R('ba_p'), out.ba_until, out.ba_err]));
+  ok('⑦ P3：正しいパスも URL も busy:user_day（どの道も）', isErr('ba_ok', 'busy', { what: 'user_day' }) && isErr('ba_u', 'busy', { what: 'user_day' }) && untilIs('ba_u'), JSON.stringify([R('ba_ok'), R('ba_u')]));
+  ok('⑦ busy:user_day で数えが増えない（bf もしない）', still('ba_p') && still('ba_ok') && still('ba_u'), JSON.stringify([delta('ba_p'), delta('ba_ok'), delta('ba_u')]));
+  ok('⑦ P3：その時も別の人は止めない（外れは wrong）', isErr('ba_other', 'wrong'), JSON.stringify(R('ba_other')));
+  ok('⑦ P3：49なら外れを数えて（wrong・ud +1）50本目の次は busy:user_day', isErr('ba_49', 'wrong') && delta('ba_49').ud === 1 && isErr('ba_50', 'busy', { what: 'user_day' }), JSON.stringify([R('ba_49'), delta('ba_49'), R('ba_50')]));
+  /* ⑦' */
+  ok('⑦\' P3：bf 1分20の後＝正しいパスも無い番号も busy:user_min・何も増えない', isErr('bf_p', 'busy', { what: 'user_min' }) && isErr('bf_gh', 'busy', { what: 'user_min' }) && still('bf_p') && still('bf_gh'),
+    JSON.stringify([R('bf_p'), R('bf_gh'), delta('bf_p'), delta('bf_gh'), out.bf_err]));
+  ok('⑦\' P3：URL は bf が無い＝bf 1分20でも入れる', okRet('bf_u', false), JSON.stringify(R('bf_u')));
+  ok('⑦\' P3：別の人は止めない', okRet('bf_other', false), JSON.stringify(R('bf_other')));
+  ok('⑦\' P3：19なら入れて20になる', okRet('bf_19', false) && Number(out.bf_19n) === 20, JSON.stringify([R('bf_19'), out.bf_19n]));
   /* ⑧ */
   ok('⑧ 無い番号＝wrong', isErr('gh', 'wrong') && Object.keys(R('gh')).length === 2, JSON.stringify(R('gh') || out.gh_err));
-  ok('⑧ 無い番号で fail1m +1・ufail +1（部屋の fail_count は触らない）', same(delta('gh'), { ra: 0, fail: 0, lock: 'false→false', f1m: 1, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify(delta('gh')));
-  ok('⑧ 無い URL＝wrong・ufail +1 だけ', isErr('gh_u', 'wrong') && same(delta('gh_u'), { ra: 0, fail: 0, lock: 'false→false', f1m: 0, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify([R('gh_u'), delta('gh_u')]));
+  ok('⑧ 無い番号で ufail1d +1・ufail +1・ふりの bf +1（P3・部屋の fail_count は触らない）', same(delta('gh'), { ra: 0, fail: 0, lock: 'false→false', ud: 1, bf: 1, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify(delta('gh')));
+  ok('⑧ 無い URL＝wrong・ufail +1・ufail1d +1 だけ', isErr('gh_u', 'wrong') && same(delta('gh_u'), { ra: 0, fail: 0, lock: 'false→false', ud: 1, bf: 0, uf: 1, ok1h: 0, bans: 0 }), JSON.stringify([R('gh_u'), delta('gh_u')]));
   ok('⑧ 時間の測りで返しが全部 wrong', !out.tm_in_bad && !out.tm_gh_bad && !out.tm_err, JSON.stringify({ a: out.tm_in_bad, b: out.tm_gh_bad, e: out.tm_err }));
   ok('⑧ 在る部屋の外れと無い番号の時間の差が bf 1回の 25% 内', out.tm && Math.abs(out.tm.in - out.tm.gh) <= out.tm.bf * 0.25, JSON.stringify(out.tm));
   /* ⑨ */
@@ -396,19 +427,19 @@ if (out) {
   ok('⑨ gone で行も数えも増えない', ['dl_p', 'dl_u', 'dl_bad', 'dl_in'].every(still), JSON.stringify(['dl_p', 'dl_u', 'dl_bad', 'dl_in'].map(delta)));
   /* ⑩ */
   ok('⑩ 人数が上限＝full', isErr('fu', 'full'), JSON.stringify(R('fu') || out.fu_err));
-  ok('⑩ full で何も増えない', still('fu'), JSON.stringify(delta('fu')));
+  ok('⑩ full で bf +1 の他は何も増えない', stillBf('fu'), JSON.stringify(delta('fu')));
   ok('⑩ 上限でも入っている人は again', okRet('fu_in', true), JSON.stringify(R('fu_in')));
   ok('⑩ 上限を1上げると入れる', okRet('fu_m1', false), JSON.stringify(R('fu_m1')));
   /* ⑪ */
   ok('⑪ 部屋の新しい入り1時間60の後＝busy:room', isErr('br', 'busy', { what: 'room' }), JSON.stringify(R('br') || out.br_err));
-  ok('⑪ busy:room で何も増えない', still('br'), JSON.stringify(delta('br')));
+  ok('⑪ busy:room で bf +1 の他は何も増えない', stillBf('br'), JSON.stringify(delta('br')));
   ok('⑪ busy:room でも入っている人は again', okRet('br_in', true), JSON.stringify(R('br_in')));
   ok('⑪ 1時間より前の窓は数えず入れる', okRet('br_next', false), JSON.stringify(R('br_next')));
   ok('⑪ 1時間より前の窓は入った時に消える', Number(out.br_old) === 0, String(out.br_old));
   /* ⑫ */
   ok('⑫ 出した人＝removed（パス）', isErr('bn', 'removed') && Object.keys(R('bn')).length === 2, JSON.stringify(R('bn') || out.bn_err));
   ok('⑫ 出した人＝removed（URL）', isErr('bn_u', 'removed'), JSON.stringify(R('bn_u')));
-  ok('⑫ removed で数えが増えない', still('bn') && still('bn_u'), JSON.stringify([delta('bn'), delta('bn_u')]));
+  ok('⑫ removed で数えが増えない（パスは bf +1 だけ・URL は何も）', stillBf('bn') && still('bn_u'), JSON.stringify([delta('bn'), delta('bn_u')]));
   ok('⑫ 印を消すと入れる', okRet('bn_next', false), JSON.stringify(R('bn_next')));
   /* ⑭ */
   const pl = out.plain || {};
@@ -484,8 +515,8 @@ if (isTest) {
       if (who) {
         const dl = await AU(`/admin/users/${who}`, { method: 'DELETE', headers: { Authorization: `Bearer ${srv}` } }, srv);
         ok('⑬ 捨てアカウントを消した', dl.s === 200 || dl.s === 204, String(dl.s));
-        /* limits の key は字＝外部キーで消えない＝ここで消す（fail1m 'all' も試験が足した分＝mahjong の limits を書くのは試験だけ） */
-        await mq(`delete from mahjong.limits where kind like 'join:%' and (key = ${lit(who)} or (kind = 'join:fail1m' and window_start >= now() - interval '10 minutes'))`);
+        /* limits の key は字＝外部キーで消えない＝ここで消す（P3：全体の fail1m はやめた＝人の鍵だけ） */
+        await mq(`delete from mahjong.limits where kind like 'join:%' and key = ${lit(who)}`);
       }
     }
   }

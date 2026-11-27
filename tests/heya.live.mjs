@@ -67,14 +67,18 @@ const SH = (name, pass) => OPS('room_share', { name: lit(name), pass: lit(pass),
 const SEC = (pass) => OPS('room_secret', { pass: lit(pass), url_token_hash: URLH });
 const WR = (room, ops, op = 'gen_random_uuid()') => `public.mj_write(${room}, ${op}, ${ops})`;
 /* 1つ呼んで key に入れる（例外も拾う） */
-const T = (key, expr) => `begin r := ${expr}; exception when others then r := jsonb_build_object('raised', sqlerrm); end;
+/* P3：1つの取引の中は now() が同じ＝同じ人の続けての呼びが人ごとの1分の窓（create:u1m 5・join:ubf1m 20）に当たる＝T は呼ぶ前に空ける（その窓は room-create・room-join と下の ub・um で試す） */
+const Z = `delete from mahjong.limits where kind in ('create:u1m', 'join:ubf1m');`;
+const T0 = (key, expr) => `begin r := ${expr}; exception when others then r := jsonb_build_object('raised', sqlerrm); end;
     res := res || jsonb_build_object('${key}', r);`;
+const T = (key, expr) => `${Z} ${T0(key, expr)}`;
 const ROW = (key, sql) => `res := res || jsonb_build_object('${key}', (${sql}));`;
 const CNT = `jsonb_build_object('rooms', (select count(*) from mahjong.rooms), 'totals', (select rooms_all from mahjong.totals where id = 1),
   'c1m', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'create:1m'), 'c1d', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'create:1d'),
   'u1d', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'create:u1d'), 'nf', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:nfail1h'),
   'uf', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1m'), 'f1m', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:fail1m'),
-  'sec', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'secret:r1d'), 'creates', (select count(*) from mahjong.creates))`;
+  'sec', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'secret:r1d'), 'creates', (select count(*) from mahjong.creates),
+  'su', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'create:su1d'), 'ud', (select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1d'))`;   // P3
 const SNAP = (key) => ROW(key, CNT);
 const FORMULA = `(select count(*) from mahjong.rooms where kind = 'shared' and closed_at is null)`;
 const undo = (key, body) => `
@@ -170,7 +174,7 @@ begin
 
   /* ── 数え ── */
   ${undo('cu', `${asWho(3)}
-    for i in 1..5 loop r := ${C(null, null)}; end loop;
+    for i in 1..5 loop ${Z} r := ${C(null, null)}; end loop;
     ${T('cu_solo', C(null, null))} s2 := (r->>'room_id')::uuid;
     ${T('cu_c1', C(P('cu1'), '2741'))} ${T('cu_c2', C(P('cu2'), '2741'))} ${T('cu_c3', C(P('cu3'), '2741'))} ${T('cu_c4', C(P('cu4'), '2741'))} ${T('cu_c5', C(P('cu5'), '2741'))}
     ${SNAP('cu_s0')}
@@ -208,7 +212,7 @@ begin
     perform mahjong_private.mj_sweep(100);
     ${ROW('rc_2', `select jsonb_build_object('t', (select rooms_all from mahjong.totals where id = 1), 'f', ${FORMULA},
       'mark', exists (select 1 from mahjong.limits where kind = 'sweep:recount' and window_start = date_trunc('day', now())))`)}`)}
-  ${undo('rr', `update mahjong.totals set rooms_all = (select cap - 20 from mahjong.mj_caps where tbl = 'rooms' and scope = 'all') where id = 1;
+  ${undo('rr', `update mahjong.totals set rooms_all = 10000 where id = 1;   -- P3：R をやめた＝開いた shared が 201 でも 10000 でも作れる
     ${asWho(6)}
     ${SNAP('rr_c0')}
     ${T('rr_s1', C(null, null))} s2 := (r->>'room_id')::uuid;
@@ -247,24 +251,31 @@ begin
     ${T('p3_b', C(P('rs'), '2741', lit('a'.repeat(64)), 'op'))}
     ${SNAP('p3_c1')}`)}
   ${undo('nj', `${T('nj_a', C(P('nj'), '2741'))}
-    ${asWho(2)} for i in 1..4 loop r := ${JN(P('nj'), '0000')}; end loop;
+    ${asWho(2)} ${T('nj_s', C(null, null))} s2 := (r->>'room_id')::uuid;
+    for i in 1..4 loop ${Z} r := ${JN(P('nj'), '0000')}; end loop;
     ${T('nj_hit', JN(P('nj'), '2741'))}
-    ${asWho(3)} ${T('nj_w5', JN(P('nj'), '0001'))}
-    ${ROW('nj_nf', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:nfail1h' and key = mahjong_private.mj_name_key(${lit(P('nj'))})`)}
-    ${asWho(4)} ${T('nj_lock', JN(P('nj'), '2741'))}
-    ${asWho(2)} ${T('nj_lock_in', JN(P('nj'), '2741'))}
-    ${asWho(5)} ${T('nj_lock_c', C(P('nj'), '9999'))}
-    ${asWho(6)} ${T('nj_s', C(null, null))} s2 := (r->>'room_id')::uuid; ${T('nj_lock_sh', WR('s2', SH(P('nj'), '9999')))}
-    ${T('nj_other', C(P('nj2'), '2741'))}`)}
+    ${T('nj_w5', JN(P('nj'), '0001'))}
+    ${ROW('nj_nf', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:nfail1h' and key = mahjong_private.mj_name_key(${lit(P('nj'))}) || ':' || us[2]::text`)}
+    ${ROW('nj_nf_all', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:nfail1h' and key like mahjong_private.mj_name_key(${lit(P('nj'))}) || ':%'`)}
+    ${T('nj_lock_in', JN(P('nj'), '2741'))}
+    ${T('nj_lock_c', C(P('nj'), '9999'))}
+    ${T('nj_lock_sh', WR('s2', SH(P('nj'), '9999')))}
+    ${T('nj_other', C(P('nj2'), '2741'))}
+    ${asWho(3)} ${T('nj_b_j', JN(P('nj'), '2741'))}
+    ${asWho(4)} ${T('nj_b_w', JN(P('nj'), '0002'))}
+    ${asWho(5)} ${T('nj_b_c', C(P('nj'), '9999'))}`)}
   ${undo('nc', `${T('nc_a', C(P('nc'), '2741'))}
-    ${asWho(2)} for i in 1..5 loop r := ${C(P('nc'), '2741')}; res := res || jsonb_build_object('nc_d' || i, r); end loop;
+    ${asWho(2)} for i in 1..5 loop ${Z} r := ${C(P('nc'), '2741')}; res := res || jsonb_build_object('nc_d' || i, r); end loop;
     ${T('nc_lock', C(P('nc'), '2741'))}
-    ${asWho(3)} ${T('nc_lock_j', JN(P('nc'), '2741'))}`)}
+    ${T('nc_lock_j', JN(P('nc'), '2741'))}
+    ${ROW('nc_ud', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1d' and key = us[2]::text`)}
+    ${asWho(3)} ${T('nc_b_j', JN(P('nc'), '2741'))}`)}
   ${undo('ns', `${T('ns_a', C(P('ns'), '2741'))}
     ${asWho(2)} ${T('ns_s', C(null, null))} s2 := (r->>'room_id')::uuid;
-    for i in 1..5 loop r := ${WR('s2', SH(P('ns'), '2741'))}; res := res || jsonb_build_object('ns_d' || i, r); end loop;
+    for i in 1..5 loop ${Z} r := ${WR('s2', SH(P('ns'), '2741'))}; res := res || jsonb_build_object('ns_d' || i, r); end loop;
     ${T('ns_lock', WR('s2', SH(P('ns'), '2741')))}
-    ${ROW('ns_kind', `select kind from mahjong.rooms where id = s2`)}`)}
+    ${ROW('ns_kind', `select kind from mahjong.rooms where id = s2`)}
+    ${ROW('ns_ud', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ufail1d' and key = us[2]::text`)}`)}
   ${undo('sc', `${T('sc_a', C(P('sc'), '2741'))} ra := (r->>'room_id')::uuid;
     ${T('sc_b', C(P('sc'), '8360'))} rb := (r->>'room_id')::uuid;
     ${T('sc_dup', WR('ra', SEC('8360')))}
@@ -299,10 +310,30 @@ begin
       select gen_random_uuid(), ${lit(P('bn'))}, lpad((floor(random() * 100000000))::bigint::text, 8, '0'), extensions.crypt(lpad(k::text, 4, '0'), extensions.gen_salt('bf', 4)),
              ${URLH}, us[1], md5(random()::text), 'shared', mahjong_private.mj_name_key(${lit(P('bn'))}) from generate_series(1, 20) k;
     ${T('bn_c', C(P('bn'), '2741'))}`)}
-  ${undo('fa', `insert into mahjong.limits (kind, key, window_start, count) values ('join:fail1m', 'all', date_trunc('minute', now()), 100)
-      on conflict (kind, key, window_start) do update set count = 100;
-    ${T('fa_a', C(P('fa'), '2741'))}
-    ${asWho(2)} ${T('fa_j', JN(P('fa'), '2741'))}`)}
+  ${undo('fa', `${T('fa_a', C(P('fa'), '2741'))}
+    ${asWho(2)} ${T('fa_s', C(null, null))} s2 := (r->>'room_id')::uuid;
+    insert into mahjong.limits (kind, key, window_start, count) values ('join:ufail1d', us[2]::text, date_trunc('hour', now()) - interval '2 hours', 50)
+      on conflict (kind, key, window_start) do update set count = 50;
+    ${T('fa_j', JN(P('fa'), '2741'))}
+    ${T('fa_c', C(P('fa2'), '2741'))}
+    ${T('fa_sh', WR('s2', SH(P('fa3'), '2741')))}
+    ${T('fa_solo', C(null, null))}
+    ${asWho(3)} ${T('fa_other', JN(P('fa'), '2741'))}`)}
+  ${undo('ub', `insert into mahjong.rooms (id, name, room_no, pass_hash, url_token_hash, owner_user_id, channel_key, kind, name_key)
+      select gen_random_uuid(), ${lit(P('ub'))}, lpad((floor(random() * 100000000))::bigint::text, 8, '0'), extensions.crypt(lpad(k::text, 4, '0'), extensions.gen_salt('bf', 4)),
+             ${URLH}, us[1], md5(random()::text), 'shared', mahjong_private.mj_name_key(${lit(P('ub'))}) from generate_series(1, 20) k;
+    ${asWho(2)} ${T('ub_1', JN(P('ub'), '9999'))}
+    ${ROW('ub_n', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ubf1m' and key = us[2]::text`)}
+    ${SNAP('ub_c0')}
+    ${T0('ub_2', JN(P('ub'), '0001'))}
+    ${SNAP('ub_c1')}
+    ${ROW('ub_n2', `select coalesce(sum(count), 0) from mahjong.limits where kind = 'join:ubf1m' and key = us[2]::text`)}
+    ${asWho(3)} ${T0('ub_other', JN(P('ub'), '0002'))}`)}
+  ${undo('um', `${asWho(7)} ${T('um_s', C(null, null))} s2 := (r->>'room_id')::uuid;
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:u1m', us[7]::text, date_trunc('minute', now()), 5)
+      on conflict (kind, key, window_start) do update set count = 5;
+    ${T0('um_sh', WR('s2', SH(P('um'), '2741')))}
+    ${ROW('um_kind', `select kind from mahjong.rooms where id = s2`)}`)}
   raise exception 'MJRESULT%', res::text;
 end ${q('hy')};`;
 
@@ -334,7 +365,7 @@ function checkA(o) {
   ok('部屋なし：作れる・kind solo・番号を返さない・channel_key は返す', sm.ok === true && sm.kind === 'solo' && !('room_no' in sm) && /^[0-9a-f]{32}$/.test(sm.channel_key || ''), J(sm));
   ok("部屋なし：行は name '対局'・pass_hash '!solo'・name_key null・番号は今の式（8桁）", o.s_row && o.s_row.name === '対局' && o.s_row.pass_hash === '!solo' && o.s_row.name_key === null && o.s_row.no8 === true && o.s_row.kind === 'solo', J(o.s_row));
   const sd = dl(o.s_c0, o.s_c1);
-  ok('部屋なし：R を見ない＝totals は増えない・全体の 1m・1d +1・人ごと u1d は増えない', sd && sd.totals === 0 && sd.c1m === 1 && sd.c1d === 1 && sd.u1d === 0 && sd.rooms === 1, J(sd));
+  ok('部屋なし：R を見ない＝totals は増えない・P3 全体の 1m・1d は書かない・部屋なしの su1d +1・人ごと u1d は増えない', sd && sd.totals === 0 && sd.c1m === 0 && sd.c1d === 0 && sd.su === 1 && sd.u1d === 0 && sd.rooms === 1, J(sd));
   ok('部屋なし：同じ op_id の送り直し＝同じ返し（番号なし）', same(o.s_again, sm), J(o.s_again));
   ok('部屋なし：同じ op_id で kind が違う送り直し＝bad kind・何も残さない', isErr(o.s_kind, 'bad', { what: 'kind' }) && zero(dl(o.s_c1, o.s_c2), ['rooms', 'totals', 'c1m', 'c1d', 'u1d', 'nf', 'creates']), J([o.s_kind, dl(o.s_c1, o.s_c2)]));
   ok('名前とパスの片方だけ null は bad', isErr(o.s_half1, 'bad', { what: 'pass' }) && isErr(o.s_half2, 'bad', { what: 'name' }), J([o.s_half1, o.s_half2]));
@@ -350,7 +381,7 @@ function checkA(o) {
   const shk = o.sh?.results?.[0]?.channel_key;
   ok('room_share：ok・新しい channel_key を返す・kind shared・名前と name_key・パスと url を作り直す', o.sh?.ok === true && /^[0-9a-f]{32}$/.test(shk || '') && o.sh_row && o.sh_row.kind === 'shared'
     && o.sh_row.name === P('sh') && o.sh_row.nk === true && o.sh_row.ch === shk && o.sh_row.no_solo === true && o.sh_row.url === true, J([o.sh, o.sh_row]));
-  ok('room_share：rooms_all +1・作るの数え 1m・1d・u1d +1', shd && shd.totals === 1 && shd.c1m === 1 && shd.c1d === 1 && shd.u1d === 1, J(shd));
+  ok('room_share：rooms_all +1・作るの数え u1d +1（P3 全体の 1m・1d は書かない・su1d は足さない）', shd && shd.totals === 1 && shd.c1m === 0 && shd.c1d === 0 && shd.u1d === 1 && shd.su === 0, J(shd));
   ok('room_share：履歴に pass・hash・channel_key を書かない', Array.isArray(o.sh_hist) && o.sh_hist.length === 1 && !J(o.sh_hist).includes(shk || 'x') && !J(o.sh_hist).includes('$2'), J(o.sh_hist));
   ok('room_share：op_results に channel_key を残さない', o.sh_opr && o.sh_opr.ok === true && !J(o.sh_opr).includes('channel_key'), J(o.sh_opr));
   ok('room_share の送り直し → ok で今の channel_key を読み直して返す（v10.2）', o.sh_again?.ok === true && o.sh_again.results?.[0]?.channel_key === crypto.createHash('md5').update('heya-ch').digest('hex'), J(o.sh_again));
@@ -377,8 +408,8 @@ function checkA(o) {
   ok('room_close→room_delete→物理の消しで rooms_all が1回だけ減る', o.cl_del?.ok === true && Number(o.cl_2) === -1 && o.cl_3 && Number(o.cl_3.left) === 0 && Number(o.cl_3.d) === -1, J([o.cl_del, o.cl_2, o.cl_3]));
   ok('数え直しと足し引きが同じ値（create・部屋なし・room_share・room_close の後・数え直しても変わらない）', o.rc_1 && Number(o.rc_1.t) === Number(o.rc_1.f) && o.rc_2 && Number(o.rc_2.t) === Number(o.rc_2.f)
     && o.rc_2.mark === true && o.rc_sh?.ok === true && o.rc_cl?.ok === true, J([o.rc_1, o.rc_2]));
-  ok('部屋なしは R−20 でも作れて totals を変えない・shared の create は full・room_share は full', ['rr_s1', 'rr_s2', 'rr_s3'].every((k) => o[k]?.ok === true) && dl(o.rr_c0, o.rr_c1)?.totals === 0
-    && isErr(o.rr_sh, 'full') && isErr(o.rr_share, 'full', { what: 'rooms' }) && dl(o.rr_c1, o.rr_c2)?.totals === 0, J([o.rr_sh, o.rr_share, dl(o.rr_c0, o.rr_c1)]));
+  ok('P3：開いた shared が 10000 でも部屋なし・shared の create・room_share が作れる（R は無い・totals は shared の2つだけ +2）', ['rr_s1', 'rr_s2', 'rr_s3', 'rr_sh'].every((k) => o[k]?.ok === true) && o.rr_share?.ok === true
+    && dl(o.rr_c0, o.rr_c1)?.totals === 0 && dl(o.rr_c1, o.rr_c2)?.totals === 2, J([o.rr_sh, o.rr_share, dl(o.rr_c0, o.rr_c1), dl(o.rr_c1, o.rr_c2)]));
   /* 組 */
   ok('同じ名前・違うパスで2部屋作れる', o.p1_a?.ok === true && o.p1_b?.ok === true, J([o.p1_a, o.p1_b]));
   ok('名前で入れる：パスごとにそれぞれの部屋へ', o.p1_ja?.ok === true && o.p1_ja.room_id === o.p1_a?.room_id && o.p1_jb?.ok === true && o.p1_jb.room_id === o.p1_b?.room_id, J([o.p1_ja, o.p1_jb]));
@@ -395,12 +426,16 @@ function checkA(o) {
   ok('終えた後は同じ組で作れ、名前で新しい方に入る', o.p2_new?.ok === true && o.p2_jn?.ok === true && o.p2_jn.room_id === o.p2_new.room_id, J([o.p2_new, o.p2_jn]));
   ok('終えた部屋でも room_leave は通る', o.p2_leave?.ok === true, J(o.p2_leave));
   ok('送り直しは ok で同じ部屋・数えない', o.p3_a?.ok === true && same(o.p3_a, o.p3_b) && zero(dl(o.p3_c0, o.p3_c1), ['rooms', 'totals', 'creates', 'c1m', 'c1d', 'u1d', 'nf']), J([o.p3_b, dl(o.p3_c0, o.p3_c1)]));
-  ok('名前ごと5回で止め（join の外れ）＝入っていない人・入っている人・create・room_share も locked', Number(o.nj_nf) === 5 && isErr(o.nj_w5, 'wrong') && isErr(o.nj_lock, 'locked') && isErr(o.nj_lock_in, 'locked')
-    && isErr(o.nj_lock_c, 'locked') && isErr(o.nj_lock_sh, 'locked') && !!o.nj_lock?.until, J([o.nj_nf, o.nj_lock, o.nj_lock_in, o.nj_lock_c, o.nj_lock_sh]));
-  ok('当たっても戻らない（外れ4・当たり1・外れ1で止め）', o.nj_hit?.ok === true && Number(o.nj_nf) === 5 && isErr(o.nj_lock, 'locked'), J([o.nj_hit, o.nj_nf]));
+  ok('名前ごと5回で止め（join の外れ・P3＝名前×人）＝その人は入っていても・create・room_share も locked', Number(o.nj_nf) === 5 && Number(o.nj_nf_all) === 5 && isErr(o.nj_w5, 'wrong') && isErr(o.nj_lock_in, 'locked')
+    && isErr(o.nj_lock_c, 'locked') && isErr(o.nj_lock_sh, 'locked') && !!o.nj_lock_in?.until, J([o.nj_nf, o.nj_nf_all, o.nj_lock_in, o.nj_lock_c, o.nj_lock_sh]));
+  ok('当たっても戻らない（外れ4・当たり1・外れ1で止め）', o.nj_hit?.ok === true && Number(o.nj_nf) === 5 && isErr(o.nj_lock_in, 'locked'), J([o.nj_hit, o.nj_nf]));
+  ok('P3：人A の名前の止めは人B を止めない（B は入れる・外れは wrong・同じ名前で作れる＝dup でない組）', o.nj_b_j?.ok === true && isErr(o.nj_b_w, 'wrong') && isErr(o.nj_b_c, 'dup', { what: 'name_pass' }) === false && o.nj_b_c?.ok === true,
+    J([o.nj_b_j, o.nj_b_w, o.nj_b_c]));
   ok('名前の止めは他の名前を止めない', o.nj_other?.ok === true, J(o.nj_other));
-  ok('create の dup 5回で止め（create・join とも locked）', [1, 2, 3, 4, 5].every((i) => isErr(o['nc_d' + i], 'dup', { what: 'name_pass' })) && isErr(o.nc_lock, 'locked') && isErr(o.nc_lock_j, 'locked'), J([o.nc_d5, o.nc_lock, o.nc_lock_j]));
+  ok('create の dup 5回で止め（その人の create・join とも locked）', [1, 2, 3, 4, 5].every((i) => isErr(o['nc_d' + i], 'dup', { what: 'name_pass' })) && isErr(o.nc_lock, 'locked') && isErr(o.nc_lock_j, 'locked'), J([o.nc_d5, o.nc_lock, o.nc_lock_j]));
+  ok('P3：create の dup も1人の外れ24時間50に数える（5）・他の人は止めない', Number(o.nc_ud) === 5 && o.nc_b_j?.ok === true, J([o.nc_ud, o.nc_b_j]));
   ok('room_share の dup 5回で止め（6回目 locked・部屋なしのまま）', [1, 2, 3, 4, 5].every((i) => isErr(o['ns_d' + i], 'dup', { at: 'name_pass' })) && isErr(o.ns_lock, 'locked') && o.ns_kind === 'solo', J([o.ns_d5, o.ns_lock, o.ns_kind]));
+  ok('P3：room_share の dup も1人の外れ24時間50に数える（5）', Number(o.ns_ud) === 5, J(o.ns_ud));
   ok('room_secret で他の部屋と同じ組 → dup name_pass', isErr(o.sc_dup, 'dup', { at: 'name_pass' }), J(o.sc_dup));
   ok('room_secret の dup も1日3回に数える（塊が戻っても残る）', Number(o.sc_n1) === 1, String(o.sc_n1));
   ok('room_secret 4回目は busy what secret（3回目まで ok・パスは3回目の物）', o.sc_1?.ok === true && o.sc_2?.ok === true && Number(o.sc_n3) === 3 && isErr(o.sc_4, 'busy', { what: 'secret' }) && o.sc_pass === true, J([o.sc_1, o.sc_2, o.sc_n3, o.sc_4]));
@@ -411,7 +446,12 @@ function checkA(o) {
   ok('終えて消した部屋の room_undelete は組を比べず、終えたまま（name_key null）', o.uc_new?.ok === true && o.uc_undel?.ok === true && o.uc_row && o.uc_row.closed === true && o.uc_row.del === false && o.uc_row.nk === null, J([o.uc_new, o.uc_undel, o.uc_row]));
   ok('ambiguous（同じ名前とパスが2つ）は数えない', isErr(o.am_j, 'ambiguous') && zero(dl(o.am_c0, o.am_c1), ['uf', 'f1m', 'nf']), J([o.am_j, dl(o.am_c0, o.am_c1)]));
   ok('同じ name_key の開いた部屋が20 → busy what name', isErr(o.bn_c, 'busy', { what: 'name' }), J(o.bn_c));
-  ok('名前の道も全体 1分100 を見る（busy all）', o.fa_a?.ok === true && isErr(o.fa_j, 'busy', { what: 'all' }), J([o.fa_a, o.fa_j]));
+  ok('P3：名前の道も1人の外れ24時間50 を見る（busy user_day・until）', o.fa_a?.ok === true && isErr(o.fa_j, 'busy', { what: 'user_day' }) && !!o.fa_j?.until, J([o.fa_a, o.fa_j]));
+  ok('P3：その時 shared の create・room_share も busy user_day・部屋なしは作れる・他の人は入れる', isErr(o.fa_c, 'busy', { what: 'user_day' }) && isErr(o.fa_sh, 'busy', { what: 'user_day' }) && o.fa_solo?.ok === true && o.fa_other?.ok === true,
+    J([o.fa_c, o.fa_sh, o.fa_solo, o.fa_other]));
+  ok('P3：同じ名前の部屋20＝名前の道の1回で bf 20（wrong）・同じ分の次は busy user_min で何も増えない・他の人は入れる', isErr(o.ub_1, 'wrong') && Number(o.ub_n) === 20 && isErr(o.ub_2, 'busy', { what: 'user_min' })
+    && Number(o.ub_n2) === 20 && same(o.ub_c0, o.ub_c1) && o.ub_other?.ok === true, J([o.ub_1, o.ub_n, o.ub_2, o.ub_n2, o.ub_other]));
+  ok('P3：room_share も人ごと1分5を見る（busy user_min・部屋なしのまま）', isErr(o.um_sh?.results ? o.um_sh : o.um_sh, 'busy', { what: 'user_min' }) && o.um_kind === 'solo', J([o.um_sh, o.um_kind]));
   return L;
 }
 
@@ -452,7 +492,9 @@ async function race(i, label, make) {
     const pa = tm(rows(a));
     await new Promise((r) => setTimeout(r, 800));
     const pb = tm(rows(b));
-    const [[ra, ta], [rb, tb]] = await Promise.all([pa, pb]);
+    const st = await Promise.allSettled([pa, pb]);   // both settle before throw = no unhandled rejection (W8 restore must run)
+    const bad = st.find((s) => s.status === 'rejected'); if (bad) throw bad.reason;
+    const [[ra, ta], [rb, tb]] = st.map((s) => s.value);
     const A = ra[0]?.r, B = rb[0]?.r;
     made = [A, B].filter((x) => x && x.ok === true && (x.kind === 'shared' || Array.isArray(x.results) && /share/.test(label))).length;
     const n = (await rows(`select count(*) filter (where extensions.crypt(${lit(pass)}, pass_hash) = pass_hash)::int as n from mahjong.rooms
@@ -465,11 +507,11 @@ async function race(i, label, make) {
     res = { n: -1, good: false, err: true, info: '回らなかった — ' + String(e.message || e).slice(0, 400) };
   } finally {
     try {
-      const sub = res && res.w && made > 0 ? `update mahjong.limits set count = greatest(count - ${made}, 0) where key = 'all' and ((kind = 'create:1m' and window_start = '${res.w.m}') or (kind = 'create:1d' and window_start = '${res.w.h}'));` : '';
+      const sub = '';   // P3：全体の窓（create:1m・1d の 'all'）はやめた＝引く物が無い
       await rows(`with d as (delete from mahjong.rooms where owner_user_id in ('${u[0]}', '${u[2]}') or id in (${mine.map((x) => `'${x}'`).join(', ') || 'null'}) returning kind, closed_at)
         update mahjong.totals set rooms_all = greatest(rooms_all - (select count(*) from d where kind = 'shared' and closed_at is null), 0) where id = 1;
         delete from mahjong.creates where user_id in ('${u[0]}', '${u[2]}');
-        delete from mahjong.limits where key in ('${u[0]}', '${u[2]}', mahjong_private.mj_name_key(${lit(nm)})) or (kind = 'secret:r1d' and key in (${mine.map((x) => `'${x}'`).join(', ') || "''"})) or kind like 'write:%';
+        delete from mahjong.limits where key in ('${u[0]}', '${u[2]}', mahjong_private.mj_name_key(${lit(nm)})) or key like mahjong_private.mj_name_key(${lit(nm)}) || ':%' or (kind = 'secret:r1d' and key in (${mine.map((x) => `'${x}'`).join(', ') || "''"})) or kind like 'write:%';
         ${sub}
         delete from auth.users where id in ('${u[0]}', '${u[2]}'); select 1 as k`);
     } catch (e) { console.log('  ✗ 片付けが落ちた — ' + String(e.message).slice(0, 300)); res = { ...(res || {}), good: false, cleanFail: true }; }
@@ -495,27 +537,29 @@ const brk = (fn, pairs) => {
   for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error(`壊す字が無い（${fn}）: ${from.slice(0, 80)}`); t = t.split(from).join(to); }
   return t + (fn.startsWith('mahjong_private.') ? `\nrevoke all on function ${fn.replace(/\(.*$/, '')}${fnSig(fn)} from public, anon, authenticated;` : '');
 };
-const SIG = { 'mahjong_private.mj_w_op': '(uuid, uuid, text, uuid, int, jsonb)', 'mahjong_private.mj_pair_bf': '(text, text, uuid, jsonb)' };
+const SIG = { 'mahjong_private.mj_w_op': '(uuid, uuid, text, uuid, int, jsonb)', 'mahjong_private.mj_pair_bf': '(text, text, uuid, jsonb, uuid)' };
 const fnSig = (fn) => SIG[fn] || '';
-const CREATE_RECHECK = "v_pair := mahjong_private.mj_pair_bf(v_nk, v_key, null, coalesce(v_pre -> 'seen', '{}'::jsonb));   -- ★引き直し★";
-const SHARE_RECHECK = "v_j := mahjong_private.mj_pair_bf(v_rk, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = v_rk then p_o -> '_pre' -> 'seen' else '{}'::jsonb end);   -- ★引き直し★";
-const SECRET_PAIR = "v_j := mahjong_private.mj_pair_bf(s.name_key, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = s.name_key then p_o -> '_pre' -> 'seen' else '{}'::jsonb end);   -- ★room_secret の比べ★";
+const CREATE_RECHECK = "v_pair := mahjong_private.mj_pair_bf(v_nk, v_key, null, coalesce(v_pre -> 'seen', '{}'::jsonb), v_me);   -- ★引き直し★";
+const SHARE_RECHECK = "v_j := mahjong_private.mj_pair_bf(v_rk, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = v_rk then p_o -> '_pre' -> 'seen' else '{}'::jsonb end, p_me);   -- ★引き直し★";
+const SECRET_PAIR = "v_j := mahjong_private.mj_pair_bf(s.name_key, v_key, p_room, case when p_o -> '_pre' ->> 'nk' = s.name_key then p_o -> '_pre' -> 'seen' else '{}'::jsonb end, p_me);   -- ★room_secret の比べ★";
 const WZ = [
-  ['W1 名前の道がパス・locked・1分100 を見ない', () => brk('public.mj_room_join', [
-    ["if p_way in ('pass', 'name') then   -- ★名前の道の1分100★", "if p_way = 'pass' then"],
-    ['v_until := mahjong_private.mj_nfail_until(v_nk);   -- ★名前の道の止め★', 'v_until := null;'],
+  ['W1 名前の道がパス・locked・1人の外れ24時間50 を見ない', () => brk('public.mj_room_join', [
+    ["v_until := mahjong_private.mj_day_until('join:ufail1d', v_me::text, 50);   -- ★人の24時間50★", 'v_until := null;'],
+    ['v_until := mahjong_private.mj_nfail_until(v_nk, v_me);   -- ★名前の道の止め★', 'v_until := null;'],
     ['if extensions.crypt(v_pk, cand.pass_hash) = cand.pass_hash then   -- ★名前の道の比べ★', 'if true then']]),
-    ['名前の道：違うパスは wrong', '名前ごと5回で止め（join の外れ）', '名前の道も全体 1分100 を見る']],
+    ['名前の道：違うパスは wrong', '名前ごと5回で止め（join の外れ', 'P3：名前の道も1人の外れ24時間50 を見る']],
+  ['W11 P3 名前の道が bf を数えない', () => brk('public.mj_room_join', [['    if not mahjong_private.mj_ubf_take(v_me, case when v_n < 1 then 1 else v_n::int end) then   -- ★名前の道の bf の数え★', '    if false then']]),
+    ['P3：同じ名前の部屋20']],
   ['W2 joined_via で落ちる（name を決まりから外す）', () => `alter table mahjong.room_accounts drop constraint room_accounts_joined_via_ok;
     alter table mahjong.room_accounts add constraint room_accounts_joined_via_ok check (joined_via in ('pass', 'url', 'create', 'import')) not valid;`,   // not valid＝khaw に今ある name の行は見ない（新しい行だけ止める）
     ['名前で入れる（joined_via name）']],
   ['W3 比べが閉じた部屋を見る', () => brk('mahjong_private.mj_pair_bf', [["where r.name_key = p_nk and r.kind = 'shared' and r.closed_at is null", "where mahjong_private.mj_name_key(r.name) = p_nk and r.kind = 'shared'"]]),
     ['終えた後は同じ組で作れ']],
-  ['W4 dup を数えない', () => brk('public.mj_room_create', [['      perform mahjong_private.mj_nfail_add(v_nk);   -- ★dup の数え★（名前ごとの止め・当たっても戻さない）', '      null;']])
-    + '\n' + brk('public.mj_write', [["    perform mahjong_private.mj_nfail_add(nullif(mahjong_private.mj_name_key(pg_catalog.btrim(p_ops -> 0 ->> 'name', ' ' || chr(9) || chr(10) || chr(13) || chr(12288))), ''));   -- ★room_share の dup の数え★", '    null;']]),
+  ['W4 dup を数えない', () => brk('public.mj_room_create', [['      perform mahjong_private.mj_nfail_add(v_nk, v_me);   -- ★dup の数え★（名前ごとの止め・当たっても戻さない）', '      null;']])
+    + '\n' + brk('public.mj_write', [["    perform mahjong_private.mj_nfail_add(nullif(mahjong_private.mj_name_key(pg_catalog.btrim(p_ops -> 0 ->> 'name', ' ' || chr(9) || chr(10) || chr(13) || chr(12288))), ''), v_me);   -- ★room_share の dup の数え★", '    null;']]),
     ['create の dup 5回で止め', 'room_share の dup 5回で止め']],
   ['W5 当たりで数えを戻す', () => brk('public.mj_room_join', [['      v_found := true; v_ok := true;   -- ★名前の道の当たり★',
-    "      v_found := true; v_ok := true; delete from mahjong.limits l where l.kind = 'join:nfail1h' and l.key = v_nk;"]]),
+    "      v_found := true; v_ok := true; delete from mahjong.limits l where l.kind = 'join:nfail1h' and l.key = v_nk || ':' || v_me::text;"]]),
     ['当たっても戻らない']],
   ['W6 room_secret が比べを通らない', () => brk('mahjong_private.mj_w_op', [[SECRET_PAIR, "v_j := '{\"busy\": false, \"hit\": false}'::jsonb;"]]),
     ['room_secret で他の部屋と同じ組 → dup']],
@@ -526,9 +570,9 @@ const WZ = [
   ['W10 P4 room_secret の1日3回を4回に', () => brk('public.mj_write', [["interval '24 hours') >= 3 then", "interval '24 hours') >= 4 then"]]),
     ['room_secret 4回目は busy what secret']],
 ];
-const W8 = () => [brk('public.mj_room_create', [[CREATE_RECHECK, "v_pair := coalesce(v_pre, mahjong_private.mj_pair_bf(v_nk, v_key, null, '{}'::jsonb));"]]),
-  brk('mahjong_private.mj_w_op', [[SHARE_RECHECK, "v_j := coalesce(p_o -> '_pre', mahjong_private.mj_pair_bf(v_rk, v_key, p_room, '{}'::jsonb));"],
-    [SECRET_PAIR, "v_j := coalesce(p_o -> '_pre', mahjong_private.mj_pair_bf(s.name_key, v_key, p_room, '{}'::jsonb));"]])].join('\n');
+const W8 = () => [brk('public.mj_room_create', [[CREATE_RECHECK, "v_pair := coalesce(v_pre, mahjong_private.mj_pair_bf(v_nk, v_key, null, '{}'::jsonb, v_me));"]]),
+  brk('mahjong_private.mj_w_op', [[SHARE_RECHECK, "v_j := coalesce(p_o -> '_pre', mahjong_private.mj_pair_bf(v_rk, v_key, p_room, '{}'::jsonb, p_me));"],
+    [SECRET_PAIR, "v_j := coalesce(p_o -> '_pre', mahjong_private.mj_pair_bf(s.name_key, v_key, p_room, '{}'::jsonb, p_me));"]])].join('\n');
 const W8_RESTORE = () => fnText('public.mj_room_create') + '\n' + fnText('mahjong_private.mj_w_op') + '\nrevoke all on function mahjong_private.mj_w_op(uuid, uuid, text, uuid, int, jsonb) from public, anon, authenticated;';
 
 let pass = 0, fail = 0, exit = 0;

@@ -3,12 +3,12 @@
  * v18（全員ログイン・人×部屋＝room_accounts・合言葉と端末の秘密なし・案 v18_login_sekkei.md G・K-7・K-10）：
  *  ⓪ 人＝mj_me：claims 無し・匿名・session 無し・users 無し・消した人・止めた人・not_after 切れ・他人の session_id・
  *     uuid でない字＝mj_session（何も増えない）
- *  ① 作れて rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits は 1m・1d・u1d に1ずつ（+3）
+ *  ① 作れて rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits は u1m・u1d に1ずつ（+2・P3＝全体の 1m・1d はやめた）
  *     持ち主＝作った人・room_accounts は kan・create・admin_secret_hash 空・creates.user_id・返しの鍵は ok・room_id・room_no・channel_key の4つ
  *  ② 同じ op_id で送り直し＝同じ返し ／ url が違う＝mismatch ／ 消した部屋＝gone ／ 別の人の同じ op_id＝mj_op_other_user
  *  ③ 形の違い（secrets は url_token_hash の1つだけ・2つ3つは bad:secrets）・ルールの範囲の外・よくあるパスを弾く ④ 既定のルール（44鍵）
  *  ⑤ pass_hash は $2a$10$・そろえた字で照らせる・平文のパスは部屋の行のどこにも無い
- *  ⑥ 一意の当たり＝dup ⑦ R−20 で full ⑧ 全体 1分20・24時間200 で busy:all・人ごと24時間5部屋で busy:user（4なら作れる・別の人は作れる）
+ *  ⑥ 一意の当たり＝dup ⑦ P3：R はやめた＝開いた shared が多くても full にならない ⑧ P3：人ごと1分5（部屋なしも）で busy:user_min・部屋なし人ごと24時間100で busy:solo_day（until）・人ごと24時間5部屋で busy:user（4なら作れる・別の人は作れる）
  *  ★ok でない返しの後は creates・limits・totals・部屋の数が1つも増えていない★（S1・N2）
  *  ⑨ 関数の権限（definer・search_path 空・authenticated だけに EXECUTE・anon と PUBLIC に無し）
  *  ⑩ anon の鍵の PostgREST は 401/403 ／ 捨てアカウント（admin で作る＝メールを送らない）で呼んで bad:op_id →
@@ -182,23 +182,35 @@ begin
   ${undo('gone', `update mahjong.rooms set deleted_at = now() where id = rid;
     r := ${call(OP1, '甲', PASS, '{"players":4}', S1)}; res := res || jsonb_build_object('gone', r, 'c_gone', ${CNT});`)}
   ${undo('p1234', `r := ${call(uid(), '甲', '1234', '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('p1234', r);`)}
-  ${undo('full', `update mahjong.totals set rooms_all = (select cap - 20 from mahjong.mj_caps where tbl = 'rooms' and scope = 'all') where id = 1;
-    cx := ${CNT}; r := ${fresh()}; res := res || jsonb_build_object('full', r, 'c_full0', cx, 'c_full1', ${CNT});
-    update mahjong.totals set rooms_all = (select cap - 21 from mahjong.mj_caps where tbl = 'rooms' and scope = 'all') where id = 1;
-    r := ${fresh()}; res := res || jsonb_build_object('full_m1', r);`)}
-  ${undo('b1m', `insert into mahjong.limits (kind, key, window_start, count) values ('create:1m', 'all', date_trunc('minute', now()), 20)
-      on conflict (kind, key, window_start) do update set count = 20;
+  ${undo('nofull', `update mahjong.totals set rooms_all = 10000 where id = 1;   -- P3：R をやめた＝開いた shared が 201 でも 10000 でも作れる
+    res := res || jsonb_build_object('caps_rooms', (select count(*) from mahjong.mj_caps where tbl = 'rooms' and scope = 'all'));
+    r := ${fresh()}; res := res || jsonb_build_object('nofull', r, 'nofull_t', (select rooms_all from mahjong.totals where id = 1));`)}
+  ${undo('b1m', `insert into mahjong.limits (kind, key, window_start, count) values ('create:u1m', v_u::text, date_trunc('minute', now()), 5)
+      on conflict (kind, key, window_start) do update set count = 5;
     cx := ${CNT}; r := ${fresh()}; res := res || jsonb_build_object('b1m', r, 'c_b1m0', cx, 'c_b1m1', ${CNT});
-    update mahjong.limits set count = 19 where kind = 'create:1m' and key = 'all' and window_start = date_trunc('minute', now());
+    r := ${call(uid(), null, null, '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('b1m_solo', r, 'c_b1m2', ${CNT});
+    ${AS_U2}
+    r := ${fresh()}; res := res || jsonb_build_object('b1m_other', r);
+    ${AS_U}
+    update mahjong.limits set count = 4 where kind = 'create:u1m' and key = v_u::text and window_start = date_trunc('minute', now());
     r := ${fresh()}; res := res || jsonb_build_object('b1m_19', r);`)}
-  ${undo('b1d', `select coalesce(sum(count), 0) into n from mahjong.limits where kind = 'create:1d' and key = 'all' and window_start > now() - interval '24 hours';
-    insert into mahjong.limits (kind, key, window_start, count) values ('create:1d', 'all', date_trunc('hour', now()) - interval '23 hours', 200 - n)
-      on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 200 - n;
-    cx := ${CNT}; r := ${fresh()}; res := res || jsonb_build_object('b1d', r, 'c_b1d0', cx, 'c_b1d1', ${CNT});`)}
-  ${undo('old', `insert into mahjong.limits (kind, key, window_start, count) values ('create:1d', 'all', date_trunc('hour', now()) - interval '25 hours', 5000)
+  /* ⑧ P3 部屋なし人ごと24時間100（create:su1d）：23時間前に 60・今の時に 40＝100 → 101本目は busy solo_day・until＝23時間前の窓＋24時間 */
+  ${undo('b1d', `delete from mahjong.limits where kind = 'create:su1d' and key = v_u::text;
+    insert into mahjong.limits (kind, key, window_start, count) values ('create:su1d', v_u::text, date_trunc('hour', now()) - interval '23 hours', 60),
+      ('create:su1d', v_u::text, date_trunc('hour', now()), 40);
+    cx := ${CNT}; r := ${call(uid(), null, null, '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('b1d', r, 'c_b1d0', cx, 'c_b1d1', ${CNT},
+      'b1d_until', date_trunc('hour', now()) + interval '1 hour');
+    r := ${fresh()}; res := res || jsonb_build_object('b1d_shared', r);
+    ${AS_U2}
+    r := ${call(uid(), null, null, '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('b1d_other', r);
+    ${AS_U}
+    update mahjong.limits set count = 39 where kind = 'create:su1d' and key = v_u::text and window_start = date_trunc('hour', now());
+    r := ${call(uid(), null, null, '{"players":4}', sec(hex()))}; res := res || jsonb_build_object('b1d_99', r,
+      'b1d_99n', (select sum(count) from mahjong.limits where kind = 'create:su1d' and key = v_u::text));`)}
+  ${undo('old', `insert into mahjong.limits (kind, key, window_start, count) values ('create:su1d', v_u::text, date_trunc('hour', now()) - interval '25 hours', 5000)
       on conflict (kind, key, window_start) do update set count = 5000;
-    r := ${fresh()};
-    res := res || jsonb_build_object('old', r, 'old_left', (select count(*) from mahjong.limits where kind = 'create:1d' and window_start <= now() - interval '24 hours'));`)}
+    r := ${call(uid(), null, null, '{"players":4}', sec(hex()))};
+    res := res || jsonb_build_object('old', r, 'old_left', (select count(*) from mahjong.limits where kind = 'create:su1d' and window_start <= now() - interval '24 hours'));`)}
   /* ⑧ 人ごと24時間5部屋（U は ① で1つ作った＝窓に足して5にする／4にする） */
   ${undo('u5', `select coalesce(sum(count), 0) into n from mahjong.limits where kind = 'create:u1d' and key = v_u::text and window_start > now() - interval '24 hours';
     insert into mahjong.limits (kind, key, window_start, count) values ('create:u1d', v_u::text, date_trunc('hour', now()) - interval '23 hours', 5 - n)
@@ -260,8 +272,9 @@ if (out) {
   ok('① 作れた', r1.ok === true, JSON.stringify(r1));
   ok('① 返しの鍵は ok・room_id・kind・room_no・channel_key の5つ（段C で kind）・kind shared', Object.keys(r1).sort().join(',') === 'channel_key,kind,ok,room_id,room_no' && r1.kind === 'shared', JSON.stringify(Object.keys(r1)));
   ok('① rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits +3（u1d +1）',
-    same(d(out.c0, out.c1), { rooms: 1, rule_sets: 1, room_accounts: 1, creates: 1, accounts: 1, totals: 1, lim: 3, lim_u: 1, lim_rows: d(out.c0, out.c1).lim_rows }), JSON.stringify(d(out.c0, out.c1)));
+    same(d(out.c0, out.c1), { rooms: 1, rule_sets: 1, room_accounts: 1, creates: 1, accounts: 1, totals: 1, lim: 2, lim_u: 1, lim_rows: d(out.c0, out.c1).lim_rows }), JSON.stringify(d(out.c0, out.c1)));
   ok('① limits の create:u1d の鍵は作った人', out.lim_kinds && Number(out.lim_kinds['create:u1d:U']) === 1, JSON.stringify(out.lim_kinds));
+  ok('① P3：limits は create:u1d:U と create:u1m:U だけ（全体の all の窓は書かない＝create:% の和の差が +2）', out.lim_kinds && Object.keys(out.lim_kinds).filter((k) => k.endsWith(':U')).sort().join(',') === 'create:u1d:U,create:u1m:U' && d(out.c0, out.c1).lim === 2 && Number(out.lim_kinds['create:u1m:U']) === 1, JSON.stringify(out.lim_kinds));
   ok('① 部屋番号は8桁', /^[0-9]{8}$/.test(r1.room_no || ''), r1.room_no);
   ok('① channel_key は倉庫が作った32字の hex', /^[0-9a-f]{32}$/.test(r1.channel_key || '') && out.room.channel_key === r1.channel_key);
   ok('① 名前の前後の空白（全角も）が落ちた', out.room.name === '甲の部屋', out.room.name);
@@ -297,16 +310,20 @@ if (out) {
   });
   ok('③ 弾いた後に creates・limits・totals・部屋が1つも増えていない', same(out.c2, out.c3), JSON.stringify(d(out.c2, out.c3)));
   /* ⑦ */
-  ok('⑦ R−20 で full', out.full && out.full.err === 'full', JSON.stringify(out.full || out.full_err));
-  ok('⑦ full で何も増えない', out.c_full0 && same(out.c_full0, out.c_full1));
+  ok('⑦ P3：mj_caps に rooms/all が無い', Number(out.caps_rooms) === 0, JSON.stringify({ c: out.caps_rooms, e: out.nofull_err }));
+  ok('⑦ P3：開いた shared が 10000 でも full にならず作れる（rooms_all は数えだけ +1）', out.nofull && out.nofull.ok === true && Number(out.nofull_t) === 10001, JSON.stringify({ r: out.nofull, t: out.nofull_t, e: out.nofull_err }));
   ok('B0 よくあるパスの弾きは無い＝1234 で作れる', out.p1234 && out.p1234.ok === true, JSON.stringify(out.p1234));
-  ok('⑦ R−21 なら作れる', out.full_m1 && out.full_m1.ok === true, JSON.stringify(out.full_m1));
   /* ⑧ */
-  ok('⑧ 1分20個の後は busy:all', out.b1m && out.b1m.err === 'busy' && out.b1m.what === 'all', JSON.stringify(out.b1m || out.b1m_err));
+  ok('⑧ P3：人ごと1分5個の後の6個目は busy:user_min', out.b1m && out.b1m.err === 'busy' && out.b1m.what === 'user_min', JSON.stringify(out.b1m || out.b1m_err));
   ok('⑧ busy の時に limits・部屋が増えない', out.c_b1m0 && same(out.c_b1m0, out.c_b1m1), JSON.stringify(out.c_b1m0 && d(out.c_b1m0, out.c_b1m1)));
-  ok('⑧ 1分19個なら作れる', out.b1m_19 && out.b1m_19.ok === true, JSON.stringify(out.b1m_19));
-  ok('⑧ 24時間で200個の後は busy:all', out.b1d && out.b1d.err === 'busy' && out.b1d.what === 'all', JSON.stringify(out.b1d || out.b1d_err));
+  ok('⑧ P3：部屋なしも人ごと1分5に入る（6個目 busy:user_min・何も増えない）', out.b1m_solo && out.b1m_solo.err === 'busy' && out.b1m_solo.what === 'user_min' && same(out.c_b1m1, out.c_b1m2), JSON.stringify(out.b1m_solo));
+  ok('⑧ P3：その時も別の人は作れる（他の人の数えで止まらない）', out.b1m_other && out.b1m_other.ok === true, JSON.stringify(out.b1m_other));
+  ok('⑧ 1分4個なら作れる', out.b1m_19 && out.b1m_19.ok === true, JSON.stringify(out.b1m_19));
+  ok('⑧ P3：部屋なし 24時間100個の後の101個目は busy:solo_day・until＝一番古い窓が抜ける時', out.b1d && out.b1d.err === 'busy' && out.b1d.what === 'solo_day'
+    && out.b1d.until && Date.parse(out.b1d.until) === Date.parse(out.b1d_until), JSON.stringify([out.b1d, out.b1d_until, out.b1d_err]));
   ok('⑧ busy（1日）の時に何も増えない', out.c_b1d0 && same(out.c_b1d0, out.c_b1d1));
+  ok('⑧ P3：部屋なしの24時間100は shared を止めない・別の人の部屋なしも止めない', out.b1d_shared?.ok === true && out.b1d_other?.ok === true, JSON.stringify([out.b1d_shared, out.b1d_other]));
+  ok('⑧ P3：99個なら部屋なしを作れて su1d が100になる', out.b1d_99?.ok === true && Number(out.b1d_99n) === 100, JSON.stringify([out.b1d_99, out.b1d_99n]));
   ok('⑧ 24時間より前の窓は数えず、作った時に消える', out.old && out.old.ok === true && Number(out.old_left) === 0, JSON.stringify({ old: out.old, left: out.old_left, e: out.old_err }));
   ok('⑧ 人ごと24時間5部屋の後は busy:user', out.u5 && out.u5.err === 'busy' && out.u5.what === 'user', JSON.stringify(out.u5 || out.u5_err));
   ok('⑧ busy:user の時に何も増えない', out.c_u50 && same(out.c_u50, out.c_u51), JSON.stringify(out.c_u50 && d(out.c_u50, out.c_u51)));
