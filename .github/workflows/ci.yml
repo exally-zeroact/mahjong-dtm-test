@@ -101,6 +101,10 @@ jobs:
         run: node tests/aizu-read.test.mjs
       - name: 合図で読む束ねの自己確認（lib をわざと壊して赤になるか）
         run: node tests/aizu-read.test.mjs --self-test
+      - name: 人の名前を直す・外す・戻すの部品（lib/meibo.mjs・A25）＝期待値（字・名の確かめ・op・点の回数と今の席・確かめの字・押した時の id）
+        run: node tests/meibo.test.mjs
+      - name: 人の部品の自己確認（lib をわざと壊して赤になるか）
+        run: node tests/meibo.test.mjs --self-test
       - name: 自分の戦績（lib/my-stats.mjs・C2-2）＝期待値（pt／込み／点・4人と3人・出た部屋・出た後の印・全部読めた印）
         run: node tests/my-stats.test.mjs
       - name: 自分の戦績の自己確認（lib をわざと壊して赤になるか）

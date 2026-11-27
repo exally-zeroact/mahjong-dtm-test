@@ -388,14 +388,14 @@ const MUT = [
   { file: G, from: 'data-heya>部屋 \' + esc(roomName(x))', to: 'data-heya>\' + esc(roomName(x))', name: '見出しに「部屋」を付けない（L3）', only: 'L3' },
   { file: G, from: "const ROOM_DEFAULT = 'do the math';", to: "const ROOM_DEFAULT = '部屋';", name: '名の無い部屋を「部屋」と出す（L3）', only: 'L3' },
   { file: 'css/gamen.css', from: '.lg-heya { font-size: 12px;', to: '.lg-heya { font-size: 18px;', name: '見出しをリーグの名より大きくする（L3）', only: 'L3' },
-  { file: G, from: "rosterSend(b.dataset.r, b.dataset.rnok, 'rename', { op: 'member_rename', member_id: b.dataset.rnok, name: nm });", to: '', name: '名前を直すを送らない（L4）', only: 'L4' },
-  { file: G, from: "  if (e === 'dup') return ROSTER_ERR.dup;\n", to: '', name: '名の dup に字を出さない（L4）', only: 'L4' },
-  { file: G, from: "  if (e === 'mj_role') return ROSTER_ERR.role;\n", to: '', name: '役の門の字を出さない（L4）', only: 'L4' },
-  { file: G, from: "  count(x.read.st);\n  for (const st of (x.mm && x.mm.sts) || []) {\n    count(st);", to: "  count(x.read.st);\n  for (const st of (x.mm && x.mm.sts) || []) {\n", name: 'リーグの半荘を点の回数に数えない（L5）', only: 'L5' },
-  { file: G, from: "        if (b && b.includes(mid)) at.push(t.label);", to: '', name: '今の席の卓を出さない（L5）', only: 'L5' },
+  { file: G, from: "rosterSend(b.dataset.r, b.dataset.rnok, 'rename', memberOp.rename(b.dataset.rnok, c.name));", to: '', name: '名前を直すを送らない（L4）', only: 'L4' },
+  { file: 'lib/meibo.mjs', from: "  if (e === 'dup') return MEIBO_ERR.dup;\n", to: '', name: '名の dup に字を出さない（L4）', only: 'L4' },
+  { file: 'lib/meibo.mjs', from: "  if (e === 'mj_role') return MEIBO_ERR.role;\n", to: '', name: '役の門の字を出さない（L4）', only: 'L4' },
+  { file: 'lib/meibo.mjs', from: "    if (!st) continue;\n    count(st);\n", to: "    if (!st) continue;\n", name: 'リーグの半荘を点の回数に数えない（L5）', only: 'L5' },
+  { file: 'lib/meibo.mjs', from: "        if (b && b.includes(mid)) at.push(t.label);", to: '', name: '今の席の卓を出さない（L5）', only: 'L5' },
   { file: G, from: "(x.mm && x.mm.sts ? '' : ' disabled')", to: "''", name: 'リーグを読む前から［外す］を押せる（L5）', only: 'L5' },
   { file: G, from: "const mem = all.filter((m) => m.active !== false), gone = all.filter((m) => m.active === false);", to: 'const mem = all, gone = [];', name: '外した人を名簿に並べたまま（L5）', only: 'L5' },
-  { file: G, from: "{ op: 'member_active', member_id: b.dataset.on, active: true }", to: "{ op: 'member_active', member_id: b.dataset.on, active: false }", name: '戻すで active true を送らない（L5）', only: 'L5' },
+  { file: G, from: "memberOp.on(b.dataset.on)", to: "memberOp.off(b.dataset.on)", name: '戻すで active true を送らない（L5）', only: 'L5' },
 ];
 (async () => {
   LIB = await import(pathToFileURL(path.join(ROOT, 'lib/room-state.mjs')).href);

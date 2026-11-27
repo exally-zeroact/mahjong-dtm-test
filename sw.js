@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '4d4095eef911';
+const VER = '280f433b761d';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', 'c51304705cf1bfcd9511fe38d93cd23c991c9764b530061109a056a6f96dcee4'],
@@ -21,7 +21,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '25bf68837ebb077ec2d46e611866459bda3d0cdf42979a54db5e91b0d85ecbfa'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
-  ['/js/gamen-league.mjs', '736cf158236fa1b484a0175d20849f8e0bf49888764fc087f05223bcec970ddf'],
+  ['/js/gamen-league.mjs', '928e3c0331edb1966e1a2bd45d1e5d5d48fc5c88ab226ea9458872406602e260'],
   ['/js/gamen-room.mjs', '56a297e713f54d59771df80dc85d6c7d8da227f7b22d56029bab2d4f6bbb7a34'],
   ['/js/gamen-rules.mjs', 'cb30b4f4be5e34150f863b85ba29fc47e654a89a8338b626e73461e31b9a60f8'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
@@ -40,6 +40,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/league-rank.mjs', 'b581d6419d0e47096699ebd290a156aa2d027fb94eff5d0b420e899833401e57'],
   ['/lib/league-round.mjs', '5d7675480bd067e8f1b012b2c00694f9f013339dbc65c185d5e8efba3d170b1c'],
+  ['/lib/meibo.mjs', '9912bbb90829f56b7988e101d84ec87744cc5d02e03aa30bdb22118ab31972ec'],
   ['/lib/my-stats.mjs', 'c69ac0283a7a6d8f45adcf973c746ff10cb538ebc59b21e1d8fdf4ae4b44f4bb'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
