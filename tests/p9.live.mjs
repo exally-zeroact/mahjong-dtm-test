@@ -109,6 +109,10 @@ begin
     ${W('w2', [{ op: 'member_add', member_id: M1, name: '鈴木' }, { op: 'session_add', session_id: S1, date: '2026-11-27', rate: 100 }])}
     ${W('big', [BIG])}
     ${ROW('bigsz', `select octet_length(z.content::text) + octet_length(z.used::text) + octet_length(z.missing::text) from mahjong.settle_snaps z where z.session_id = '${S1}' and z.rev = 1`)}
+    -- E1 の前：見張りの印を今の書きの直前に置き直す（試しの塊は全部戻す＝戻した取引の id の空きが 50,000 を越えると E1 が1回で届かない・11-27 khaw で 61,488）
+    v_mx0 := (select pg_catalog.min(h.id) - 1 from mahjong.history h where h.room_id = ra);
+    update mahjong.wwatch set from_id = v_mx0, to_id = v_mx0;
+    ${ROW('mx0e1', 'select v_mx0')}
     -- E1 書いた後の1回
     v_mx1 := ${MX};
     v_lc := (select count(*) from mahjong.limits);
@@ -188,7 +192,7 @@ function check(o) {
   ok('W 締めの大きさがちょうど 32,768', Number(o.bigsz) === 32768, J(o.bigsz));
   ok('W 32KB の締め1つ＝重み 32（u1m・ur1m・uk1d・rk1d・u1d +32）・履歴は1行・all 0', bg && bg.h === 1 && bg.u === 32 && bg.ur === 32 && bg.uk === 32 && bg.rk === 32 && bg.ud === 32 && bg.all === 0, J(bg));
   const e1 = o.e1 || [];
-  const mx0 = Number(o.mx0), mx1 = Number(o.mx1);
+  const mx0 = Number(o.mx0e1), mx1 = Number(o.mx1);
   ok('E1 書いた後の1回＝同じ時の同じ from は1行（上書き）・from＝前の max・to＝今の max・rows＝その差（≥ 4）', e1.length === 1 && Number(e1[0].from) === mx0 && Number(e1[0].to) === mx1 && Number(e1[0].rows) === mx1 - mx0 && mx1 - mx0 >= 4, J([e1, mx0, mx1]));
   ok('E1 bytes＝(from, to] の pg_column_size の和（> 0）', e1.length === 1 && Number(e1[0].bytes) === Number(o.e1bytes) && Number(o.e1bytes) > 0, J([e1[0]?.bytes, o.e1bytes]));
   ok('E1 limits の行は増えない（見張りは limits に書かない）', Number(o.e1lim) === 0, J(o.e1lim));
