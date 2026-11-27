@@ -4,12 +4,13 @@
  * 芯＝★版を道に入れる（控えの中だけ）★：install で html の <script src> と <link rel="stylesheet" href> の名簿の道を
  *   /v/<VER>/<道> に書き換えて控えに入れる。import は全部相対なので、1つの画面の取りはその html の版の控えにしか行かない＝混ざらない。
  *   repo の html・js は1字も変えない（ネットで開く時は普通のウェブ）。a href・manifest・apple-touch-icon は触らない。
- * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
+ * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-part（取りかけの続きの置き場・画面と activate が作る）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し・mj-part が無い時の続きの置き場）。
+ * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'f18ae85c6323';
+const VER = 'c4221acb6e99';
 const ASSETS = /*ASSETS-BEGIN*/[
-  ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
+  ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '2333a31cf42ffb37998f9105741ff07b5894abfee2a3fd3dcc16a8dde1c6e117'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
@@ -29,7 +30,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/kenban.mjs', 'ad7e1f231d24f51d6517e904f1d81fefe883f396a8b0123b1c049b9094715a7a'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/rules-memory.mjs', '38dc35121e4c63683a3a2ff658803d73368436990a20f121540d9b25b4391495'],
-  ['/js/sw-reg.js', '6cabdb55f344b5ec9f1087e98e13efb4d7d41491745d089ee1c9fede624cd6ba'],
+  ['/js/sw-reg.js', 'd6f454be54cfeaa50c9b45ea337dd02582ebb1b0ca2bc988db659153a8d524cb'],
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
   ['/league.html', '9025ac356cebce04924c803955b73999bcfc198e866fc7136ec2bb2298430150'],
@@ -61,6 +62,8 @@ const C = 'mj-' + VER;
 const TMP = 'mj-tmp-' + VER + '-';
 const CONF = 'mj-conf';
 const CONF_PATH = '/js/supa-config.js';
+const PART = 'mj-part';                        // 続きの置き場（install の外＝画面の sw-reg.js と activate が作る）
+const FB = 'mj-tmp-' + VER + '-x';              // mj-part も mj-conf も無い時の使い捨て（続きは無い）
 const DONE = O + '/__mj_done';
 const CACHE_RE = /^mj-[0-9a-f]{12}$/;
 const V_RE = /^\/v\/([0-9a-f]{12})(\/.*)$/;
@@ -69,6 +72,13 @@ const PATHS = new Map(ASSETS);
 const WAIT = self.MJ_WAIT_MS || 3000;          // 画面と supa-config のネット待ち
 const RETRY = self.MJ_RETRY_MS || 30000;       // 取り直しが落ちた後に、次に走れるまで
 const vkey = (ver, p) => O + '/v/' + ver + p;
+const TRIES = self.MJ_TRIES || [0, 500, 1500]; // 1つの素材を取る回数と、その前に待つ ms（iOS の電波の揺れ・一時の 5xx）
+const POOL = 4;                                // 同時に取る本数（45本を1本ずつだと遅い＝取り込みの途中で iOS が SW を止める）
+const INSTALL_MS = self.MJ_INSTALL_MS || 90000; // install 全体の締め切り（iOS で返らない取りが在っても install を終わらせ、画面に「取り込めませんでした」）
+const FETCH_MS = self.MJ_FETCH_MS || 20000;     // 1回の取りの締め切り（返事が無い取りは1回の落ちとして取り直す）
+const VPRE = O + '/v/';
+const SHA_H = 'x-mj-sha';                      // 仮の控えに入れた素材の「取った中身の sha」＝次の取り込みで飛ばしてよいかの印
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -93,55 +103,115 @@ async function isDone(name) {
   return !!(await (await caches.open(name)).match(DONE));
 }
 
-/** 名簿を全部ネットから取り、sha を照らして仮の控えへ。1つでも違えば投げる。 */
-async function fillInto(tmpName) {
-  const tmp = await caches.open(tmpName);
-  for (const [p, want] of ASSETS) {
-    const r = await fetch(new Request(O + p, { cache: 'reload' }));
-    if (!r.ok || r.redirected) throw new Error('取れない ' + p + ' ' + r.status);
-    const buf = await r.arrayBuffer();
-    const got = hex(await crypto.subtle.digest('SHA-256', buf));
-    if (got !== want) throw new Error('中身が違う ' + p);
-    const headers = new Headers();
-    const ct = r.headers.get('Content-Type');
-    if (ct) headers.set('Content-Type', ct);
-    const body = p.endsWith('.html') ? rewriteHtml(new TextDecoder().decode(buf), p) : buf;
-    await tmp.put(vkey(VER, p), new Response(body, { status: 200, headers }));
+const stopped = (signal) => !!(signal && signal.aborted);
+
+/** 1つの素材をネットから取り、sha を照らす。落ち・ok でない・寄り道・中身違い・FETCH_MS 越えは待ってやり直す（TRIES の回数）。全部だめなら投げる。
+ *  signal（install の締め切り）が切れたら、次の取り直しをしない・今の取りも切る。 */
+async function fetchOne(p, want, signal) {
+  let last = null;
+  for (const wait of TRIES) {
+    if (wait) await pause(wait);
+    if (stopped(signal)) throw new Error('締め切り');
+    const ac = new AbortController();
+    const cut = () => ac.abort();
+    if (signal) signal.addEventListener('abort', cut);
+    const t = setTimeout(cut, FETCH_MS);
+    try {
+      const r = await fetch(new Request(O + p, { cache: 'reload', signal: ac.signal }));
+      if (!r.ok || r.redirected) { last = new Error('取れない ' + p + ' ' + r.status); continue; }
+      const buf = await r.arrayBuffer();
+      if (hex(await crypto.subtle.digest('SHA-256', buf)) !== want) { last = new Error('中身が違う ' + p); continue; }
+      return { buf, ct: r.headers.get('Content-Type') };
+    } catch (err) { last = err; } finally { clearTimeout(t); if (signal) signal.removeEventListener('abort', cut); }
   }
+  throw last;
 }
 
-/** 仮から mj-<VER> へ写し、名簿が全部そろったと数えてから完了印。仮は消す。 */
-async function promote(tmpName) {
+/** 名簿を仮の控えへ（swupd_sadame v1.1 §2）。仮に在って印 x-mj-sha が名簿と同じ物は取らない＝取り込みが途中で止まっても（iOS が SW を止める・電波）
+ *  次は残りだけ取る。同じ VER＝同じ名簿の sha なので混ざらない。POOL 本ずつ並べ、1つでも取れなければ他を取り終えてから投げる（取れた物は仮に残る）。 */
+async function fillInto(tmpName, signal) {
+  const tmp = await caches.open(tmpName);
+  const todo = [];
+  for (const [p, want] of ASSETS) {
+    const have = await tmp.match(vkey(VER, p));
+    if (!have || have.headers.get(SHA_H) !== want) todo.push([p, want]);
+  }
+  let next = 0, fail = null;
+  const lane = async () => {
+    while (next < todo.length && !stopped(signal)) {
+      const [p, want] = todo[next++];
+      try {
+        const { buf, ct } = await fetchOne(p, want, signal);
+        if (stopped(signal)) break;
+        const headers = new Headers();
+        if (ct) headers.set('Content-Type', ct);
+        headers.set(SHA_H, want);
+        const body = p.endsWith('.html') ? rewriteHtml(new TextDecoder().decode(buf), p) : buf;
+        await tmp.put(vkey(VER, p), new Response(body, { status: 200, headers }));
+      } catch (err) { if (!fail) fail = err; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(POOL, todo.length) }, lane));
+  if (stopped(signal)) throw new Error('締め切り');
+  if (fail) throw fail;
+}
+
+/** 置き場から mj-<VER> へ ★この VER の /v/ の物だけ★ 写し（mj-conf の supa-config は写さない）、名簿が全部そろったと数えてから完了印。
+ *  置き場が mj-part・mj-conf なら写した物だけ消す（控えは残す）。使い捨て（mj-tmp-*）は控えごと消す。締め切りが切れたら写しも印もしない。 */
+async function promote(tmpName, signal) {
   const tmp = await caches.open(tmpName);
   const c = await caches.open(C);
-  for (const req of await tmp.keys()) await c.put(req, await tmp.match(req));
+  const mine = (await tmp.keys()).filter((req) => req.url.startsWith(VPRE + VER + '/'));
+  for (const req of mine) {
+    if (stopped(signal)) throw new Error('締め切り');
+    await c.put(req, await tmp.match(req));
+  }
   for (const [p] of ASSETS) if (!(await c.match(vkey(VER, p)))) throw new Error('写しが欠けた ' + p);
+  if (stopped(signal)) throw new Error('締め切り');
   await c.put(DONE, new Response(JSON.stringify({ ver: VER, at: Date.now() }), { headers: { 'Content-Type': 'application/json' } }));
-  await caches.delete(tmpName);
+  if (tmpName === PART || tmpName === CONF) { for (const req of mine) await tmp.delete(req); }
+  else await caches.delete(tmpName);
+}
+
+/** 続きの置き場から、他の版の /v/ の物を消す（mj-conf の supa-config は触らない）。残るのは今の VER の分だけ。 */
+async function cleanOther(name) {
+  if (!(await caches.has(name))) return;
+  const c = await caches.open(name);
+  for (const req of await c.keys()) if (req.url.startsWith(VPRE) && !req.url.startsWith(VPRE + VER + '/')) await c.delete(req);
 }
 
 async function dropTmp(keepPrefix) {
   for (const k of await caches.keys()) if (k.startsWith('mj-tmp-') && !(keepPrefix && k.startsWith(keepPrefix))) await caches.delete(k);
 }
 
-async function build(tmpName) {
-  try {
-    await caches.delete(C);            // 印の無い mj-<VER> は使わない＝消して取り直す
-    await fillInto(tmpName);
-    await promote(tmpName);
-  } catch (err) {
-    await caches.delete(tmpName);
-    await caches.delete(C);
-    throw err;
-  }
+/** 落ちても mj-<VER> を消さない（v1.3.1 §2：締め切りの後に遅れて落ちた古い取り込みが、次の install の出来上がった控えを消していた）。
+ *  印の無い mj-<VER> は始めにだけ消す（取りの道は印の在る控えしか使わない＝fromCache・isDone）。置き場は残す＝次は残りだけ。 */
+async function build(tmpName, signal) {
+  await caches.delete(C);              // 印の無い mj-<VER> は使わない＝消して取り直す
+  await fillInto(tmpName, signal);
+  await promote(tmpName, signal);
+}
+
+/** 続きの置き場を選ぶ（install は作らない）：mj-part → mj-conf → 使い捨て。 */
+async function pickStore() {
+  if (await caches.has(PART)) return PART;
+  if (await caches.has(CONF)) return CONF;
+  return FB;
 }
 
 self.addEventListener('install', (e) => {
-  e.waitUntil((async () => {
-    await dropTmp(TMP);                // 同じ登録の install は1つずつ＝他の版の仮は残骸
+  const ac = new AbortController();
+  let timer = null;
+  const run = (async () => {
+    await dropTmp(TMP);                // 他の版の仮は残骸
+    await caches.delete(FB);           // 使い捨ては毎回新しく（dropTmp(TMP) は同じ版の名を残す）
     if (await isDone(C)) return;       // 完了印の在る控えは取り直さない
-    await build(TMP + 'i');
-  })());
+    await cleanOther(PART);
+    await cleanOther(CONF);
+    await build(await pickStore(), ac.signal);
+  })();
+  const deadline = new Promise((_, ng) => { timer = setTimeout(() => { ac.abort(); ng(new Error('install の締め切り')); }, INSTALL_MS); });
+  e.waitUntil(Promise.race([run, deadline]).finally(() => { clearTimeout(timer); ac.abort(); }));
 });
 
 self.addEventListener('activate', (e) => {
@@ -156,6 +226,7 @@ self.addEventListener('activate', (e) => {
       if (at > prevAt) { prevAt = at; prev = k; }
     }
     for (const k of olds) if (k !== prev) await caches.delete(k);
+    await caches.open(PART);           // 次の版の続きの置き場（install の外で作る＝v1.3.1 §1）
     await self.clients.claim();
   })());
 });
@@ -164,14 +235,13 @@ self.addEventListener('message', (e) => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-let refilling = null, refillFailAt = 0, refillN = 0;
+let refilling = null, refillFailAt = 0;
 /** 控えが欠けた・追い出された時の取り直し＝sw の中で1本だけ。 */
 function startRefill(e) {
   if (refilling || Date.now() - refillFailAt < RETRY) return;
   refilling = (async () => {
     try {
-      await dropTmp(null);
-      await build(TMP + 'r' + (++refillN) + '-' + Date.now());
+      await build(TMP + 'r');          // 自分の仮の続きから・他の版の仮（新しい版の取り込み中の物）には触らない（§2・前は dropTmp(null) で消していた）
     } catch (_) {
       refillFailAt = Date.now();
     } finally {

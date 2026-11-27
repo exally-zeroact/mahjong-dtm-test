@@ -9,10 +9,11 @@
  *    q 控えの html は script src と stylesheet href の名簿の道だけ /v/<VER>/・a href・manifest・apple-touch-icon・supa-config は替わらない・meta mj-ver
  *    b ?room=・/r/<token>・/r/<token>/・/ が控えの画面　c 5xx も名簿の外の答えも控えに入らない・404 はそのまま
  *    d install で skipWaiting しない・SKIP_WAITING でだけする　e 名簿の外の画面で3秒越え／すぐ落ちた時は控えの /index.html
- *    s activate で今と「1つ前」だけ残る・mj-conf と mj-tmp は残る　g install で中身が違う／5xx の時は控えも仮も残らない
+ *    s activate で今と「1つ前」だけ残る・mj-conf と mj-tmp は残る　g install で中身が違う／5xx の時は控えが残らず仮は残る・直った後は残りだけ取る（swupd v1.1）
+ *    g2 一時の 5xx・中身違いは取り直して通る　g3 取りは並ぶ（同時に2本以上）
  *    h GET 以外・他の origin・/version.json は素通し　i 完了印の在る控えは取り直さない
  *    j 印の無い控えは使わない（画面はネットの素の html・裏で取り直して印が付く）　t 取り直しは重なっても1本
- *    k 取り直しが落ちたら印は付かず仮も残らない・すぐには走り直さない　r /v/<古い版>/ は古い控えから・控えに無ければ素の道を取る
+ *    k 取り直しが落ちたら印は付かない・すぐには走り直さない・他の版の仮（取り込み中の物）を消さない　r /v/<古い版>/ は古い控えから・控えに無ければ素の道を取る
  *    l supa-config＝初めてはネットの答え・遅い／5xx は mj-conf・ok なら入れ直す　p 素の道はネットが先・落ちた時だけ控え
  * --self-test＝上の決まりをわざと壊した sw.js・sw-reg.js・html の写しを食わせて、壊しごとに赤になるか（CI 床＝壊しの数）
  */
@@ -38,7 +39,8 @@ class FakeCache {
     const v = this.m.get(k);
     return v ? new Response(v.buf.slice(0), { status: v.status, headers: v.headers }) : undefined;
   }
-  async keys() { return [...this.m.keys()]; }
+  async keys() { return [...this.m.keys()].map((url) => ({ url })); }  // 本物と同じく Request の形（.url）で返す
+  async delete(r) { return this.m.delete(this.key(r)); }
 }
 class FakeCaches {
   constructor() { this.c = new Map(); }
@@ -60,17 +62,26 @@ function makeEnv(swText, opt = {}) {
   const caches = new FakeCaches();
   const files = opt.files || serverFrom(ROOT);
   const log = [];
-  const net = { delay: {}, fail: new Set(), status: {}, body: {} };
+  const net = { delay: {}, hold: {}, fail: new Set(), status: {}, body: {}, statusN: {}, bodyN: {}, live: 0, peak: 0 };
   const fetchFn = async (req) => {
     const url = new URL(typeof req === 'string' ? req : req.url, ORIGIN);
     log.push({ url: url.href, path: url.pathname, cache: req.cache });
-    const d = net.delay[url.pathname]; if (d) await sleep(d);
+    net.live++; net.peak = Math.max(net.peak, net.live);
+    try {
+    const sig = typeof req === 'string' ? null : req.signal;
+    const wait = (ms) => new Promise((ok, ng) => { const t = setTimeout(ok, ms); if (sig) sig.addEventListener('abort', () => { clearTimeout(t); ng(new DOMException('aborted', 'AbortError')); }); });
+    const h = net.hold[url.pathname]; if (h) { delete net.hold[url.pathname]; await wait(h); }
+    const d = net.delay[url.pathname]; if (d) await wait(d);
+    if (sig && sig.aborted) throw new DOMException('aborted', 'AbortError');
+    if (net.statusN[url.pathname] > 0) { net.statusN[url.pathname]--; return new Response('一時', { status: 503 }); }
+    if (net.bodyN[url.pathname] > 0) { net.bodyN[url.pathname]--; return new Response('違う中身', { status: 200 }); }
     if (net.fail.has(url.pathname) || net.fail.has('*')) throw new TypeError('ネットが無い');
     if (url.origin !== ORIGIN) return new Response('外', { status: 200 });
     const f = files.get(url.pathname);
     const st = net.status[url.pathname] || (f ? 200 : 404);
     const body = net.body[url.pathname] !== undefined ? net.body[url.pathname] : (f ? f.buf : 'Not Found');
     return new Response(st === 204 ? null : body, { status: st, headers: { 'Content-Type': f ? f.ct : 'text/plain' } });
+    } finally { net.live--; }
   };
   const listeners = {};
   let skipped = 0, claimed = 0;
@@ -79,9 +90,11 @@ function makeEnv(swText, opt = {}) {
     addEventListener: (t, fn) => { listeners[t] = fn; },
     skipWaiting: () => { skipped++; return Promise.resolve(); },
     clients: { claim: async () => { claimed++; } },
-    MJ_WAIT_MS: 60, MJ_RETRY_MS: opt.retry || 10000,
+    MJ_WAIT_MS: 60, MJ_RETRY_MS: opt.retry || 10000, MJ_TRIES: [0, 1, 1],
   };
-  const ctx = { self, caches, fetch: fetchFn, Request, Response, Headers, URL, TextDecoder, crypto: globalThis.crypto, setTimeout, clearTimeout, console, Date, Promise, Uint8Array, CustomEvent: undefined };
+  if (opt.installMs) self.MJ_INSTALL_MS = opt.installMs;
+  if (opt.fetchMs) self.MJ_FETCH_MS = opt.fetchMs;
+  const ctx = { self, caches, fetch: fetchFn, Request, Response, Headers, URL, TextDecoder, crypto: globalThis.crypto, setTimeout, clearTimeout, console, Date, Promise, Uint8Array, AbortController, CustomEvent: undefined, DOMException };
   vm.runInNewContext(swText, ctx, { filename: 'sw.js' });
   const bg = [];
   const env = {
@@ -102,6 +115,8 @@ function makeEnv(swText, opt = {}) {
   };
   return env;
 }
+
+const isDoneIn = async (e, ver) => (await e.caches.has('mj-' + ver)) && !!(await (await e.caches.open('mj-' + ver)).match(ORIGIN + '/__mj_done'));
 
 /* ── 試験の本体（壊しの写しでも同じ物を回す） ─────────────── */
 async function run(t) {
@@ -223,17 +238,118 @@ async function run(t) {
     // cccc は印の無い控え（at 0 は印を置かない）
     await e.activate();
     const ks = (await e.caches.keys()).sort();
-    ok('s activate で今と1つ前（一番新しく完了した bbbb）だけ・mj-conf と mj-tmp は残る', JSON.stringify(ks) === JSON.stringify(['mj-' + V, 'mj-bbbbbbbbbbbb', 'mj-conf', 'mj-tmp-dddddddddddd-r1'].sort()), ks.join(','));
+    ok('s activate で今と1つ前（一番新しく完了した bbbb）だけ・mj-conf と mj-tmp は残る・mj-part を作る', JSON.stringify(ks) === JSON.stringify(['mj-' + V, 'mj-bbbbbbbbbbbb', 'mj-conf', 'mj-part', 'mj-tmp-dddddddddddd-r1'].sort()), ks.join(','));
     ok('s activate で claim', e.claimed === 1);
   }
   {
-    // g 中身が違う／5xx の install は控えも仮も残さない
-    for (const [name, set] of [['中身が違う', (e) => { e.net.body['/lib/score.mjs'] = 'x'; }], ['5xx', (e) => { e.net.status['/js/tensu.js'] = 500; }]]) {
+    // g 中身が違う／5xx の install は落ちる・控え（mj-<VER>）は残らず仮は残る・直った後の install は落ちた1つだけ取る（swupd v1.1 §2）
+    for (const [name, p, set] of [['中身が違う', '/lib/score.mjs', (e) => { e.net.body['/lib/score.mjs'] = 'x'; }], ['5xx', '/js/tensu.js', (e) => { e.net.status['/js/tensu.js'] = 500; }]]) {
       const e = makeEnv(swText, { files });
+      await e.caches.open('mj-part');   // 画面の sw-reg.js が作った置き場
       set(e);
       const res = await e.install();
       const ks = await e.caches.keys();
-      ok('g install（' + name + '）は落ち、控えも仮も残らない', res === false && !ks.some((k) => k.startsWith('mj-')), ks.join(','));
+      ok('g install（' + name + '）は落ち、控えは残らない', res === false && !(await isDoneIn(e, V)), ks.join(','));
+      const kept = (await (await e.caches.open('mj-part')).keys()).length;
+      ok('g install（' + name + '）の置き場 mj-part に取れた ' + (list.length - 1) + ' 本が残る', kept === list.length - 1, ks.join(',') + ' ' + kept);
+      delete e.net.body[p]; delete e.net.status[p];
+      e.log.length = 0;
+      const res2 = await e.install();
+      const got = e.log.filter((x) => x.cache === 'reload').map((x) => x.path);
+      ok('g 直った後の install（' + name + '）は通り、落ちた1つだけ取る', res2 === true && got.length === 1 && got[0] === p && await isDoneIn(e, V) && !(await e.caches.keys()).some((k) => k.startsWith('mj-tmp-')), JSON.stringify([res2, got]));
+      const left = (await (await e.caches.open('mj-part')).keys()).filter((r) => r.url.includes('/v/')).length;
+      ok('g 写した後 mj-part は残り、中の /v/ は0', (await e.caches.has('mj-part')) && left === 0, String(left));
+    }
+    // g4 mj-part が無く mj-conf が在る（今の客）＝mj-conf に続ける・写した後 mj-conf は supa-config だけ
+    {
+      const e = makeEnv(swText, { files });
+      await (await e.caches.open('mj-conf')).put(ORIGIN + '/js/supa-config.js', new Response('window.SUPA={}'));
+      e.net.body['/lib/score.mjs'] = 'x';
+      ok('g4 mj-conf の時も落ちる', (await e.install()) === false);
+      delete e.net.body['/lib/score.mjs'];
+      e.log.length = 0;
+      const res2 = await e.install();
+      const got = e.log.filter((x) => x.cache === 'reload').map((x) => x.path);
+      ok('g4 mj-conf に続けて落ちた1つだけ取る', res2 === true && got.length === 1 && await isDoneIn(e, V), JSON.stringify(got));
+      const ck = (await (await e.caches.open('mj-conf')).keys()).map((r) => new URL(r.url).pathname);
+      ok('g4 写した後 mj-conf は supa-config だけ', JSON.stringify(ck) === JSON.stringify(['/js/supa-config.js']), ck.join(','));
+      ok('g4 install は mj-part を作らない', !(await e.caches.has('mj-part')));
+    }
+    // g5 置き場が無い（mj-part も mj-conf も無い）＝使い捨て・続きは無い（毎回消して全部取る）・install は mj-part を作らない
+    {
+      const e = makeEnv(swText, { files });
+      e.net.body['/lib/score.mjs'] = 'x';
+      ok('g5 使い捨ての時も落ちる', (await e.install()) === false);
+      ok('g5 落ちた install は mj-part を作らない', !(await e.caches.has('mj-part')));
+      delete e.net.body['/lib/score.mjs'];
+      e.log.length = 0;
+      const res2 = await e.install();
+      const got = e.log.filter((x) => x.cache === 'reload').length;
+      ok('g5 使い捨ては続けない（全部 ' + list.length + ' 本取り直す）', res2 === true && got === list.length && await isDoneIn(e, V), String(got));
+      ok('g5 通った後 使い捨ては残らず mj-part も無い', !(await e.caches.keys()).some((k) => k.startsWith('mj-tmp-')) && !(await e.caches.has('mj-part')));
+    }
+    // g6 他の版の物を置き場から消す（mj-conf の supa-config は触らない）
+    {
+      const e = makeEnv(swText, { files });
+      await (await e.caches.open('mj-part')).put(ORIGIN + '/v/ffffffffffff/x', new Response('古'));
+      const cf = await e.caches.open('mj-conf');
+      await cf.put(ORIGIN + '/js/supa-config.js', new Response('c')); await cf.put(ORIGIN + '/v/eeeeeeeeeeee/y', new Response('古'));
+      await e.install();
+      const pk = (await (await e.caches.open('mj-part')).keys()).length;
+      const ck = (await (await e.caches.open('mj-conf')).keys()).map((r) => new URL(r.url).pathname);
+      ok('g6 mj-part の他の版は消える', pk === 0, String(pk));
+      ok('g6 mj-conf の他の版は消え supa-config は残る', JSON.stringify(ck) === JSON.stringify(['/js/supa-config.js']), ck.join(','));
+    }
+    // g7 1回の取りの締め切り（FETCH_MS）＝返事の無い取りは切って取り直す
+    {
+      const e = makeEnv(swText, { files, fetchMs: 40, installMs: 5000 });
+      await e.caches.open('mj-part');
+      e.net.hold['/lib/score.mjs'] = 3000;
+      const t0 = Date.now();
+      const res = await e.install();
+      const n = e.log.filter((x) => x.path === '/lib/score.mjs').length;
+      ok('g7 返事の無い取りを切って取り直し、install が通る（2回・早い）', res === true && n === 2 && Date.now() - t0 < 1500, JSON.stringify([res, n, Date.now() - t0]));
+    }
+    // g8 install の締め切り（INSTALL_MS）＝落ちて、取りの列も写しも止まる
+    {
+      const e = makeEnv(swText, { files, installMs: 60 });
+      await e.caches.open('mj-part');
+      for (const q of list) e.net.delay[q] = 30;
+      const t0 = Date.now();
+      const res = await e.install();
+      const dt = Date.now() - t0;
+      const n1 = e.log.length;
+      await sleep(400);
+      const n2 = e.log.length;
+      const pk = (await (await e.caches.open('mj-part')).keys()).length;
+      ok('g8 締め切りで install が落ちる（早い）', res === false && dt < 300, JSON.stringify([res, dt]));
+      ok('g8 締め切りの後は次の取りをしない・写しも印もしない', n2 === n1 && n2 < list.length && !(await isDoneIn(e, V)) && pk < list.length, JSON.stringify([n1, n2, pk]));
+    }
+    // g9 締め切りで切れた古い取り込みが遅れて落ちても、次の install の出来上がった控えを消さない（v1.3.1 §2）
+    {
+      const e = makeEnv(swText, { files, installMs: 150, fetchMs: 60000 });
+      await e.caches.open('mj-part');
+      e.net.hold['/lib/score.mjs'] = 700;
+      const t0 = Date.now();
+      ok('g9 1回目は締め切りで落ちる', (await e.install()) === false);
+      ok('g9 2回目は通る', (await e.install()) === true && await isDoneIn(e, V));
+      e.net.body['/lib/score.mjs'] = 'x';
+      await sleep(Math.max(0, 1000 - (Date.now() - t0)));
+      ok('g9 古い取り込みが遅れて落ちても控えと印は残る', await isDoneIn(e, V));
+      delete e.net.body['/lib/score.mjs'];
+    }
+    // g2 一時の 5xx・中身違い（1回ずつ）は取り直して通る
+    {
+      const e = makeEnv(swText, { files });
+      e.net.statusN['/js/tensu.js'] = 1; e.net.bodyN['/lib/score.mjs'] = 1;
+      ok('g2 一時の 5xx・中身違いは取り直して install が通る', (await e.install()) === true && await isDoneIn(e, V));
+    }
+    // g3 取りは並ぶ
+    {
+      const e = makeEnv(swText, { files });
+      for (const p of list) e.net.delay[p] = 5;
+      await e.install();
+      ok('g3 install の取りは同時に2本以上（4本まで）', e.net.peak >= 2 && e.net.peak <= 4, String(e.net.peak));
     }
   }
   {
@@ -260,11 +376,19 @@ async function run(t) {
     e.net.status['/lib/tiles.mjs'] = 500;
     await e.nav('/index.html'); await e.settle();
     const ks = await e.caches.keys();
-    ok('k 取り直しが落ちたら印も仮も無い', !ks.some((k) => k.startsWith('mj-')), ks.join(','));
+    ok('k 取り直しが落ちたら印は無い', !(await isDoneIn(e, V)), ks.join(','));
     delete e.net.status['/lib/tiles.mjs'];
     e.log.length = 0;
     await e.nav('/index.html'); await e.settle();
     ok('k 落ちた直後は走り直さない（RETRY の間）', e.log.filter((x) => x.cache === 'reload').length === 0);
+  }
+  {
+    // k2 取り直しは他の版の仮（新しい版の取り込み中の物）を消さない
+    const e = makeEnv(swText, { files });
+    await (await e.caches.open('mj-tmp-ffffffffffff-i')).put(ORIGIN + '/v/ffffffffffff/index.html', new Response('x'));
+    await e.nav('/index.html'); await e.settle();
+    ok('k2 取り直しは印を付ける', await isDoneIn(e, V));
+    ok('k2 取り直しは他の版の仮を消さない', (await e.caches.keys()).includes('mj-tmp-ffffffffffff-i'));
   }
   {
     // l supa-config
@@ -301,13 +425,27 @@ const SW = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8').replace(/\r\n/g, '\
 const rep = (a, b) => (s) => { if (!s.includes(a)) throw new Error('壊しの字が見つからない：' + a); return s.split(a).join(b); };
 const BREAKS = [
   ['ignoreSearch を足す', { sw: rep("match(vkey(ver, p))", "match(vkey(ver, p), { ignoreSearch: true })") }],
-  ['ok を見ない', { sw: rep('if (!r.ok || r.redirected) throw', 'if (false) throw') }],
-  ['install で skipWaiting', { sw: rep("e.waitUntil((async () => {\n    await dropTmp(TMP);", "self.skipWaiting();\n  e.waitUntil((async () => {\n    await dropTmp(TMP);") }],
+  ['ok を見ない', { sw: rep('if (!r.ok || r.redirected) { last', 'if (false) { last') }],
+  ['install で skipWaiting', { sw: rep("self.addEventListener('install', (e) => {\n", "self.addEventListener('install', (e) => {\n  self.skipWaiting();\n") }],
   ['名簿から1つ外す', { sw: (s) => s.replace(/\n  \['\/lib\/score\.mjs', '[0-9a-f]{64}'\],/, '') }],
   ['VER をずらす', { sw: (s) => s.replace(/const VER = '[0-9a-f]{12}';/, "const VER = 'ffffffffffff';") }],
   ['a href・manifest まで書き換える', { sw: rep("(/\\srel\\s*=\\s*\"[^\"]*\\bstylesheet\\b[^\"]*\"/i.test(t) ? swap(t, 'href') : t)", "swap(t, 'href')") }],
   ['完了印を見ない', { sw: rep("if (!(await caches.has(name))) return false;\n  return !!(await (await caches.open(name)).match(DONE));", 'return caches.has(name);') }],
-  ['install 失敗で控えを残す', { sw: rep('await caches.delete(tmpName);\n    await caches.delete(C);\n    throw err;', 'throw err;') }],
+  ['install 失敗で置き場も消す（続きから取れない）', { sw: rep('  await fillInto(tmpName, signal);\n  await promote', '  try { await fillInto(tmpName, signal); } catch (err) { await caches.delete(tmpName); throw err; }\n  await promote') }],
+  ['install が mj-part を作る', { sw: rep('  if (await caches.has(PART)) return PART;', '  await caches.open(PART); return PART;') }],
+  ['mj-conf に続けない', { sw: rep('  if (await caches.has(CONF)) return CONF;\n', '') }],
+  ['使い捨てを消さない（死んだ控えに続ける）', { sw: rep('    await caches.delete(FB);', '    //') }],
+  ['他の版を置き場から消さない', { sw: rep('    await cleanOther(PART);\n    await cleanOther(CONF);\n', '') }],
+  ['promote が mj-conf ごと消す', { sw: rep('if (tmpName === PART || tmpName === CONF)', 'if (tmpName === PART)') }],
+  ['promote が mj-part の写した物を残す', { sw: rep('{ for (const req of mine) await tmp.delete(req); }', '{}') }],
+  ['activate が mj-part を作らない', { sw: rep('    await caches.open(PART);           // 次の版', '    // 次の版') }],
+  ['1回の取りの締め切りが無い', { sw: rep('const t = setTimeout(cut, FETCH_MS);', 'const t = 0;') }],
+  ['install の締め切りが無い', { sw: rep("timer = setTimeout(() => { ac.abort(); ng(new Error('install の締め切り')); }, INSTALL_MS);", 'timer = null;') }],
+  ['v1.1 の古い取り込み（切らない＋落ちたら控えを消す）', { sw: (s) => rep('const stopped = (signal) => !!(signal && signal.aborted);', 'const stopped = () => false;')(rep("    if (signal) signal.addEventListener('abort', cut);\n", '')(rep('  await fillInto(tmpName, signal);\n  await promote(tmpName, signal);', '  try { await fillInto(tmpName, signal); await promote(tmpName, signal); } catch (err) { await caches.delete(C); throw err; }')(s))) }],
+  ['取った物を飛ばさない（いつも全部取る）', { sw: rep("if (!have || have.headers.get(SHA_H) !== want) todo.push", "todo.push") }],
+  ['取り直さない（1回だけ）', { sw: rep('const TRIES = self.MJ_TRIES || [0, 500, 1500];', 'const TRIES = [0];') }],
+  ['並べない（1本ずつ）', { sw: rep('const POOL = 4;', 'const POOL = 1;') }],
+  ['取り直しが他の版の仮を消す', { sw: rep("      await build(TMP + 'r');", "      await dropTmp(null);\n      await build(TMP + 'r');") }],
   ['activate が mj-conf も消す', { sw: rep('const CACHE_RE = /^mj-[0-9a-f]{12}$/;', 'const CACHE_RE = /^mj-/;') }],
   ['取り直しを1本に絞らない', { sw: rep('if (refilling || Date.now()', 'if (Date.now()') }],
   ['/v/ のままネットへ', { sw: rep("O + p + url.search, { cache: 'reload' }", "O + url.pathname + url.search, { cache: 'reload' }") }],
