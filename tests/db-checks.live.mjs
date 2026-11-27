@@ -229,6 +229,9 @@ else { p++; console.log('  ✓ 試験の行（部屋・仮の人・操作）は�
     ['5 tick の succeeded が無い', '5 mj-sweep-tick', `delete from cron.job_run_details d using cron.job j where j.jobid = d.jobid and j.jobname = 'mj-sweep-tick' and d.status = 'succeeded';`],
     ['5 tail の failed 1つ', '5 mj-sweep-tail', `insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)
       select j.jobid, (select coalesce(max(runid), 0) + 1 from cron.job_run_details), 0, 'postgres', 'postgres', 'test', 'failed', 'test:mihari', now(), now() from cron.job j where j.jobname = 'mj-sweep-tail';`],
+    // P9 §1.3（pbundle v2.1）：書きの量の見張り mj-wwatch も同じ見張りの中（止める・succeeded が無い＝その1つだけ赤）
+    ['4 wwatch を止める', '4 mj-wwatch', `perform cron.alter_job((select jobid from cron.job where jobname = 'mj-wwatch'), active := false);`],
+    ['5 wwatch の succeeded が無い', '5 mj-wwatch', `delete from cron.job_run_details d using cron.job j where j.jobid = d.jobid and j.jobname = 'mj-wwatch' and d.status = 'succeeded';`],
   ];
   const sqlM = `do $m$ declare res jsonb := '{}'; v_u uuid; begin
   res := res || jsonb_build_object('now', ${MIHARI_EXPR});
@@ -316,6 +319,38 @@ end $c$;`;
     ck('P8 鎖の印の見張り＝今の khaw で壊れた卓 0', cr.now === 0, JSON.stringify(cr.now));
     ck('P8 鎖の印の見張り＝正しく作った3段の鎖で 0（今の数から増えない）', !cr.set_err && cr.ok3 === cr.now, JSON.stringify([cr.ok3, cr.set_err]));
     BR.forEach(([name], i) => ck(`P8 鎖の印の見張り：${name} → 赤`, !cr['b' + i + '_err'] && cr['b' + i] > cr.now, JSON.stringify([cr['b' + i], cr['b' + i + '_err']])));
+  }
+}
+/* ── P9 §1.3 [R2-SA]（pbundle v2.1）mj_wwatch を呼ぶのは cron の mj-wwatch だけ ──
+ * 倉庫の関数の中身（pg_proc.prosrc）に mj_wwatch の字が在るのは mj_wwatch 自身だけ＝客の作る・入る（mj_sweep・mj_sweep_tail）の鍵の下で走らない。
+ * 塊の中で mj_sweep_tail に呼びを足すと赤（塊は最後に戻す＝関数は元のまま）。cron.job の mj-wwatch は 1本・'select mahjong_private.mj_wwatch()'。 */
+{
+  const OTHERS = `(select coalesce(jsonb_agg(n.nspname || '.' || p.proname), '[]') from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where strpos(p.prosrc, 'mj_wwatch') > 0 and not (n.nspname = 'mahjong_private' and p.proname = 'mj_wwatch'))`;
+  const sqlW = `do $w$ declare res jsonb := '{}'; v_def text; begin
+  res := res || jsonb_build_object('now', ${OTHERS},
+    'job', (select coalesce(jsonb_agg(jsonb_build_object('cmd', j.command, 'sch', j.schedule, 'act', j.active)), '[]') from cron.job j where j.jobname = 'mj-wwatch'));
+  begin
+    select pg_get_functiondef('mahjong_private.mj_sweep_tail(int)'::regprocedure) into v_def;
+    execute regexp_replace(v_def, '\\mbegin\\M', 'begin perform mahjong_private.mj_wwatch();');
+    res := res || jsonb_build_object('waza', ${OTHERS});
+    raise exception 'MJUNDO';
+  exception when others then
+    if sqlerrm <> 'MJUNDO' then res := res || jsonb_build_object('waza_err', sqlerrm); end if;
+  end;
+  raise exception 'MJRESULT%', res::text;
+end $w$;`;
+  let wr = null, why = '';
+  try { await q(sqlW); why = '結果の例外が来なかった'; } catch (e) {
+    const at = e.message.indexOf('MJRESULT');
+    if (at < 0) why = e.message.slice(0, 300); else wr = JSON.parse(e.message.slice(at + 8).split(String.fromCharCode(10))[0]);
+  }
+  const ck = (name, cond, w = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (w ? ' — ' + w : '')); } };
+  if (!wr) ck('P9 mj_wwatch の呼び手が読めた', false, why);
+  else {
+    ck('P9 mj_wwatch の字が在る関数は mj_wwatch 自身だけ', Array.isArray(wr.now) && wr.now.length === 0, JSON.stringify(wr.now));
+    ck("P9 cron の mj-wwatch は1本・'*/5 * * * *'・active・select mahjong_private.mj_wwatch()", wr.job.length === 1 && wr.job[0].sch === '*/5 * * * *' && wr.job[0].act === true && wr.job[0].cmd === 'select mahjong_private.mj_wwatch()', JSON.stringify(wr.job));
+    ck('P9 わざと：mj_sweep_tail に呼びを足す → 赤（mj_sweep_tail が出る）', !wr.waza_err && JSON.stringify(wr.waza) === '["mahjong_private.mj_sweep_tail"]', JSON.stringify([wr.waza, wr.waza_err]));
   }
 }
 console.log(`\n${p} passed, ${f} failed`);

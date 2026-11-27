@@ -63,8 +63,8 @@ const LS = (k) => `(select coalesce(sum(count), 0) from mahjong.limits where kin
 const CNT = (v) => `jsonb_build_object('rc', (select row_count from mahjong.rooms where id = ${v}), 'hc', (select history_count from mahjong.rooms where id = ${v}),
   'h', (select count(*) from mahjong.history where room_id = ${v}), 'op', (select count(*) from mahjong.op_results where room_id = ${v}),
   'm', (select count(*) from mahjong.members where room_id = ${v}), 'x', (select coalesce(sum(e.value), 0) from mahjong.extras e join mahjong.tables t on t.id = e.table_id where t.room_id = ${v}),
-  'ur', ${LS('ur1m')}, 'u', ${LS('u1m')}, 'rn1m', ${LS('rn1m')}, 'all1m', ${LS('all1m')},
-  'un', ${LS('un1d')}, 'ud', ${LS('u1d')}, 'uk', ${LS('uk1d')}, 'rk', ${LS('rk1d')}, 'all1d', ${LS('all1d')}, 'rn', ${LS('rn1d')})`;
+  'ur', ${LS('ur1m')}, 'u', ${LS('u1m')}, 'rn1m', ${LS('rn1m')}, 'all', (select count(*) from mahjong.limits where kind like 'write:all%'),
+  'un', ${LS('un1d')}, 'ud', ${LS('u1d')}, 'uk', ${LS('uk1d')}, 'rk', ${LS('rk1d')}, 'rn', ${LS('rn1d')})`;
 const W = (key, who, room, ops, opid) => `${asWho(who)}
   cx := ${CNT(room)};
   begin r := public.mj_write(${room}, ${opid ? `'${opid}'::uuid` : 'gen_random_uuid()'}, ${ops}); exception when others then r := jsonb_build_object('raised', sqlerrm); end;
@@ -1280,7 +1280,7 @@ function check(out, lib, say) {
   const isErr = (k, err, extra = {}) => { const r = R(k); return r.ok === false && r.err === err && Object.entries(extra).every(([x, v]) => J(r[x]) === J(v)); };
   const isOk = (k) => R(k).ok === true;
   const none = { rc: 0, hc: 0, h: 0, op: 0, m: 0, x: 0 };
-  const rejNyu = { ...none, ur: 1, u: 1, rn1m: 0, all1m: 0, un: 0, ud: 0, uk: 0, rk: 0, all1d: 0 }; // P6：弾いた呼びは分け合う rn1m・all1m に数えない
+  const rejNyu = { ...none, ur: 1, u: 1, rn1m: 0, all: 0, un: 0, ud: 0, uk: 0, rk: 0 }; // P6：弾いた呼びは分け合う rn1m（P9：全員の窓 all は行0） に数えない
   const u = out.u || [];
 
   ok('部屋を5つ作れた・3人が入れた', ['ra', 'rb', 'rc', 're', 'rf'].every((v) => out['made_' + v]?.ok === true) && ['j2', 'j3', 'j5'].every((k) => out[k]?.ok === true),
@@ -1293,7 +1293,7 @@ function check(out, lib, say) {
   /* ① */
   ok('① member_add×4 → ok・results 4つ（v1）', isOk('m4') && J(R('m4').results) === J([0, 1, 2, 3].map((i) => ({ i, v: 1 }))), J(R('m4')));
   ok('① member_add×4 で行+4・履歴+4・op_results+1', has('m4', { rc: 4, hc: 4, h: 4, op: 1, m: 4 }), J(d('m4')));
-  ok('① 入の書き込みは ur・u・rn1m・all1m に 4・un1d・u1d に 4・管の数えは 0・rn1d は数えない', has('m4', { ur: 4, u: 4, rn1m: 4, all1m: 4, un: 4, ud: 4, rn: 0, uk: 0, rk: 0, all1d: 4 }), J(d('m4')));
+  ok('① 入の書き込みは ur・u・rn1m（P9：全員の窓 all は行0） に 4・un1d・u1d に 4・管の数えは 0・rn1d は数えない', has('m4', { ur: 4, u: 4, rn1m: 4, all: 0, un: 4, ud: 4, rn: 0, uk: 0, rk: 0 }), J(d('m4')));
   ok('① session_add → ok・行+1', isOk('s1') && has('s1', { rc: 1, hc: 1, op: 1 }), J([R('s1'), d('s1')]));
   ok('① table_add → ok・初めの state（チップ使う＝ok・祝儀 null＝unused・extra ok）', isOk('t1') && JS(out.t1_row) === JS({ c: 'ok', s: 'unused', e: 'ok' }), J([R('t1'), out.t1_row]));
   ok('① hanchan_start → ok・行+5（半荘1＋マス4）・履歴+5', isOk('h1') && has('h1', { rc: 5, hc: 5, h: 5 }), J([R('h1'), d('h1')]));
@@ -1589,18 +1589,18 @@ function check(out, lib, say) {
   ok('⑪ extra_set：席から外れた人は 0 へ近づく時だけ（−2 → −3 bad・−2 → −1 ok）', isOk('kxc') && out.kxc_t?.e === 'ok' && isOk('kxd') && isErr('kxe', 'bad', { at: 'member_id' }) && isOk('kxf'),
     J([R('kxc'), out.kxc_t, R('kxd'), R('kxe'), R('kxf')]));
   /* ⑧ */
-  const busyD = { ...none, ur: 1, u: 1, rn1m: 0, all1m: 0, un: 0, ud: 0, all1d: 0 };
-  ok('⑧ 先見の busy（ur1m 120）→ busy・何も書かない・ur1m は +1・rn1m・all1m・un1d・u1d は 0', isErr('b1', 'busy', { what: 'write:ur1m' }) && has('b1', busyD), J([R('b1'), d('b1')]));
-  ok('⑧ 後見の busy（un1d 1499＋2行）→ busy・何も書かない・ur1m +1・rn1m・all1m・un1d・u1d 0', isErr('b2', 'busy', { what: 'write:un1d' }) && has('b2', busyD), J([R('b2'), d('b2')]));
+  const busyD = { ...none, ur: 1, u: 1, rn1m: 0, all: 0, un: 0, ud: 0 };
+  ok('⑧ 先見の busy（ur1m 120）→ busy・何も書かない・ur1m は +1・rn1m（P9：全員の窓 all は行0）・un1d・u1d は 0', isErr('b1', 'busy', { what: 'write:ur1m' }) && has('b1', busyD), J([R('b1'), d('b1')]));
+  ok('⑧ 後見の busy（un1d 1499＋2行）→ busy・何も書かない・ur1m +1・rn1m（P9：全員の窓 all は行0）・un1d・u1d 0', isErr('b2', 'busy', { what: 'write:un1d' }) && has('b2', busyD), J([R('b2'), d('b2')]));
   ok('⑧ 入A の un1d が満ちても同じ部屋の入B と管は書ける（P6＝垢を足して他の人を止められない）', isErr('b3n', 'busy', { what: 'write:un1d' }) && isOk('b3b') && has('b3b', { un: 1, ud: 1 }) && isOk('b3k'), J([R('b3n'), R('b3b'), d('b3b'), R('b3k')]));
   ok('⑧ 人の u1d 2999＋2行 → busy write:u1d・何も書かない／別の人は書ける', isErr('b5n', 'busy', { what: 'write:u1d' }) && has('b5n', busyD) && isOk('b5b'), J([R('b5n'), d('b5n'), R('b5b')]));
   ok('⑧ 管も u1d で止まる', isErr('b5k', 'busy', { what: 'write:u1d' }), J([R('b5k')]));
   ok('⑧ 前の版の rn1d 3000 が在っても入は書ける（読まない）', isOk('b6') && has('b6', { un: 1, rn: 0 }), J([R('b6'), d('b6')]));
   ok('⑧ 管の rk1d が満ちても入は書ける', isErr('b4k', 'busy', { what: 'write:rk1d' }) && isOk('b4n'), J([R('b4k'), R('b4n')]));
   ok('⑧ 古い窓は書いた時に消える（25時間前の un1d 1500・u1d 3000 は数えない）', isOk('bo') && Number(out.bo_left) === 0, J([R('bo'), out.bo_left, out.bo_err]));
-  ok('⑧ 同値だけの組 → ok・op_results 0・人の分は +1・分け合う分と1日は 0', isOk('sv') && has('sv', { ...none, ur: 1, rn1m: 0, all1m: 0, un: 0, ud: 0 }), J(d('sv')));
-  ok('⑧ 入の1行 → ur・u・rn1m・all1m・un1d・u1d・all1d に +1・uk・rk 0', isOk('okn') && has('okn', { ur: 1, u: 1, rn1m: 1, all1m: 1, un: 1, ud: 1, all1d: 1, uk: 0, rk: 0, rn: 0, op: 1 }), J(d('okn')));
-  ok('⑧ 管の1行 → uk・rk・u1d に +1・rn1m・un1d 0', isOk('okk') && has('okk', { ur: 1, u: 1, rn1m: 0, un: 0, ud: 1, uk: 1, rk: 1, all1d: 1 }), J(d('okk')));
+  ok('⑧ 同値だけの組 → ok・op_results 0・人の分は +1・分け合う分と1日は 0', isOk('sv') && has('sv', { ...none, ur: 1, rn1m: 0, all: 0, un: 0, ud: 0 }), J(d('sv')));
+  ok('⑧ 入の1行 → ur・u・rn1m（P9：全員の窓 all は行0）・un1d・u1d に +1・uk・rk 0', isOk('okn') && has('okn', { ur: 1, u: 1, rn1m: 1, all: 0, un: 1, ud: 1, uk: 0, rk: 0, rn: 0, op: 1 }), J(d('okn')));
+  ok('⑧ 管の1行 → uk・rk・u1d に +1・rn1m・un1d 0', isOk('okk') && has('okk', { ur: 1, u: 1, rn1m: 0, un: 0, ud: 1, uk: 1, rk: 1 }), J(d('okk')));
   ok('⑧ 持ち主の1行 → 管と同じ（uk・rk）', isOk('oko') && has('oko', { un: 0, ud: 1, uk: 1, rk: 1 }), J(d('oko')));
   ok('⑧ 例外（P0001）→ internal・何も書かない・ur1m +1', isErr('ie_P0001', 'internal') && has('ie_P0001', busyD), J([R('ie_P0001'), d('ie_P0001'), out.ie_err]));
   ['55P03', '40P01', '40001'].forEach((c) => ok(`⑧ 一時の失敗（${c}）→ busy lock・何も書かない・ur1m +1・分け合う分と1日 0`, isErr('ie_' + c, 'busy', { what: 'lock' }) && has('ie_' + c, busyD), J([R('ie_' + c), d('ie_' + c)])));

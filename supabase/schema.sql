@@ -534,6 +534,19 @@ create table if not exists mahjong.totals (
 );
 insert into mahjong.totals (id, rooms_all) values (1, 0) on conflict (id) do nothing;
 
+-- ── P9 §1.3 書きの量の見張り（pbundle_sadame v2.1・[N1]）＝limits でない自分の表（掃除と kindcheck は見ない）・cron の mj-wwatch だけが書く ──
+--   1行＝1回の見回り（history の id の (from_id, to_id] の行の数と大きさ）・hour＝見回りの時・30日で消す・alert＝24時間の和が線を越えた時の字
+create table if not exists mahjong.wwatch (
+  hour      timestamptz not null,
+  from_id   bigint not null,
+  to_id     bigint not null,
+  rows      bigint not null,
+  bytes     bigint,                 -- 読めなかった回は null（それでも先へ進む）
+  rooms_all int,
+  alert     text,
+  primary key (hour, from_id)
+);
+
 -- ── 作る・引っ越しの送り直し（op_id 一意・2日で掃除） ─────────────────────
 create table if not exists mahjong.creates (
   op_id   uuid primary key,
@@ -1335,10 +1348,10 @@ begin
     raise log 'mj_sweep kindcheck %', sqlstate;
     perform mahjong_private.mj_sweep_tailbad('kindcheck');
   end;
-  -- cron の記録＝自分の2つの job の行だけ・7日より古い物（共有の倉庫・他のアプリの行は触らない＝§1-7）
+  -- cron の記録＝自分の3つの job（P9 で mj-wwatch を足した）の行だけ・7日より古い物（共有の倉庫・他のアプリの行は触らない＝§1-7）
   begin
     if exists (select 1 from pg_catalog.pg_namespace n where n.nspname = 'cron') then
-      execute 'delete from cron.job_run_details d where d.jobid in (select j.jobid from cron.job j where j.jobname in (''mj-sweep-tick'', ''mj-sweep-tail'')) and d.end_time < pg_catalog.now() - interval ''7 days''';
+      execute 'delete from cron.job_run_details d where d.jobid in (select j.jobid from cron.job j where j.jobname in (''mj-sweep-tick'', ''mj-sweep-tail'', ''mj-wwatch'')) and d.end_time < pg_catalog.now() - interval ''7 days''';
     end if;
   exception when others then
     raise log 'mj_sweep cron %', sqlstate;
@@ -1399,6 +1412,50 @@ revoke all on function mahjong_private.mj_sweep_tick(int, int, int) from public,
 create extension if not exists pg_cron;
 select cron.schedule('mj-sweep-tick', '10 seconds', 'select mahjong_private.mj_sweep_tick()');
 select cron.schedule('mj-sweep-tail', '* * * * *', 'select mahjong_private.mj_sweep_tail(1000)');
+
+-- P9 §1.3 [N1][R2-SA] 書きの量の見張り＝cron の mj-wwatch（5分ごと）だけが呼ぶ（★mj_sweep・mj_sweep_tail・客の呼びからは呼ばない★＝客の作る・入るの鍵の下で走らせない）
+--   しおり＝wwatch の max(to_id)（空なら history の max(id)＝今から数える）。1回で history の id を最大 50,000 進む（主キーの幅だけ・中身は読まない＝pg_column_size）
+--   大きさが読めない回は bytes null で行を書いて先へ進む。24時間の和 rows>200,000・bytes>200MB・totals.rooms_all>5,000 で alert。30日より古い行は1回 1,000 まで消す
+--   読む人＝コンサルの週1の本番読み（alert is not null）・kensan は最後の alert と最後の行の時を出す
+create or replace function mahjong_private.mj_wwatch() returns void
+language plpgsql set search_path = '' set lock_timeout = '1s' as $fn$
+declare
+  v_from bigint; v_max bigint; v_to bigint; v_bytes bigint; v_r24 bigint; v_b24 bigint; v_rooms int; v_al text;
+  v_hour timestamptz := pg_catalog.date_trunc('hour', pg_catalog.now());
+begin
+  begin
+    select coalesce(pg_catalog.max(h.id), 0) into v_max from mahjong.history h;
+    select pg_catalog.max(w.to_id) into v_from from mahjong.wwatch w;
+    v_from := coalesce(v_from, v_max);
+    v_to := greatest(v_from, least(v_max, v_from + 50000));
+    begin
+      select coalesce(pg_catalog.sum(coalesce(pg_catalog.pg_column_size(h.before_value), 0) + coalesce(pg_catalog.pg_column_size(h.after_value), 0)
+                                   + coalesce(pg_catalog.pg_column_size(h.fold), 0)), 0)
+        into v_bytes from mahjong.history h where h.id > v_from and h.id <= v_to;
+    exception when others then
+      raise log 'mj_wwatch bytes % %', sqlstate, sqlerrm;
+      v_bytes := null;
+    end;
+    select t.rooms_all into v_rooms from mahjong.totals t where t.id = 1;
+    select coalesce(pg_catalog.sum(w.rows), 0), coalesce(pg_catalog.sum(w.bytes), 0) into v_r24, v_b24
+      from mahjong.wwatch w where w.hour > pg_catalog.now() - interval '24 hours';
+    v_r24 := v_r24 + (v_to - v_from); v_b24 := v_b24 + coalesce(v_bytes, 0);
+    v_al := nullif(pg_catalog.concat_ws(' ',
+      case when v_r24 > 200000 then 'rows24=' || v_r24 end,
+      case when v_b24 > 200 * 1024 * 1024 then 'bytes24=' || v_b24 end,
+      case when v_rooms > 5000 then 'rooms_all=' || v_rooms end), '');
+    insert into mahjong.wwatch (hour, from_id, to_id, rows, bytes, rooms_all, alert)
+      values (v_hour, v_from, v_to, v_to - v_from, v_bytes, v_rooms, v_al)
+      on conflict (hour, from_id) do update set to_id = excluded.to_id, rows = excluded.rows, bytes = excluded.bytes,
+        rooms_all = excluded.rooms_all, alert = excluded.alert;
+    delete from mahjong.wwatch z where z.ctid = any(array(
+      select w.ctid from mahjong.wwatch w where w.hour < pg_catalog.now() - interval '30 days' limit 1000));
+  exception when others then
+    raise log 'mj_wwatch % %', sqlstate, sqlerrm;
+  end;
+end $fn$;
+revoke all on function mahjong_private.mj_wwatch() from public, anon, authenticated;
+select cron.schedule('mj-wwatch', '*/5 * * * *', 'select mahjong_private.mj_wwatch()');
 
 -- ── 入口1本目：部屋を作る（設計図 §2・§3.0・§3.1・§3.2・案 v18_login_sekkei.md G＋前の叩き room_create_tome.txt 止め2直し5）──
 -- ⓪ 呼んだ人＝mj_me（null なら {ok:false, err:'mj_session'}＝画面は「ログインが切れました」・K-10）。作った人が持ち主で管。
@@ -2446,8 +2503,10 @@ begin
 end $fn$;
 revoke all on function mahjong_private.mj_w_tvoid(uuid, uuid) from public, anon, authenticated;
 
--- 書き込みの数え（§5・P6 p6_sadame v3.1）：分の窓＝人ごとの ur1m・u1m は max(1,n)（弾いた呼びの罰）・分け合う all1m・入だけ rn1m は n だけ（弾いた呼びで他の人を止めない）
---   24時間（時の窓24本）＝入 un1d（部屋×人 1,500）・管と持ち主 uk1d（部屋×人 1,500）・rk1d（部屋 7,500）・人ごと u1d（部屋をまたぐ 3,000）・全員 all1d（n だけ）
+-- 書き込みの数え（§5・P6 p6_sadame v3.1）：分の窓＝人ごとの ur1m・u1m は max(1,n)（弾いた呼びの罰）・入だけ rn1m は n だけ（弾いた呼びで他の人を止めない）
+--   P9（pbundle v2.1 §1）：全員で分け合う all1d・all1m はやめた＝他の人の量で正直な客を止めない（古い行は mj_sweep の '%1d'・'%1m' で消える）・量は wwatch で見る
+--   n＝組の重み＝max(history の行, ceil(大きさ ÷ 1,024))（mj_write が数える）
+--   24時間（時の窓24本）＝入 un1d（部屋×人 1,500）・管と持ち主 uk1d（部屋×人 1,500）・rk1d（部屋 7,500）・人ごと u1d（部屋をまたぐ 3,000）
 --   P6 で入の部屋の1日 rn1d（3,000）はやめた＝垢を足して部屋の入の全員を24時間止められたため。古い rn1d の行は mj_sweep の '%1d' で消える
 --   p_room が null＝段①②の弾き＝u1m だけに1。古い窓は同じ取引で消す。(kind, key) の字の順に upsert
 -- 2c-2f 合図（2c2f_sadame v1.2 §1）＝倉庫からの送りは控え（本道は書いた端末の websocket）。中身は版の数だけ。
@@ -2475,8 +2534,6 @@ declare
 begin
   for r in
     select k.kind, k.key, k.day, k.add from (values
-      ('write:all1d', 'all',      true,  case when p_room is null then 0 else v_d end),
-      ('write:all1m', 'all',      false, case when p_room is null then 0 else v_d end),
       ('write:rk1d',  v_rk,       true,  case when p_room is null or not v_kan then 0 else v_d end),
       ('write:rn1m',  v_rk,       false, case when p_room is null or not v_nyu then 0 else v_d end),
       ('write:u1d',   p_me::text, true,  case when p_room is null then 0 else v_d end),
@@ -2508,8 +2565,6 @@ declare
   v_rk text := p_room::text; v_ru text := p_room::text || ':' || p_me::text;
 begin
   select k.kind into v from (values
-      ('write:all1d', 'all',      true,  p_d, 300000),
-      ('write:all1m', 'all',      false, p_m, 3000),
       ('write:rk1d',  v_rk,       true,  case when v_kan then p_d else 0 end, 7500),
       ('write:rn1m',  v_rk,       false, case when v_nyu then p_m else 0 end, 600),
       ('write:u1d',   p_me::text, true,  p_d, 3000),
@@ -4050,6 +4105,7 @@ declare
   v_who text; v_re text; v_need text; v_ra boolean; v_wl text; v_lg record;
   v_pre jsonb; v_op0 text;
   v_rv bigint; v_ch0 text; v_ch1 text;   -- 2c-2f：送る版・組の頭の合図の名・ok の後の合図の名
+  v_w int := 0;   -- P9 §1.2：窓に足す重み（戻った組は 0）
   r record;
 begin
   -- ⓪ 人（数えない）
@@ -4305,8 +4361,17 @@ begin
        where x.id = p_room_id;
     end if;
 
-    -- 後見（実の履歴の行で）
-    v_k := mahjong_private.mj_w_over(p_room_id, v_me, v_role, greatest(1, v_n), v_n);
+    -- P9 §1.2（p2p9 §3.2）重み＝max(この組の history の行, ceil(大きさ ÷ 1,024))。大きさ＝行の before・after の字の長さ、締めの行は content・used・missing の長さ
+    --   （締めの門の 32,768 と同じ量り＝32KB の締め 1つ＝32）。正直な組（数行・数百B）は行の数のまま
+    if v_n > 0 then
+      select greatest(v_n, pg_catalog.ceil(coalesce(pg_catalog.sum(case when h.tbl = 'settle_snaps' then
+               coalesce((select pg_catalog.octet_length(z.content::text) + pg_catalog.octet_length(z.used::text) + pg_catalog.octet_length(z.missing::text)
+                           from mahjong.settle_snaps z where z.session_id = (h.row_key ->> 'session_id')::uuid and z.rev = (h.row_key ->> 'rev')::int), 0)
+             else coalesce(pg_catalog.octet_length(h.before_value::text), 0) + coalesce(pg_catalog.octet_length(h.after_value::text), 0) end), 0) / 1024.0)::int)
+        into v_w from mahjong.history h where h.group_id = v_gid;
+    end if;
+    -- 後見（実の履歴の重みで）
+    v_k := mahjong_private.mj_w_over(p_room_id, v_me, v_role, greatest(1, v_w), v_w);
     if v_k is not null then
       perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', v_k));
     end if;
@@ -4349,12 +4414,12 @@ begin
     end if;
   exception
     when sqlstate 'MJ001' then
-      v_ret := sqlerrm::jsonb; v_n := 0;
+      v_ret := sqlerrm::jsonb; v_n := 0; v_w := 0;
     when deadlock_detected or lock_not_available or serialization_failure then
-      v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'lock'); v_n := 0;
+      v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'lock'); v_n := 0; v_w := 0;
     when others then
       raise log 'mj_write internal % %', sqlstate, sqlerrm;
-      v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;
+      v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0; v_w := 0;
   end;
 
   -- ⑥ 数え（塊の外＝戻らない・limits は一番最後・(kind,key) の字の順＝join:nfail1h → secret:r1d → write:*）
@@ -4367,7 +4432,7 @@ begin
     insert into mahjong.limits (kind, key, window_start, count) values ('secret:r1d', p_room_id::text, pg_catalog.date_trunc('hour', pg_catalog.now()), 1)
       on conflict (kind, key, window_start) do update set count = mahjong.limits.count + 1;
   end if;
-  perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);
+  perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_w);
   return v_ret;
 end $fn$;
 revoke all on function public.mj_write(uuid, uuid, jsonb) from public, anon, authenticated;

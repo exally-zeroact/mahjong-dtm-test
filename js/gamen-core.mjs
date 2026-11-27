@@ -114,8 +114,7 @@ export function errText(res, way) {
       // P6g §5（p6g_sadame v1.1）：書きの窓（write:*）は what で字を分ける＝1日の窓で「1分待って」を出さない・頼める人がいない道もあるので「他の人に」は言わない
       if (typeof w === 'string' && w.startsWith('write:')) {
         if (['write:un1d', 'write:uk1d', 'write:u1d', 'write:rk1d', 'write:rn1d'].includes(w)) return '24時間に書ける数を越えたので、今は送れません。時間をおいてもう一度押してください。';
-        if (w === 'write:all1d') return '全体が混んでいます。時間をおいてもう一度押してください。';
-        if (!['write:all1m', 'write:rn1m', 'write:u1m', 'write:ur1m'].includes(w)) return '書ける数を越えました（' + w + '）。時間をおいてもう一度押してください。';
+        if (!['write:rn1m', 'write:u1m', 'write:ur1m'].includes(w)) return '書ける数を越えました（' + w + '）。時間をおいてもう一度押してください。';
       }
       return '混んでいます。1分待ってもう一度押してください。';
     case 'bad':

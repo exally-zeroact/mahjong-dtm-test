@@ -4,8 +4,8 @@
  *  1 消して8日を越えて残る部屋 0
  *  2 直近2日（今日と昨日）の sweep:bad 0
  *  3 直近2日の sweep:tailbad 0
- *  4 cron.job の mj-sweep-tick と mj-sweep-tail が1本ずつ・active
- *  5 両方の最後の succeeded が5分以内・直近1日の failed 0
+ *  4 cron.job の mj-sweep-tick・mj-sweep-tail・mj-wwatch（P9 の書きの量の見張り・5分ごと）が1本ずつ・active
+ *  5 どれも最後の succeeded が AGE_S 以内（tick・tail 5分／wwatch 11分）・直近1日の failed 0
  * ★読めない時も赤★（式が落ちる＝cron が無い等・欄が欠ける・数でない）。
  * 使い方（khaw だけ）: node scripts/sweep-mihari.mjs
  */
@@ -15,7 +15,8 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-export const JOBS = ['mj-sweep-tick', 'mj-sweep-tail'];
+export const JOBS = ['mj-sweep-tick', 'mj-sweep-tail', 'mj-wwatch'];
+export const AGE_S = { 'mj-sweep-tick': 300, 'mj-sweep-tail': 300, 'mj-wwatch': 660 };
 
 /** jsonb を返す式（select の中にも plpgsql の := にも置ける） */
 export const MIHARI_EXPR = `jsonb_build_object(
@@ -29,7 +30,7 @@ export const MIHARI_EXPR = `jsonb_build_object(
                     where j.jobname = n and d.status = 'succeeded'),
       'failed1d', (select count(*) from cron.job_run_details d join cron.job j on j.jobid = d.jobid
                     where j.jobname = n and d.status = 'failed' and d.start_time > now() - interval '1 day')))
-    from unnest(array['mj-sweep-tick', 'mj-sweep-tail']) n))`;
+    from unnest(array['mj-sweep-tick', 'mj-sweep-tail', 'mj-wwatch']) n))`;
 
 /** 赤の名の並び（空＝緑）。m が読めない・欄が欠ける時も赤 */
 export function mihariAka(m) {
@@ -44,7 +45,7 @@ export function mihariAka(m) {
     if (!j) { aka.push('4 ' + n + ' 読めない'); continue; }
     if (num(j.all) !== 1 || num(j.active) !== 1) aka.push(`4 ${n} 本数=${j.all} active=${j.active}`);
     const age = num(j.ok_age_s);
-    if (age === null || age > 300) aka.push(`5 ${n} 最後の succeeded=${j.ok_age_s === null ? '無し' : Math.round(age) + '秒前'}`);
+    if (age === null || age > AGE_S[n]) aka.push(`5 ${n} 最後の succeeded=${j.ok_age_s === null ? '無し' : Math.round(age) + '秒前'}`);
     if (num(j.failed1d) !== 0) aka.push(`5 ${n} 直近1日の failed=${j.failed1d}`);
   }
   return aka;

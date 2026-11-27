@@ -7,7 +7,7 @@
  * 控え：mj-<VER>（完了印 /__mj_done つきの物だけ使う）・mj-tmp-<VER>-*（取りかけ）・mj-conf（supa-config.js の写し）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '57dfd356e69f';
+const VER = 'f18ae85c6323';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', '6c76c1512ed6471b09e88a64322f41fe8df3cb8c910d877ef9d29b53c62f5517'],
   ['/css/gamen.css', '2333a31cf42ffb37998f9105741ff07b5894abfee2a3fd3dcc16a8dde1c6e117'],
@@ -18,10 +18,10 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', 'bc767af815bda845916eeef4b761017114a4de2bca7a29fb62d17371807aa4da'],
+  ['/js/gamen-core.mjs', 'fbe7f7c79396341df6839d6886cc449236b11c6d63927cb405c5c9e238703bb8'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
   ['/js/gamen-league.mjs', '86f2babd576ea697ab64c975be5325bdb4ddf29aca8759ccab87c0f8df10f86b'],
-  ['/js/gamen-room.mjs', 'f2324a0d4ed21b39ab2b0cdc82b21fe5ff1755636171e25fc0ddf34c71755ef5'],
+  ['/js/gamen-room.mjs', 'fd3cd914f9812ae104c3506b6cb75d267975ae03b474f670af40d456bac6ce67'],
   ['/js/gamen-rules.mjs', 'cb30b4f4be5e34150f863b85ba29fc47e654a89a8338b626e73461e31b9a60f8'],
   ['/js/gamen-taikyoku.mjs', 'b722639d7f84545aff9121236222bcd7d106f25776825eff9cc6f23b72b727d8'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
@@ -37,7 +37,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
-  ['/lib/outbox.mjs', '831f24ebaec2774ef64f5ba237d1579cfea848de2f2bd9e6a32f4a08ce918ffe'],
+  ['/lib/outbox.mjs', 'e82567cb9fd2dfb95b9e27e0c26ec9705544010f5e3f0eef6e32353a6ea29b97'],
   ['/lib/room-state.mjs', '98216b9dba96d22d937ad28241d118b3e2f23961d87aded234de3885c5672baf'],
   ['/lib/rules.mjs', 'e389644031b87167e7f9f5fec6b20d997e6d93fee5862e4ba66677856d034f36'],
   ['/lib/safe-int.mjs', 'c3d97c57acb9e2308a2e0e827a715a18b39659985877044b8c5b8d4379fb6b83'],
