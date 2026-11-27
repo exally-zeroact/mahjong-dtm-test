@@ -507,7 +507,7 @@ const WZ = [
     ['if extensions.crypt(v_pk, cand.pass_hash) = cand.pass_hash then   -- ★名前の道の比べ★', 'if true then']]),
     ['名前の道：違うパスは wrong', '名前ごと5回で止め（join の外れ）', '名前の道も全体 1分100 を見る']],
   ['W2 joined_via で落ちる（name を決まりから外す）', () => `alter table mahjong.room_accounts drop constraint room_accounts_joined_via_ok;
-    alter table mahjong.room_accounts add constraint room_accounts_joined_via_ok check (joined_via in ('pass', 'url', 'create', 'import'));`,
+    alter table mahjong.room_accounts add constraint room_accounts_joined_via_ok check (joined_via in ('pass', 'url', 'create', 'import')) not valid;`,   // not valid＝khaw に今ある name の行は見ない（新しい行だけ止める）
     ['名前で入れる（joined_via name）']],
   ['W3 比べが閉じた部屋を見る', () => brk('mahjong_private.mj_pair_bf', [["where r.name_key = p_nk and r.kind = 'shared' and r.closed_at is null", "where mahjong_private.mj_name_key(r.name) = p_nk and r.kind = 'shared'"]]),
     ['終えた後は同じ組で作れ']],
@@ -523,6 +523,8 @@ const WZ = [
     ['create 5回の後の room_share は busy user']],
   ['W9 部屋なし潰しを外す', () => brk('public.mj_room_join', [["  if v_found and v_kind = 'solo' then v_found := false; end if;   -- ★部屋なし潰し★", '  null;']]),
     ['番号・url で部屋なしと無い部屋の返しが同じ']],
+  ['W10 P4 room_secret の1日3回を4回に', () => brk('public.mj_write', [["interval '24 hours') >= 3 then", "interval '24 hours') >= 4 then"]]),
+    ['room_secret 4回目は busy what secret']],
 ];
 const W8 = () => [brk('public.mj_room_create', [[CREATE_RECHECK, "v_pair := coalesce(v_pre, mahjong_private.mj_pair_bf(v_nk, v_key, null, '{}'::jsonb));"]]),
   brk('mahjong_private.mj_w_op', [[SHARE_RECHECK, "v_j := coalesce(p_o -> '_pre', mahjong_private.mj_pair_bf(v_rk, v_key, p_room, '{}'::jsonb));"],

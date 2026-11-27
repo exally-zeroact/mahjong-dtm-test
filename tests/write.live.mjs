@@ -874,6 +874,11 @@ const body = `
     ${W('b4k', 3, 'ra', A(ma(U(), '管満ち')))}
     ${W('b4n', 2, 'ra', A(ma(U(), '入は書ける')))}`)}
   ${RS}
+  ${undo('b7', `insert into mahjong.limits (kind, key, window_start, count) values ('write:uk1d', ra::text || ':' || us[3]::text, date_trunc('hour', now()), 1500);
+    ${W('b7k', 3, 'ra', A(ma(U(), '管の人満ち')))}
+    ${W('b7o', 1, 'ra', A(ma(U(), '持ち主は書ける')))}
+    ${W('b7n', 2, 'ra', A(ma(U(), '入も書ける')))}`)}
+  ${RS}
   ${undo('bo', `insert into mahjong.limits (kind, key, window_start, count) values ('write:ur1m', ra::text || ':' || us[2]::text, date_trunc('minute', now()) - interval '5 minutes', 7),
       ('write:un1d', ra::text || ':' || us[2]::text, now() - interval '25 hours', 1500),
       ('write:u1d', us[2]::text, now() - interval '25 hours', 3000);
@@ -1597,6 +1602,7 @@ function check(out, lib, say) {
   ok('⑧ 管も u1d で止まる', isErr('b5k', 'busy', { what: 'write:u1d' }), J([R('b5k')]));
   ok('⑧ 前の版の rn1d 3000 が在っても入は書ける（読まない）', isOk('b6') && has('b6', { un: 1, rn: 0 }), J([R('b6'), d('b6')]));
   ok('⑧ 管の rk1d が満ちても入は書ける', isErr('b4k', 'busy', { what: 'write:rk1d' }) && isOk('b4n'), J([R('b4k'), R('b4n')]));
+  ok('⑧ P4 管A の uk1d（部屋×人 1500）が満ちると busy・同じ部屋の持ち主と入は書ける', isErr('b7k', 'busy', { what: 'write:uk1d' }) && isOk('b7o') && isOk('b7n'), J([R('b7k'), R('b7o'), R('b7n')]));
   ok('⑧ 古い窓は書いた時に消える（25時間前の un1d 1500・u1d 3000 は数えない）', isOk('bo') && Number(out.bo_left) === 0, J([R('bo'), out.bo_left, out.bo_err]));
   ok('⑧ 同値だけの組 → ok・op_results 0・人の分は +1・分け合う分と1日は 0', isOk('sv') && has('sv', { ...none, ur: 1, rn1m: 0, all: 0, un: 0, ud: 0 }), J(d('sv')));
   ok('⑧ 入の1行 → ur・u・rn1m（P9：全員の窓 all は行0）・un1d・u1d に +1・uk・rk 0', isOk('okn') && has('okn', { ur: 1, u: 1, rn1m: 1, all: 0, un: 1, ud: 1, uk: 0, rk: 0, rn: 0, op: 1 }), J(d('okn')));
@@ -1801,6 +1807,10 @@ const fnText = (name) => {
 };
 /* [名, 関数, 壊す字, 替える字, 2つ目の替え（無ければ null）, 狙った試験の名の頭] */
 const WAZA = [
+  /* P4（pbundle_sadame v2.1 §4）：24時間の窓が効く＝上限を1上げると狙いが赤 */
+  ['P4 rk1d の上限 7500 を 7501 に', 'mahjong_private.mj_w_over', 'case when v_kan then p_d else 0 end, 7500)', 'case when v_kan then p_d else 0 end, 7501)', null, '⑧ 管の rk1d が満ちても'],
+  ['P4 un1d の上限 1500 を 1501 に', 'mahjong_private.mj_w_over', "('write:un1d',  v_ru,       true,  case when v_nyu then p_d else 0 end, 1500)", "('write:un1d',  v_ru,       true,  case when v_nyu then p_d else 0 end, 1501)", null, '⑧ 後見の busy（un1d'],
+  ['P4 uk1d の上限 1500 を 1501 に', 'mahjong_private.mj_w_over', "('write:uk1d',  v_ru,       true,  case when v_kan then p_d else 0 end, 1500)", "('write:uk1d',  v_ru,       true,  case when v_kan then p_d else 0 end, 1501)", null, '⑧ P4 管A の uk1d'],
   ['素点の範囲を見ない（表の行で赤になるか）', 'mahjong_private.mj_w_op', 'if v_x not between -2000000000 and 2000000000 or v_x % 100 <> 0 then', 'if false then', null, '⑩ 表：cell_set の100の倍数でない値は range'],
   ['op_results を書かない', 'public.mj_write', "insert into mahjong.op_results (room_id, op_id, result, user_id) values (p_room_id, p_op_id,\n        case when v_op0 in ('room_secret', 'room_share') then pg_catalog.jsonb_set(v_ret, '{results,0}', (v_ret #> '{results,0}') - 'channel_key') else v_ret end, v_me);", 'null;', null, '⑨ 同じ人の同じ op_id 2回'],
   ['卓の部屋を確かめない', 'mahjong_private.mj_w_t', 'where x.id = p_tid and x.room_id = p_room for update', 'where x.id = p_tid for update', null, '② 別の部屋の table_id'],

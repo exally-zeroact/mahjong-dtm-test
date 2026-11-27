@@ -15,6 +15,7 @@
  *  ⑫ room_bans に在る人→removed（数えない）・印を消すと入れる
  *  ⑬ anon は 401/403・捨てアカウントで外れ→wrong で数えが残る／GET と Prefer: tx=rollback で外れを送って「wrong なのに数えが残らない」道が無い
  *  ⑭ 平文のパス・token が rooms・room_accounts・limits の字に無い ⑮ 関数の権限（public.mj_* 3本・definer・search_path 空・authenticated だけ）
+ *  --waza（P4・pbundle_sadame v2.1 §4）：素の塊の後、ok1h の 60 を 61 に上げた mj_room_join を塊の頭で当てて回す＝⑪ busy:room が赤になるか（塊ごと戻る）
  *  ★wrong 以外の ok でない返しの後は数え（limits の join:*・fail_count・room_accounts）が1つも増えていない★
  * 倉庫には何も残さない（do の塊の最後でわざと例外を投げて結果を持ち帰る＝仮の人・部屋も全部戻る）。
  * ⑬ の捨てアカウントの数え（limits の join:*）は最後に消す（mahjong の limits を書くのは試験だけ＝khaw の客の行は0）。
@@ -267,6 +268,25 @@ begin
   raise exception 'MJRESULT%', res::text;
 end ${q('rj')};`;
 
+const WAZA = process.argv.includes('--waza');
+let outBase = null;
+const OK1H = "if v_n >= 60 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'room'); end if;";
+function wazaPre() {
+  const S = fs.readFileSync(path.join(ROOT, 'supabase/schema.sql'), 'utf8').replace(/\r\n/g, '\n');
+  const a = S.indexOf('create or replace function public.mj_room_join(');
+  const b = S.indexOf('$fn$;', S.indexOf('$fn$', a) + 4);
+  if (a < 0 || b < 0) throw new Error('mj_room_join が見つからない');
+  const t = S.slice(a, b + 5);
+  if (t.split(OK1H).length !== 2) throw new Error('壊す字（ok1h 60）がちょうど1つでない');
+  return t.split(OK1H).join(OK1H.replace('>= 60', '>= 61')) + '\n';
+}
+async function getOut(pre) {
+  const { text: t } = await mq(pre + sql);
+  let msg = t; try { msg = JSON.parse(t).message || t; } catch (_) { /* 素の字 */ }
+  const at = msg.indexOf('MJRESULT');
+  if (at < 0) { console.log('★失敗★ 結果の例外が来なかった: ' + msg.slice(0, 800)); return null; }
+  try { return JSON.parse(msg.slice(at + 8).split(String.fromCharCode(10))[0]); } catch (e) { console.log('★失敗★ 結果が読めない: ' + e.message); return null; }
+}
 async function mq(query) {
   const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -280,13 +300,8 @@ let p = 0, f = 0;
 const ok = (name, cond, why = '') => { if (cond) { p++; console.log('  ✓ ' + name); } else { f++; console.log('  ✗ ' + name + (why ? ' — ' + why : '')); } };
 if (!isTest) console.log('★中止★ test の倉庫でない');
 else {
-  const { text: t } = await mq(sql);
-  let msg = t; try { msg = JSON.parse(t).message || t; } catch (_) { /* 素の字 */ }
-  const at = msg.indexOf('MJRESULT');
-  if (at < 0) console.log('★失敗★ 結果の例外が来なかった: ' + msg.slice(0, 800));
-  else {
-    try { out = JSON.parse(msg.slice(at + 8).split(String.fromCharCode(10))[0]); } catch (e) { console.log('★失敗★ 結果が読めない: ' + e.message); }
-  }
+  out = await getOut('');
+  if (WAZA && out) { outBase = out; out = await getOut(wazaPre()); }
 }
 const so = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o).sort().map((k) => k + ':' + JSON.stringify(o[k])).join(',') : JSON.stringify(o));
 const same = (a, b) => so(a) === so(b);
@@ -297,6 +312,18 @@ const still = (k) => same(out[k + '_c0'], out[k + '_c1']);
 const delta = (k) => dd(out[k + '_c0'], out[k + '_c1']);
 const okRet = (k, again, role = 'nyu') => { const r = R(k); return r.ok === true && r.again === again && r.role === role && r.room_id === out.rid
   && Object.keys(r).sort().join(',') === 'again,channel_key,name,ok,role,room_id,room_no'; };
+if (WAZA) {
+  const busyRoom = (o) => { const r = (o && o.br) || {}; return r.ok === false && r.err === 'busy' && r.what === 'room'; };
+  const clean = (o) => !!o && !Object.keys(o).some((k) => k.endsWith('_err'));
+  const b = clean(outBase) && busyRoom(outBase);
+  const red = b && !!out && !busyRoom(out);
+  if (!b) console.log('★中止★ 壊す前の素の回りで ⑪ busy:room が緑でない（か塊の中の例外）＝--waza は数えない');
+  else if (!out) console.log('  ✗ P4 ok1h の上限 60 を 61 に：塊が回らなかった');
+  else console.log(red ? '  ✓ P4 ok1h の上限 60 を 61 に → 狙い ⑪ 部屋の新しい入り1時間60の後＝busy:room が赤（' + JSON.stringify(out.br).slice(0, 80) + '）'
+    : '  ✗ P4 ok1h の上限 60 を 61 に → ⑪ が赤にならない');
+  console.log(`\nroom-join --waza: ${red ? 1 : 0}/1 狙いが赤になった`);
+  process.exit(red ? 0 : 1);
+}
 
 if (out) {
   ok('khaw に前から在る古い部屋は先に掃けた（0＝表全体の数えが掃除で揺れない・taiketsu 直し N1）', Number(out.others_left) === 0, String(out.others_left));
