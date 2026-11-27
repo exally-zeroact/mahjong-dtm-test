@@ -37,6 +37,12 @@ async function check(src) {
   eq('入る（name）full＝人数がいっぱい', t({ ok: false, err: 'full' }, 'name'), 'この部屋は人数がいっぱいで入れません。');
   eq('入る（url）full＝人数がいっぱい', t({ ok: false, err: 'full' }, 'url'), 'この部屋は人数がいっぱいで入れません。');
   eq('作る full＝倉庫がいっぱい', t({ ok: false, err: 'full' }, 'create'), '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。');
+  // write（部屋の op の直送・c20_sadame v2.3）＝作る の字に落とさない
+  eq('write full what members＝名簿', t({ ok: false, err: 'full', what: 'members' }, 'write'), '名簿がいっぱいです。これ以上名前を足せません。');
+  eq('write full what admins', t({ ok: false, err: 'full', what: 'admins' }, 'write'), '管の人がいっぱいです。');
+  eq('write full what room_bans', t({ ok: false, err: 'full', what: 'room_bans' }, 'write'), '部屋がいっぱいです。');
+  eq('write full what op_results', t({ ok: false, err: 'full', what: 'op_results' }, 'write'), LEAGUE_FULL);
+  eq('write full（what 無し）', t({ ok: false, err: 'full' }, 'write'), LEAGUE_FULL);
   // close・league の他の字は変わらない
   eq('close bad closed', t({ ok: false, err: 'bad', at: 'closed' }, 'close'), 'この部屋はもう終わっています。');
   eq('close mj_role', t({ ok: false, err: 'mj_role' }, 'close'), '部屋を終えられるのは部屋の持ち主だけです。');
@@ -52,6 +58,8 @@ const BREAKS = [
   ['close の字を前に戻す', (s) => s.replace("return '" + CLOSE_FULL + "'", "return 'この部屋は記録がいっぱいのため、今は終えられません。'")],
   ['league の full の枝を消す（作る の字へ落ちる）', (s) => s.replace("    if (e === 'full') return '" + LEAGUE_FULL + "';", '')],
   ['league の full を前の what ごとの字に戻す', (s) => s.replace("    if (e === 'full') return '" + LEAGUE_FULL + "';", "    if (e === 'full') { if (at === 'leagues') return 'この部屋のリーグは50までです。'; return 'この部屋は記録がいっぱいです（' + at + '）。'; }")],
+  ['write の full の枝を消す（作る の字へ落ちる）', (s) => s.replace("if (way === 'write' && e === 'full') {", "if (false) {")],
+  ['write の members を他の full と同じ字にする', (s) => s.replace("if (w === 'members') return", "if (false) return")],
   ['入る の字を変える（残す字の見張り）', (s) => s.replace('この部屋は人数がいっぱいで入れません。', '入れません。')],
 ];
 

@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '5f97e2bd7bdd';
+const VER = 'c4bd54eb0ceb';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '9f64c91331245c370b4e478a7670dd7c597a77be0a703098f87f9f770d7db26c'],
@@ -19,7 +19,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', 'fbe7f7c79396341df6839d6886cc449236b11c6d63927cb405c5c9e238703bb8'],
+  ['/js/gamen-core.mjs', '0242ce637097da642deea243509cb63cd72ba242fa492ebc8eeec793144af361'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
   ['/js/gamen-league.mjs', '86f2babd576ea697ab64c975be5325bdb4ddf29aca8759ccab87c0f8df10f86b'],
   ['/js/gamen-room.mjs', '56a297e713f54d59771df80dc85d6c7d8da227f7b22d56029bab2d4f6bbb7a34'],

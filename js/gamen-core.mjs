@@ -63,6 +63,14 @@ export function errText(res, way) {
     if (e === 'mj_reauth') return '部屋を消すには、パスワードでもう一度ログインしてください。';
     if (e === 'mj_role') return '部屋を消せるのは部屋の持ち主だけです。';
   }
+  // way 'write'＝部屋の op の直送（名前の頁など・c20_sadame v2.3）：full は what で分ける＝部屋を作る字（下の switch）に落とさない。
+  // 上限が残る表（fullji_sadame v1.1 §2）＝members・admins・room_bans・room_accounts。op_results と what 無しは mj_caps の行の欠け
+  if (way === 'write' && e === 'full') {
+    if (w === 'members') return '名簿がいっぱいです。これ以上名前を足せません。';
+    if (w === 'admins') return '管の人がいっぱいです。';
+    if (w === 'room_bans' || w === 'room_accounts') return '部屋がいっぱいです。';
+    return '倉庫で止まりました。もう一度押しても同じです。';
+  }
   // way 'league'＝リーグの op（league_create・league_save・league_owner_set／d1_sadame v2.1 §1 の表・bad は at か what を見る）。
   // 表に無い err（mj_session・busy・net・offline・server・mj_op_other_user・dup・知らない err）は下の今の字のまま
   if (way === 'league') {
