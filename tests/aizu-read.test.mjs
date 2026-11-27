@@ -153,6 +153,10 @@ if (!self) {
     ['既定の delay を 1秒にする', 'export const AIZU_DELAY_MS = 300;', 'export const AIZU_DELAY_MS = 1000;'],
   ];
   let p = 0, f = 0;
+  /* わざと壊した lib（例：読みの try/catch を外す）は読みの失敗を受け取らない＝Node 20 では受け取られない失敗でプロセスごと落ちる（CI 46008844000）。
+   * 自己確認の間だけ数えて落とさない（壊しの赤は期待値で数える）。ふだんの試験（--self-test 無し）では受けない＝落ちる。 */
+  let loose = 0;
+  process.on('unhandledRejection', () => { loose++; });
   console.log('[aizu-read --self-test] lib をわざと壊して赤になるか');
   if ((await run(L0, true)).f) { console.log('  ✗ 壊す前から赤'); process.exit(1); }
   for (const [n, from, to] of W) {
@@ -166,6 +170,6 @@ if (!self) {
     } finally { fs.unlinkSync(tmp); }
   }
   console.log('\n' + p + ' passed, ' + f + ' failed');
-  console.log('自己確認: ' + p + '/' + (p + f));
+  console.log('自己確認: ' + p + '/' + (p + f) + '（壊しの lib が受け取らなかった失敗 ' + loose + '）');
   process.exit(f ? 1 : 0);
 }
