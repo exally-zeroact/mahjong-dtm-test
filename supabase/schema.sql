@@ -4722,6 +4722,7 @@ begin
              'rules', (select q.rules from mahjong.rule_sets q where q.id = l.rule_set_id and q.version = l.rule_version),
              'rules_alt', (select q.rules from mahjong.rule_sets q where l.rule_set_id_alt is not null and q.id = l.rule_set_id_alt and q.version = l.rule_version_alt),
              'version', l.version,
+             'created_at', pg_catalog.to_char(l.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),   -- A24（11-27）：同じ名のリーグを作った日時で見分ける（画面は端末の時刻で出す・Z＝UTC・小数なしで WebKit も読める）
              'l', l.owner_user_id = v_me or (v_role = 'owner' and not exists (select 1 from auth.users u where u.id = l.owner_user_id)))
              || case when l.voided then '{"voided": true}'::jsonb else '{}'::jsonb end
              order by l.created_at, l.id), '[]'::jsonb)

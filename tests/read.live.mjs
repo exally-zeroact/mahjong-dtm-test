@@ -421,10 +421,10 @@ function check(o) {
   ok('D1 塊が回った', !o.lg_err, o.lg_err);
   ok('D1 リーグの段は st の外・st の鍵は今のまま・リーグ無しは []', isOk(g) && canon(g.leagues) === '[]' && !('leagues' in g.st) && Object.keys(g.st).sort().join(',') === ST_KEYS
     && isOk(o.lg_r1) && !('leagues' in o.lg_r1.st) && Object.keys(o.lg_r1.st).sort().join(',') === ST_KEYS, J([g && g.leagues, g && Object.keys(g.st)]));
-  ok('D1 作ったリーグの形（欄11・期間・rules と rules_alt・version 1・l true・取り消し印なし・持ち主の id を出さない）', isOk(o.lg_c) && lg(o.lg_r1).length === 1
+  ok('D1 作ったリーグの形（欄12・期間・rules と rules_alt・version 1・l true・created_at（A24・UTC Z）・取り消し印なし・持ち主の id を出さない）', isOk(o.lg_c) && lg(o.lg_r1).length === 1
     && g1.league_id === L1 && g1.name === 'D1 リーグ' && g1.date_from === '2026-11-01' && g1.date_to === null && g1.rank_by === 'avg_pt' && g1.min_games === 10
     && g1.players_main === 4 && g1.rules && g1.rules.players === 4 && g1.rules.rate === 100 && g1.rules_alt && g1.rules_alt.players === 3
-    && g1.version === 1 && g1.l === true && Object.keys(g1).length === 11 && !J(o.lg_r1.leagues).includes('owner'), J([o.lg_c, o.lg_r1 && o.lg_r1.leagues]));
+    && g1.version === 1 && g1.l === true && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(g1.created_at) && Object.keys(g1).length === 12 && !J(o.lg_r1.leagues).includes('owner'), J([o.lg_c, o.lg_r1 && o.lg_r1.leagues]));
   ok('D1 他の部屋のリーグが出ない', isOk(o.lg_cf) && lg(o.lg_r1).length === 1, J([o.lg_cf, lg(o.lg_r1).map((x) => x.league_id)]));
   ok('D1 l は L の人だけ true（入は false）', isOk(o.lg_r2) && lg(o.lg_r2).length === 1 && lg(o.lg_r2)[0].l === false, J(o.lg_r2 && o.lg_r2.leagues));
   ok('D1 league の書きの後は same にならない（read_ver+1）', isOk(o.lg_since) && !o.lg_since.same && o.lg_since.read_ver === Number(o.lg_v0) + 1

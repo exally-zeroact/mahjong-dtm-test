@@ -2,6 +2,7 @@
  *   ① 締めの門：リーグの日に締め（settle_snap）が在れば、その日の卓の table_edit voided true／false＝err settled（table_id・session_id）
  *      締めた後でも同じ値の送り直し（何も変わらない）は ok・締める前は通る・ふつうの部屋の日は締めた後も今のまま通る・voided 以外（label）は締めた後も通る
  *   ② 名（司さん 11-27 23時「同じ名前のリーグも作れる」）：同じ部屋で同じ名のリーグを作る・改名で同じ名にするのは通る（門を置かない事を確かめる）
+ *   ③ 作った日時（A24・11-27）：mj_read の room の leagues[] に created_at（倉庫の leagues.created_at・UTC・"YYYY-MM-DDTHH:MM:SSZ"・小数なし）
  * 全部を1つの塊の中で書いて戻す（倉庫に何も残さない・最後に残りを数える）。
  * --waza：倉庫の関数をわざと壊して、狙った行が赤になるか（壊した関数は塊の初めに当てる＝塊ごと戻る）
  * 使い方: node tests/lf.live.mjs [--waza]
@@ -114,7 +115,11 @@ begin
     ${W('ra', 'n6', [{ op: 'league_save', league_id: L4, base_version: 1, name: 'L 本' }])} ${ROW('n6_n', `select x.name from mahjong.leagues x where x.id = '${L4}'`)}
     ${W('ra', 'n7', [{ op: 'league_save', league_id: L4, base_version: 1, name: ' L 別 ' }])}
     ${undo('nx', `${W('ra', 'n8', [{ op: 'league_save', league_id: L4, base_version: 1, name: 'L 新' }])}
-      ${W('ra', 'n9', [lc(LX, 'L 別')])}`)}`)}
+      ${W('ra', 'n9', [lc(LX, 'L 別')])}`)}
+    -- ③ 作った日時：読みの leagues[].created_at が倉庫の値と同じ（v 3 と v 2 の両方）
+    ${T('rd3', `public.mj_read(ra, 'room', ${jb({ v: 3 })})`)}
+    ${T('rd2', `public.mj_read(ra, 'room', '{}'::jsonb)`)}
+    ${ROW('lc_want', `select jsonb_object_agg(x.id::text, to_char(x.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')) from mahjong.leagues x where x.room_id = ra`)}`)}
   raise exception 'MJRESULT%', res::text;
 end ${q('lf')};`;
 
@@ -145,6 +150,14 @@ function check(o) {
   ok('①ふつうの部屋の日は締めた後も卓を消せる（今のまま）', o.p1?.ok === true && o.p1_v === true, J([o.p1, o.p1_v]));
   ok('②同じ部屋・同じ名のリーグも作れる・同じ league_id の送り直しは ok', o.n1?.ok === true && o.n1_n === 2 && o.n2?.ok === true, J([o.n1, o.n1_n, o.n2]));
   ok('②league_save で他のリーグと同じ名へ改名できる', o.n6?.ok === true && o.n6_n === 'L 本', J([o.n6, o.n6_n]));
+  const CA = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  const want = o.lc_want || {};
+  const caOk = (rd) => {
+    const lg = rd?.ok === true && Array.isArray(rd.leagues) ? rd.leagues : null;
+    return !!lg && lg.length === 3 && Object.keys(want).length === 3
+      && lg.every((x) => typeof x.created_at === 'string' && CA.test(x.created_at) && x.created_at === want[x.league_id]);
+  };
+  ok('③mj_read の leagues[].created_at が倉庫の作った日時（UTC・Z・小数なし）・v 3 と v 2', caOk(o.rd3) && caOk(o.rd2), J([o.rd3?.leagues, o.rd2?.leagues, want]).slice(0, 600));
   return L;
 }
 
@@ -156,7 +169,10 @@ const fnText = (name) => {
   if (a < 0 || b < 0) throw new Error('関数が見つからない: ' + name);
   return SCHEMA.slice(a, b + '$fn$;'.length);
 };
-const SIG = { 'mahjong_private.mj_w_op': '(uuid, uuid, text, uuid, int, jsonb)' };
+const SIG = { 'mahjong_private.mj_w_op': '(uuid, uuid, text, uuid, int, jsonb)', 'public.mj_read': '(uuid, text, jsonb)' };
+const RD = 'public.mj_read';
+const RDG = `\ngrant execute on function ${RD}${SIG[RD]} to authenticated;`;
+const CA0 = `'created_at', pg_catalog.to_char(l.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),`;
 const brk = (fn, pairs) => {
   let t = fnText(fn);
   for (const [from, to] of pairs) { if (!t.includes(from)) throw new Error(`壊す字が無い（${fn}）: ${from.slice(0, 80)}`); t = t.split(from).join(to); }
@@ -169,6 +185,9 @@ const WZ = [
   ['Z1 締めの門を外す', () => brk(OP, [[G2, 'if false and exists']]), ['①締めた後：リーグの日の卓を消す', '①締めた後：リーグの日の消した卓を戻す']],
   ['Z2 締めの門を voided が変わらない時も掛ける', () => brk(OP, [[G1, 'if true then']]), ['①締めた後：同じ値の送り直し', '①締めた後：voided でない直し']],
   ['Z3 締めの門をふつうの部屋の日にも掛ける', () => brk(OP, [[G2, 'if true and exists']]), ['①ふつうの部屋の日']],
+  ['Z4 読みから created_at を外す', () => brk(RD, [[CA0, '']]) + RDG, ['③mj_read の leagues']],
+  ['Z5 created_at に小数を付ける', () => brk(RD, [[CA0, CA0.replace('SS"Z"', 'SS.US"Z"')]]) + RDG, ['③mj_read の leagues']],
+  ['Z6 created_at を UTC でなく倉庫の時刻で出す', () => brk(RD, [[CA0, CA0.replace(` at time zone 'UTC'`, ` at time zone 'Asia/Tokyo'`)]]) + RDG, ['③mj_read の leagues']],
 ];
 
 let pass = 0, fail = 0;
