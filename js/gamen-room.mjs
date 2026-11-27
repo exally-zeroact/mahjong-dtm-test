@@ -1538,7 +1538,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const partial = lastMissing.length > 0 || s.missing.length > 0;
     if (partial) viewSnap = false; // 終えた時の額を見る道も無い（N2）
     const tenCh = last && !partial ? tenChanged(last.content.ten, s.ten) : []; // 鍵を合わせて比べる（S2 v1.1 止め2）
-    const changed = !!last && (partial ? cn(lastMissing) !== cn(s.missing) : tenCh.length > 0);
+    const ptCh = last && !partial ? tenChanged(last.content.pt10NoRate || {}, s.pt10NoRate || {}) : []; // w2a：レートなしの卓の pt も比べる（締めた後の変わり・お金）
+    const chWho = tenCh.concat(ptCh.filter((m) => !tenCh.includes(m))); // 重ねずに数える（点と pt の両方が変わった人は1人）
+    const changed = !!last && (partial ? cn(lastMissing) !== cn(s.missing) : chWho.length > 0);
     const many = chainHeads(d.sid).length > 1; // C4：区切った卓の鎖は1つの卓と数える
     const goBtn = s.missing.length ? '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many, d.sid)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>' : '';
     const errLine = closeErr ? '<div class="r-red"><b>' + (closeErr === HELD_GATE ? esc(HELD_GATE) : '対局終了を残せませんでした（' + esc(closeErr) + '）') + '</b></div>' : '';
@@ -1558,8 +1560,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (partial) {
         h += '<div class="r-red"><b>入っていない物が変わりました（' + lastMissing.length + '件 → ' + s.missing.length + '件）</b></div>' + goBtn;
       } else {
-        h += '<div class="r-red"><b>終えた後に変わりました（' + tenCh.length + '人）</b><span>' + tenCh.map((m) => esc(s.name(m))).join('・') + '</span></div>';
+        h += '<div class="r-red"><b>終えた後に変わりました（' + chWho.length + '人）</b><span>' + chWho.map((m) => esc(s.name(m))).join('・') + '</span></div>';
         h += '<p class="sec">終えた時 → 今</p><div class="list">' + tenCh.map((m) => { const a = last.content.ten[m] || 0, b = s.ten[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmt(a) + ' →</span><span class="' + sign(b) + ' b">' + fmt(b) + '</span></div>'; }).join('') + '</div>';
+        if (ptCh.length) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + ptCh.map((m) => { const a = (last.content.pt10NoRate || {})[m] || 0, b = (s.pt10NoRate || {})[m] || 0; return '<div class="li"><span class="b">' + esc(s.name(m)) + '</span><span class="li-v">' + fmtPt(a) + 'pt →</span><span class="' + sign(b) + ' b">' + fmtPt(b) + 'pt</span></div>'; }).join('') + '</div>'; // w2a
       }
       h += errLine + closeArea('今の中身で対局終了し直す');
       if (!partial) h += '<button class="btn btn-line" id="sSnap">終えた時のまま見る</button>';
@@ -1594,8 +1597,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
           h += head + '<div class="r-card-sub">' + parts.map(esc).join('　') + '</div><div class="r-card-kei">計 ' + (Object.keys(b.kei).length ? keiText(b.kei) : fmtPt(total10) + 'pt') + '</div></div>';
         }
       }
-      const nr = Object.entries(s.pt10NoRate || {});
-      if (nr.length && !viewSnap) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
+      const nr = Object.entries((viewSnap ? last.content.pt10NoRate : s.pt10NoRate) || {}); // w2a：終えた時のまま見る間は控えの pt
+      if (nr.length) h += '<p class="sec">レートなしの卓（pt）</p><div class="list">' + nr.map(([m, x]) => '<div class="li"><span>' + esc(s.name(m)) + '</span><span class="' + sign(x) + ' b">' + fmtPt(x) + 'pt</span></div>').join('') + '</div>';
     }
     if (!viewSnap) h += splitHtml(d.sid, partial);
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';

@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'e4ac28efe126';
+const VER = '4780e346bac0';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
@@ -22,7 +22,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/gamen-core.mjs', '25bf68837ebb077ec2d46e611866459bda3d0cdf42979a54db5e91b0d85ecbfa'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
   ['/js/gamen-league.mjs', '928e3c0331edb1966e1a2bd45d1e5d5d48fc5c88ab226ea9458872406602e260'],
-  ['/js/gamen-room.mjs', 'f11edf6917d312e55c6d90a54fb779b9dbb763f9b8b4d00272f5537458b334b9'],
+  ['/js/gamen-room.mjs', '2d4659ec6bd3239e38e8e83d1c9a63fb004bdca7109a0021a074273eed4e851c'],
   ['/js/gamen-rules.mjs', '13246bf062b14e9d9dd582e445744c8d9262e43979124576705cb0a0766ed03e'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
   ['/js/gamen-taikyoku.mjs', 'b722639d7f84545aff9121236222bcd7d106f25776825eff9cc6f23b72b727d8'],
