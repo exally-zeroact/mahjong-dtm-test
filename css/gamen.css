@@ -191,8 +191,6 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .uma-row label { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: var(--c-ji-usui); }
 .uma-row .box { width: 100%; }
 /* ウマの［±］（iPhone の数字鍵盤に − が無い・司さん 11-21）＝14px の字→高さ36・押す所は ::after で44 */
-.uma-pm { position: relative; width: 100%; height: 36px; padding: 0; font: inherit; font-size: 14px; font-weight: 800; border: 0; border-radius: 8px; background: var(--c-seg); color: var(--c-kon); }
-.uma-pm::after { content: ""; position: absolute; inset: -4px 0; }
 /* ホーム（home_v154 ①） */
 .h-brand { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 12px) 20px 0; }
 .h-n1 { font-size: 30px; font-weight: 800; letter-spacing: .02em; }
@@ -251,6 +249,11 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 #pCand > .btn { margin-top: 8px; }
 /* リーグ（D1・絵 mahjong_league_v157 ①・一覧は今の部品の型＝.list・.li・.btn-s・.sec） */
 .lg-owari { margin-left: 8px; font-size: 12px; font-weight: 600; }
+.lg-heya { font-size: 12px; font-weight: 600; } /* A24③ 見出しは「部屋 ○○」と小さく・行の主はリーグの名 */
+.lg-roster .lg-mem { flex-wrap: wrap; }
+.lg-roster .lg-ed { flex-wrap: wrap; gap: 8px; }
+.lg-roster .lg-ed .h-in { flex: 1 1 140px; }
+.lg-gone { margin-left: 28px; }
 .lg-row { flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
 .li.lg-row > span.lg-l { display: flex; white-space: normal; flex-direction: column; min-width: 0; flex: 1 1 140px; }
 .lg-l .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

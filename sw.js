@@ -8,10 +8,10 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'd5295c077b4b';
+const VER = 'c4a9f6f35c4a';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
-  ['/css/gamen.css', '37172b7ec36d3c25c79b88364a2b8585790ed56240ffe2222fef4427b8bbb4db'],
+  ['/css/gamen.css', 'c51304705cf1bfcd9511fe38d93cd23c991c9764b530061109a056a6f96dcee4'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
   ['/icons/icon-192.png', '5857277bafb6ddcbfa834336110ec15859121db6bc7371f4bab8021fc5b6dc6a'],
@@ -21,7 +21,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '25bf68837ebb077ec2d46e611866459bda3d0cdf42979a54db5e91b0d85ecbfa'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
-  ['/js/gamen-league.mjs', '86f2babd576ea697ab64c975be5325bdb4ddf29aca8759ccab87c0f8df10f86b'],
+  ['/js/gamen-league.mjs', 'a96cf84812c1ba051b3fe4fe04e32c94c6546fc12fb59f00a4744e0373999a74'],
   ['/js/gamen-room.mjs', '56a297e713f54d59771df80dc85d6c7d8da227f7b22d56029bab2d4f6bbb7a34'],
   ['/js/gamen-rules.mjs', 'cb30b4f4be5e34150f863b85ba29fc47e654a89a8338b626e73461e31b9a60f8'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
@@ -34,9 +34,11 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/sw-reg.js', '175c262793f9402a85417459d3f939c6af34137c9eade7ac8ad487c91ed010c7'],
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
-  ['/league.html', '9025ac356cebce04924c803955b73999bcfc198e866fc7136ec2bb2298430150'],
+  ['/league.html', '235b43c44e69c9fb6083500bf893d722bfd19bdc126000b144c7200406c960f0'],
   ['/lib/hanchan-pt.mjs', '7e824f2397ed1107d320a40800d17f7eca26053c917712e71ee0e9028d4de338'],
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
+  ['/lib/league-rank.mjs', 'b581d6419d0e47096699ebd290a156aa2d027fb94eff5d0b420e899833401e57'],
+  ['/lib/league-round.mjs', '5d7675480bd067e8f1b012b2c00694f9f013339dbc65c185d5e8efba3d170b1c'],
   ['/lib/my-stats.mjs', 'c69ac0283a7a6d8f45adcf973c746ff10cb538ebc59b21e1d8fdf4ae4b44f4bb'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],

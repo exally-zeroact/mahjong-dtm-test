@@ -11,11 +11,17 @@
  *   返しごとに印を「残す／消す」は定め §1 の表の通り（KEEP＝残す）。字は gamen-core.mjs errText(res, 'league')。
  * 合図＝読んだ部屋の channel_key に入り、受けたらその部屋を since なしで読み直す（倉庫が league の op でも read_ver を上げて合図を出す）。
  * D2（d2_sadame v1.1 §3）：取り消していないリーグ（終えていない部屋）に［このリーグで対局を始める］→ taikyoku.html?room=<id>&league=<league_id>。
- * 作らない物：人を外す画面・リーグを取り消すボタン・順位表（D3）。
+ * L（l_sadame v1.3 §1）：A22 規定の半荘数は無し（min_games は 0 で送る）・A16 もう一方の打ち方の箱は js/kenban（− はウマだけ・端末の鍵盤は出さない）・
+ *   A24 同じ部屋の取り消していないリーグと同じ名は作らない（倉庫 dup at name）・作れたらそのリーグの対局の頁へ・見出しは「部屋 ○○」と小さく・
+ *   名簿＝人ごとに［名前を直す］［外す］・下に「外した人」［戻す］（A25・member_rename／member_active・何も消さない）。
+ * 作らない物：リーグを取り消すボタン・順位表（D3）。
  */
 import { needLogin, showLogin, rpc, errText, sb, $, esc, uuid } from './gamen-core.mjs';
 import { rulesOk, defaultRules } from '../lib/rules.mjs';
 import { mountRules, RULE_ERR, umaText } from './gamen-rules.mjs';
+import { keypadHtml, wireKeypad } from './kenban.mjs';
+import { baseSeats } from '../lib/league-round.mjs';
+import { tableChains } from '../lib/league-rank.mjs';
 
 const KEEP = new Set(['mj_reauth', 'mj_session', 'busy', 'net', 'offline', 'server', 'internal']); // 印を残す返し（定め §1 の表）
 const LOGIN = new Set(['mj_reauth', 'mj_session']);
@@ -174,7 +180,7 @@ function renderList() {
     const dead = owner ? x.read.leagues.filter((l) => l.voided) : [];
     liveAll += live.length;
     if (!live.length && !dead.length) continue;
-    h += '<section class="lg-room" data-room="' + esc(rid) + '"><h3 class="sec">' + esc(roomName(x)) + (closed ? '<small class="lg-owari" data-owari>終わった部屋</small>' : '') + '</h3><div class="list">';
+    h += '<section class="lg-room" data-room="' + esc(rid) + '"><h3 class="sec lg-heya" data-heya>部屋 ' + esc(roomName(x)) + (closed ? '<small class="lg-owari" data-owari>終わった部屋</small>' : '') + '</h3><div class="list">';
     for (const l of live) {
       const sub = [period(l), playersText(l)].filter(Boolean).join(' ・ ');
       h += '<div class="li lg-row" data-lg="' + esc(l.league_id) + '"><span class="lg-l"><span class="row-name">' + esc(l.name) + '</span><span class="row-sub">' + esc(sub) + '</span></span><span class="lg-btns">';
@@ -183,9 +189,10 @@ function renderList() {
       h += '</span></div>';
       if (!closed) h += '<div class="li li-sub lg-play"><a class="btn-s" data-play="' + esc(l.league_id) + '" href="taikyoku.html?room=' + encodeURIComponent(rid) + '&amp;league=' + encodeURIComponent(l.league_id) + '">このリーグで対局を始める</a></div>';
     }
-    const mem = Array.isArray(x.read.st.members) ? x.read.st.members.filter((m) => m && m.active !== false) : [];
+    const all = Array.isArray(x.read.st.members) ? x.read.st.members.filter((m) => m && m.member_id) : [];
+    const mem = all.filter((m) => m.active !== false), gone = all.filter((m) => m.active === false);
     h += '<div class="li"><span>名簿 <b data-nmem>' + mem.length + '</b>人</span><button class="btn-s" type="button" data-roster="' + esc(rid) + '" aria-expanded="' + x.roster + '">名簿を見る</button></div>';
-    if (x.roster) h += '<div class="li li-sub" data-names="' + esc(rid) + '"><span class="lg-names">' + mem.map((m) => esc(m.name)).join('・') + '</span></div>';
+    if (x.roster) h += rosterHtml(rid, x, mem, gone, closed);
     if (dead.length) {
       h += '<button class="li" type="button" data-dead="' + esc(rid) + '" aria-expanded="' + x.dead + '"><span>取り消したリーグ（' + dead.length + '）</span><span class="li-v"><span class="li-ya" aria-hidden="true">' + (x.dead ? '⌄' : '›') + '</span></span></button>';
       if (x.dead) for (const l of dead) {
@@ -204,7 +211,8 @@ function renderList() {
   for (const b of $('vList').querySelectorAll('[data-edit]')) b.onclick = () => openEdit(b.dataset.r, b.dataset.edit);
   for (const b of $('vList').querySelectorAll('[data-own]')) b.onclick = () => ownerSet(b.dataset.r, b.dataset.own);
   for (const b of $('vList').querySelectorAll('[data-dead]')) b.onclick = () => { const x = rooms.get(b.dataset.dead); x.dead = !x.dead; renderList(); };
-  for (const b of $('vList').querySelectorAll('[data-roster]')) b.onclick = () => { const x = rooms.get(b.dataset.roster); x.roster = !x.roster; renderList(); };
+  for (const b of $('vList').querySelectorAll('[data-roster]')) b.onclick = () => { const x = rooms.get(b.dataset.roster); x.roster = !x.roster; x.mm = null; x.redit = null; if (x.roster) rosterLoad(b.dataset.roster); renderList(); };
+  wireRoster();
   for (const b of $('vList').querySelectorAll('[data-reread]')) b.onclick = async () => { const k = await readOne(b.dataset.reread); if (k === 'mj_session') relogin(() => loadAll()); renderList(); };
 }
 function wireMsg(pre, m) {
@@ -212,6 +220,134 @@ function wireMsg(pre, m) {
   const a = $(pre + 'Again'), r = $(pre + 'Reread');
   if (a) a.onclick = () => m.again();
   if (r) r.onclick = () => (m.rereadFn ? m.rereadFn() : loadAll());
+}
+
+/* ── A25 名簿（l_sadame v1.3 §1 A24④・A25）＝人ごとに［名前を直す］［外す］・下に「外した人」［戻す］。何も消さない ──
+ * 送り＝member_rename／member_active を部屋の範囲で mj_write へ直に（押した時に1回だけ op_id・答えが決まるまで同じ id）。役の門は倉庫（mj_role need owner_or_sole_L）。
+ * 外す前の確かめ＝点の回数（部屋の半荘＋各リーグの半荘・取り消していない回と卓）と、締めていないリーグの日で次の席（baseSeats）に居る卓。
+ *   リーグの半荘は mj_read 'room' に来ない＝名簿を開いた時に各リーグを mj_read 'league' で読む（読めない間は［外す］を押せない）。 */
+const ROSTER_ERR = { dup: '同じ名前の人がもういます', left: 'この人は部屋を出ています。名前は直せません。', role: 'この人はほかのリーグにも出ているので、部屋の持ち主だけが直せます' };
+const LG_DUP = '同じ名前のリーグがもうあります';
+async function rosterLoad(rid) {
+  const x = rooms.get(rid); if (!x || !x.read) return;
+  const seq = (x.rseq = (x.rseq || 0) + 1);
+  const live = x.read.leagues.filter((l) => !l.voided);
+  const got = await Promise.all(live.map((l) => rpc('mj_read', { p_room_id: rid, p_what: 'league', p_args: { league_id: l.league_id } })));
+  if (rooms.get(rid) !== x || x.rseq !== seq) return;
+  if (got.some((r) => !r || r.ok !== true || !r.st)) { x.mm = { err: true }; renderList(); return; }
+  x.mm = { sts: got.map((r) => r.st) };
+  renderList();
+}
+function chainLastT(st, t) {
+  const by = new Map((st.tables || []).map((y) => [y.table_id, y]));
+  const seen = new Set();
+  let c = t;
+  while (c && c.next_table_id && by.get(c.next_table_id) && !seen.has(c.next_table_id)) { seen.add(c.next_table_id); c = by.get(c.next_table_id); }
+  return c;
+}
+/* 人の点の回数と、締めていないリーグの日で次の席に居る卓の名 */
+function memberUse(x, mid) {
+  const seen = new Set(); let n = 0; const at = [];
+  const count = (st) => {
+    const liveT = new Set((st.tables || []).filter((t) => !t.voided).map((t) => t.table_id));
+    for (const h of st.hanchans || []) if (!h.voided && liveT.has(h.table_id) && !seen.has(h.hanchan_id) && Array.isArray(h.seats) && h.seats.includes(mid)) { seen.add(h.hanchan_id); n++; }
+  };
+  count(x.read.st);
+  for (const st of (x.mm && x.mm.sts) || []) {
+    count(st);
+    for (const s of st.sessions || []) {
+      if (s.voided || (st.settles || []).some((y) => y.session_id === s.session_id)) continue;
+      for (const hd of tableChains(st, s.session_id)) {
+        const t = st.tables.find((y) => y.table_id === hd);
+        const last = chainLastT(st, t);
+        const np = last && last.rules && Number.isInteger(last.rules.players) ? last.rules.players : null;
+        const b = np === null ? null : baseSeats(st, hd, np).seats;
+        if (b && b.includes(mid)) at.push(t.label);
+      }
+    }
+  }
+  return { n, at };
+}
+function rosterHtml(rid, x, mem, gone, closed) {
+  const ed = x.redit || null; // { mid, kind 'rename'|'off'|'on', msg, busy, p }
+  const busy = !!(ed && ed.busy);
+  const R = esc(rid);
+  let h = '<div class="lg-roster" data-names="' + R + '">';
+  if (x.mm && x.mm.err) h += '<div class="li li-sub"><span class="err" data-rerrm>リーグの点が読めませんでした。外す前に読み直してください。</span><button class="btn-s" type="button" data-rload="' + R + '">読み直す</button></div>';
+  const msg = (m) => (ed && ed.mid === m.member_id && ed.msg ? '<div class="li li-sub"><span class="err" data-redmsg>' + esc(ed.msg) + '</span></div>' : '');
+  for (const m of mem) {
+    const mid = esc(m.member_id);
+    h += '<div class="li li-sub lg-mem" data-mem="' + mid + '"><span class="row-name">' + esc(m.name) + '</span>';
+    if (!closed) h += '<span class="lg-btns"><button class="btn-s" type="button" data-rn="' + mid + '" data-r="' + R + '">名前を直す</button><button class="btn-s" type="button" data-off="' + mid + '" data-r="' + R + '"' + (x.mm && x.mm.sts ? '' : ' disabled') + '>外す</button></span>';
+    h += '</div>';
+    if (ed && ed.mid === m.member_id && ed.kind === 'rename') {
+      h += '<div class="li li-sub lg-ed" data-ed="rename"><input class="h-in" id="rnIn" maxlength="20" autocomplete="off" value="' + esc(ed.val != null ? ed.val : m.name) + '" aria-label="新しい名前"><span class="lg-btns"><button class="btn-s" type="button" data-rnok="' + mid + '" data-r="' + R + '"' + (busy ? ' disabled' : '') + '>保存</button><button class="btn-s" type="button" data-edno="' + R + '">やめる</button></span></div>';
+    }
+    if (ed && ed.mid === m.member_id && ed.kind === 'off') {
+      const u = memberUse(x, m.member_id);
+      const t = [u.n ? m.name + 'さんは半荘 ' + u.n + ' 回の点があります。外しても点はリーグの順位に残ります' : m.name + 'さんを外します。人を選ぶ所に出なくなります'];
+      if (u.at.length) t.push('今 ' + u.at.join('・') + ' の席にいます。その卓の次の半荘は人を選び直します');
+      h += '<div class="li li-sub lg-ed" data-ed="off"><span class="lg-names" data-offt>' + esc(t.join('。') + '。') + '</span><span class="lg-btns"><button class="btn-s" type="button" data-offok="' + mid + '" data-r="' + R + '"' + (busy ? ' disabled' : '') + '>外す</button><button class="btn-s" type="button" data-edno="' + R + '">やめる</button></span></div>';
+    }
+    h += msg(m);
+  }
+  if (gone.length) {
+    h += '<h4 class="sec lg-gone">外した人</h4>';
+    for (const m of gone) {
+      const mid = esc(m.member_id);
+      h += '<div class="li li-sub lg-mem" data-gone="' + mid + '"><span class="row-name">' + esc(m.name) + '</span>' + (!closed ? '<span class="lg-btns"><button class="btn-s" type="button" data-on="' + mid + '" data-r="' + R + '"' + (busy ? ' disabled' : '') + '>戻す</button></span>' : '') + '</div>';
+      h += msg(m);
+    }
+  }
+  return h + '</div>';
+}
+function rosterErr(res) {
+  const e = res && res.err;
+  if (e === 'dup') return ROSTER_ERR.dup;
+  if (e === 'left') return ROSTER_ERR.left;
+  if (e === 'mj_role') return ROSTER_ERR.role;
+  return errText(res);
+}
+async function rosterSend(rid, mid, kind, op) {
+  const x = rooms.get(rid); if (!x) return;
+  if (x.redit && x.redit.busy) return;
+  if (!(x.redit && x.redit.mid === mid && x.redit.kind === kind)) x.redit = { mid, kind };
+  const ed = x.redit;
+  if (!ed.p || JSON.stringify(ed.p.op) !== JSON.stringify(op)) ed.p = { op_id: uuid(), op }; // 押した時に1回だけ id（同じ中身の送り直しは同じ id）
+  ed.busy = true; ed.msg = null; renderList();
+  const res = await rpc('mj_write', { p_room_id: rid, p_op_id: ed.p.op_id, p_ops: [ed.p.op] });
+  ed.busy = false;
+  if (rooms.get(rid) !== x) return;
+  if (res && res.ok === true) {
+    x.redit = null;
+    const k = await readOne(rid);
+    if (k === 'mj_session') relogin(() => loadAll());
+    else if (k !== 'ok' && k !== 'gone') listMsg = { text: errText({ err: k }), reread: true };
+    const y = rooms.get(rid);
+    if (y && y.roster) rosterLoad(rid);
+    renderList(); return;
+  }
+  const e = (res && res.err) || 'net';
+  if (!KEEP.has(e)) ed.p = null; // 決まった答え＝次は新しい id
+  ed.msg = LOGIN.has(e) ? errText(res, 'league') : rosterErr(res || { err: 'net' });
+  renderList();
+  if (LOGIN.has(e)) relogin(() => rosterSend(rid, mid, kind, op));
+}
+function wireRoster() {
+  const V = $('vList');
+  const on = (sel, f) => { for (const b of V.querySelectorAll(sel)) b.onclick = () => f(b); };
+  on('[data-rload]', (b) => { const x = rooms.get(b.dataset.rload); x.mm = null; rosterLoad(b.dataset.rload); renderList(); });
+  on('[data-rn]', (b) => { const x = rooms.get(b.dataset.r); x.redit = { mid: b.dataset.rn, kind: 'rename' }; renderList(); const i = $('rnIn'); if (i) i.focus(); });
+  on('[data-off]', (b) => { const x = rooms.get(b.dataset.r); x.redit = { mid: b.dataset.off, kind: 'off' }; renderList(); });
+  on('[data-edno]', (b) => { const x = rooms.get(b.dataset.edno); x.redit = null; renderList(); });
+  on('[data-rnok]', (b) => {
+    const x = rooms.get(b.dataset.r), i = $('rnIn'), nm = i ? i.value.trim() : '';
+    if (x.redit) x.redit.val = i ? i.value : null;
+    if (!nm || [...nm].length > 20) { x.redit.msg = '名前は1〜20字で入れてください。'; renderList(); return; }
+    rosterSend(b.dataset.r, b.dataset.rnok, 'rename', { op: 'member_rename', member_id: b.dataset.rnok, name: nm });
+  });
+  on('[data-offok]', (b) => rosterSend(b.dataset.r, b.dataset.offok, 'off', { op: 'member_active', member_id: b.dataset.offok, active: false }));
+  on('[data-on]', (b) => rosterSend(b.dataset.r, b.dataset.on, 'on', { op: 'member_active', member_id: b.dataset.on, active: true }));
 }
 
 /* ── ［＋ リーグ］：部屋を選ぶ（管か持ち主の共有の部屋で、終えていない物だけ） ── */
@@ -246,7 +382,6 @@ function openForm(f) {
   $('fName').value = v.name || '';
   $('fFrom').value = v.date_from || '';
   $('fTo').value = v.date_to || '';
-  $('fMin').value = String(okInt(v.min_games) ? v.min_games : 10);
   form.rank = v.rank_by || 'pt';
   form.mainN = v.players_main;
   form.alt = { on: !!v.rules_alt, open: new Set(), ...altFrom(v.rules_alt, 7 - v.players_main) };
@@ -259,7 +394,7 @@ function openForm(f) {
 }
 function openCreate(rid) {
   const p = loadP(rid).create; // 印が在る＝答えが決まっていない＝同じ中身を出して同じ id で送り直す
-  const val = p ? p.op : { name: '', date_from: null, date_to: null, rank_by: 'pt', min_games: 10, players_main: 4, rules: { ...defaultRules(4), rate: 100 }, rules_alt: null };
+  const val = p ? p.op : { name: '', date_from: null, date_to: null, rank_by: 'pt', min_games: 0, players_main: 4, rules: { ...defaultRules(4), rate: 100 }, rules_alt: null };
   openForm({ mode: 'create', rid, val });
 }
 function openEdit(rid, lid) {
@@ -275,11 +410,13 @@ function renderAlt() {
   let h = '<div class="li"><span>' + nm + 'の卓も使う</span><button type="button" class="tg" role="switch" id="aOn" aria-checked="' + a.on + '" aria-label="入切"></button></div>';
   if (a.on) {
     h += '<button type="button" class="li" data-aopen="ps"><span>' + nm + 'の持ち点／返し</span><span class="li-v">' + n0(a.start_pts) + ' ／ ' + n0(a.return_pts) + '<span class="li-ya" aria-hidden="true">›</span></span></button>';
-    if (a.open.has('ps')) h += '<div class="li li-sub"><span>持ち点</span><input class="box" id="aStart" inputmode="numeric" value="' + bv(a.start_pts) + '" autocomplete="off"></div><div class="li li-sub"><span>返し</span><input class="box" id="aReturn" inputmode="numeric" value="' + bv(a.return_pts) + '" autocomplete="off"></div>';
+    if (a.open.has('ps')) h += '<div class="li li-sub"><span>持ち点</span><input class="box" id="aStart" readonly inputmode="none" value="' + bv(a.start_pts) + '" autocomplete="off"></div><div class="li li-sub"><span>返し</span><input class="box" id="aReturn" readonly inputmode="none" value="' + bv(a.return_pts) + '" autocomplete="off"></div>';
     h += '<button type="button" class="li" data-aopen="uma"><span>' + nm + 'のウマ</span><span class="li-v">' + esc(umaText(a.uma)) + '<span class="li-ya" aria-hidden="true">›</span></span></button>';
-    if (a.open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + a.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-auma="' + i + '" inputmode="numeric" value="' + bv(u) + '" autocomplete="off"><button type="button" class="uma-pm" data-aumaneg="' + i + '" aria-label="' + (i + 1) + '位のウマの＋−を替える">±</button></label>').join('') + '</span></div>';
+    if (a.open.has('uma')) h += '<div class="li li-sub"><span class="uma-row">' + a.uma.map((u, i) => '<label><small>' + (i + 1) + '位</small><input class="box" data-auma="' + i + '" readonly inputmode="none" value="' + bv(u) + '" autocomplete="off"></label>').join('') + '</span></div>';
   }
-  $('fAlt').innerHTML = h;
+  $('fAlt').innerHTML = h + keypadHtml({ sp: false });
+  // A16：箱はアプリの数字鍵盤（gamen-rules と同じ）＝− はウマだけ・持ち点／返しは6桁・ウマは3桁
+  wireKeypad($('fAlt'), { boxes: () => [...$('fAlt').querySelectorAll('input.box')], spec: (x) => (x.dataset.auma !== undefined ? { neg: true, dec: false, max: 3 } : { neg: false, dec: false, max: 6 }), sp: $('fKpSp') });
 }
 function readAlt() {
   const a = form.alt, el = $('fAlt');
@@ -319,9 +456,10 @@ function readForm() {
     if (!c2.ok) return { err: RULE_ERR[c2.err] || ('ルールの「' + c2.err + '」が入れられません。') };
     rules_alt = c2.rules;
   }
-  const min_games = toInt($('fMin').value);
-  if (!(okInt(min_games) && min_games >= 0 && min_games <= 9999)) return { err: '規定の半荘数は 0〜9999 の整数です。' };
-  return { val: { name, date_from, date_to, rank_by: form.rank, min_games, players_main: chk.rules.players, rules: chk.rules, rules_alt } };
+  // A24①：同じ部屋の取り消していないリーグと同じ名（前後の空白を除いた字）は作らない（直す時は自分を除く）＝倉庫の dup at name の先回り
+  const x = rooms.get(form.rid);
+  if (x && x.read && x.read.leagues.some((l) => !l.voided && l.league_id !== form.lid && String(l.name || '').trim() === name)) return { err: LG_DUP };
+  return { val: { name, date_from, date_to, rank_by: form.rank, min_games: 0, players_main: chk.rules.players, rules: chk.rules, rules_alt } };
 }
 async function submit() {
   if (!form || form.busy || form.stale) return;
@@ -371,7 +509,11 @@ async function afterWrite(res, rid, kind, lid) {
   const again = () => (kind === 'owner' ? ownerSet(rid, lid) : submit());
   const say = (m) => { if (inForm && form) { form.msg = m; renderFormMsg(); } else { listMsg = m; renderList(); } };
   if (res && res.ok === true) {
+    // A24②：作れたら一覧に戻らず、そのリーグの対局の頁へ（印を消す前に league_id を取る）
+    const pc = kind === 'create' ? loadP(rid).create : null;
+    const made = pc && pc.op ? pc.op.league_id : null;
     dropP(rid, kind, lid);
+    if (made) { form = null; location.href = 'taikyoku.html?room=' + encodeURIComponent(rid) + '&league=' + encodeURIComponent(made); return; }
     const k = await readOne(rid);
     form = null; listMsg = k === 'ok' || k === 'gone' ? null : { text: errText({ err: k }), reread: true };
     renderList(); return;
@@ -391,6 +533,7 @@ async function afterWrite(res, rid, kind, lid) {
     form = null; listMsg = { text }; renderList(); return;
   }
   let t = text;
+  if (e === 'dup' && at === 'name') t = LG_DUP;
   if (e === 'bad' && (at === 'rules' || at === 'rules_alt') && res.key && RULE_ERR[res.key]) t = RULE_ERR[res.key];
   say({ text: t });
 }
@@ -426,12 +569,11 @@ function start(user) {
 /* 作る頁の配線（頁の箱は1回だけ作る） */
 $('fRank').onclick = (e) => { const b = e.target.closest('button[data-rank]'); if (!b) return; form.rank = b.dataset.rank; renderRank(); };
 $('fAlt').onclick = (e) => {
-  const b = e.target.closest('button'); if (!b || !form) return;
+  const b = e.target.closest('button'); if (!b || !form || b.closest('.kp')) return; // 鍵盤の鍵は描き直さない
   readAlt();
   const a = form.alt;
   if (b.id === 'aOn') a.on = !a.on;
   else if (b.dataset.aopen) { a.open.has(b.dataset.aopen) ? a.open.delete(b.dataset.aopen) : a.open.add(b.dataset.aopen); }
-  else if (b.dataset.aumaneg !== undefined) { const i = Number(b.dataset.aumaneg); if (okInt(a.uma[i])) a.uma[i] = -a.uma[i]; }
   renderAlt();
 };
 $('fGo').onclick = submit;
