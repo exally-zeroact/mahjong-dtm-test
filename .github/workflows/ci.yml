@@ -281,6 +281,7 @@ jobs:
           - { name: d2, script: tests/e2e/gamen_d2-e2e.cjs, yuka: 25 }
           - { name: e2, script: tests/e2e/gamen_e2-e2e.cjs, yuka: 15 }
           - { name: c20, script: tests/e2e/gamen_c20-e2e.cjs, yuka: 21 }
+          - { name: c23, script: tests/e2e/gamen_c23-e2e.cjs, yuka: 17 }
     name: 画面 ${{ matrix.name }}（webkit）
     steps:
       - uses: actions/checkout@v4

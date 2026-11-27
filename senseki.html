@@ -8,14 +8,22 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="theme-color" content="#14213D">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/gamen.css">
 <script src="js/supa-config.js"></script>
 <script src="js/env-badge.js"></script>
+<script src="vendor/supabase-2.112.4.js"></script>
+<script src="js/exally-login.js"></script>
 <script src="/js/sw-reg.js" defer></script>
 </head>
 <body>
+<!-- C2-3 戦績（c2_sadame v9.4 §3・絵 mahjong_senseki_tochu_v158 ①②・警告の帯なし）＝js/gamen-senseki.mjs。数は lib/my-stats.mjs だけ -->
 <header class="appbar"><a class="back" href="index.html">‹ ホーム</a><h1>戦績</h1></header>
 <main>
-<p class="soon">準備中</p>
+<section id="vLogin" class="view" hidden>
+  <button class="btn btn-main" type="button" id="btnLoginOpen">ログイン・新規登録</button>
+</section>
+<section id="vStats" class="view s-view" hidden></section>
 </main>
+<script type="module" src="js/gamen-senseki.mjs"></script>
 </body>
 </html>

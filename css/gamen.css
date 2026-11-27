@@ -277,3 +277,24 @@ a.bar-r { display: inline-flex; align-items: center; text-decoration: none; }
 .r-me { display: flex; align-items: center; gap: 8px; margin: 4px 4px 8px; font-size: 14px; }
 .r-me .btn-s { margin-left: auto; }
 .r-cand button:disabled { color: var(--c-ji-usui); }
+/* C2-3 戦績（c2_sadame v9.4 §3・絵 v158 ①②） */
+.s-view { gap: 0; }
+.s-view .chips { margin: 0 0 8px; }
+.s-big { display: flex; gap: 6px; }
+.s-big div { flex: 1; background: var(--c-haikei); border-radius: 10px; padding: 8px 4px; text-align: center; }
+.s-big b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.s-big small { font-size: 11px; color: var(--c-ji-usui); }
+.s-sub { margin-top: 10px; }
+.s-dist { display: flex; height: 22px; border-radius: 6px; overflow: hidden; font-size: 11px; font-weight: 700; color: #fff; }
+.s-dist span { display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+.s-r0 { background: var(--c-kon); } .s-r1 { background: #5B7DB1; } .s-r2 { background: #D9A25B; } .s-rL { background: var(--c-aka); }
+.s-tb { width: 100%; border-collapse: collapse; font-size: 14px; }
+.s-tb th { font-size: 11px; color: var(--c-ji-usui); font-weight: 600; text-align: right; padding: 4px 3px; border-bottom: 1px solid var(--c-sen); }
+.s-tb td { text-align: right; padding: 7px 3px; border-bottom: 1px solid #EEF0F2; font-variant-numeric: tabular-nums; }
+.s-tb th:first-child, .s-tb td:first-child { text-align: left; }
+.s-tb tr:last-child td { border-bottom: 0; }
+.s-tb td.plus, .s-tb td.minus, .s-big b.plus, .s-big b.minus { font-weight: 700; }
+.s-tap { cursor: pointer; }
+.s-open td { text-align: left; background: var(--c-men-usui); }
+.s-dt { font-size: 13px; padding: 2px 0; }
+.s-dt-h { color: var(--c-ji-usui); font-weight: 700; margin-top: 4px; }
