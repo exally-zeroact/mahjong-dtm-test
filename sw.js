@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'c4a9f6f35c4a';
+const VER = '63275dcb9d2e';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', 'c51304705cf1bfcd9511fe38d93cd23c991c9764b530061109a056a6f96dcee4'],
@@ -21,7 +21,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
   ['/js/gamen-core.mjs', '25bf68837ebb077ec2d46e611866459bda3d0cdf42979a54db5e91b0d85ecbfa'],
   ['/js/gamen-home.mjs', 'ad368a770ca2e0450528fd0ba7267c0264895eb27bf63d96c58016804d1c0b9a'],
-  ['/js/gamen-league.mjs', 'a96cf84812c1ba051b3fe4fe04e32c94c6546fc12fb59f00a4744e0373999a74'],
+  ['/js/gamen-league.mjs', 'a9f80979e52003b58ee7ad9ae0b477ed2076ad473a36f0dc23fec8b92091bc37'],
   ['/js/gamen-room.mjs', '56a297e713f54d59771df80dc85d6c7d8da227f7b22d56029bab2d4f6bbb7a34'],
   ['/js/gamen-rules.mjs', 'cb30b4f4be5e34150f863b85ba29fc47e654a89a8338b626e73461e31b9a60f8'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
@@ -35,6 +35,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/js/tensu.js', 'fdc340cfe6837fdcf72a03eacbc89f685820bb958a28f2e54eb96a4093bb80e4'],
   ['/js/tile-svg.mjs', '215a0635d07aadc3e93122a5dfcf35326a223775eef70cbe6e668e05d069d7ef'],
   ['/league.html', '235b43c44e69c9fb6083500bf893d722bfd19bdc126000b144c7200406c960f0'],
+  ['/lib/aizu-read.mjs', '753d3a178348aa8c4fe3ab48f6de21e02ba3277c62661ef7f2751369684d28ce'],
   ['/lib/hanchan-pt.mjs', '7e824f2397ed1107d320a40800d17f7eca26053c917712e71ee0e9028d4de338'],
   ['/lib/kamicha.mjs', '678b1620ad2f741e044cc1da7ceabd5b9be20c49a5cba2b97180974556cebfcc'],
   ['/lib/league-rank.mjs', 'b581d6419d0e47096699ebd290a156aa2d027fb94eff5d0b420e899833401e57'],

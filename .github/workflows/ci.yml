@@ -97,6 +97,10 @@ jobs:
         run: node tests/league-round.test.mjs
       - name: リーグの次の対局の自己確認（lib をわざと壊して赤になるか）
         run: node tests/league-round.test.mjs --self-test
+      - name: 合図で読む束ね（lib/aizu-read.mjs・P1g）＝偽の時計で期待値（読み中1本＋待ち1本・荒らしでも同時1本・始めの間 250・どの合図も1秒以内に読む・stop）
+        run: node tests/aizu-read.test.mjs
+      - name: 合図で読む束ねの自己確認（lib をわざと壊して赤になるか）
+        run: node tests/aizu-read.test.mjs --self-test
       - name: 自分の戦績（lib/my-stats.mjs・C2-2）＝期待値（pt／込み／点・4人と3人・出た部屋・出た後の印・全部読めた印）
         run: node tests/my-stats.test.mjs
       - name: 自分の戦績の自己確認（lib をわざと壊して赤になるか）
@@ -291,6 +295,7 @@ jobs:
           - { name: c20, script: tests/e2e/gamen_c20-e2e.cjs, yuka: 21 }
           - { name: c23, script: tests/e2e/gamen_c23-e2e.cjs, yuka: 17 }
           - { name: l, script: tests/e2e/gamen_l-e2e.cjs, yuka: 19 }
+          - { name: p1g, script: tests/e2e/gamen_p1g-e2e.cjs, yuka: 5 }
     name: 画面 ${{ matrix.name }}（webkit）
     steps:
       - uses: actions/checkout@v4

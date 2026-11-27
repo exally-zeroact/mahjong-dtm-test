@@ -22,6 +22,7 @@ import { mountRules, RULE_ERR, umaText } from './gamen-rules.mjs';
 import { keypadHtml, wireKeypad } from './kenban.mjs';
 import { baseSeats } from '../lib/league-round.mjs';
 import { tableChains } from '../lib/league-rank.mjs';
+import { makeAizuRead } from '../lib/aizu-read.mjs';
 
 const KEEP = new Set(['mj_reauth', 'mj_session', 'busy', 'net', 'offline', 'server', 'internal']); // 印を残す返し（定め §1 の表）
 const LOGIN = new Set(['mj_reauth', 'mj_session']);
@@ -126,8 +127,9 @@ async function loadAll() {
   renderList();
 }
 
-/* ── 合図（2c-2f と同じ管の名・event 'w'）＝受けたらその部屋を読み直す（0.3秒まとめ） ── */
-const chans = new Map(); // rid → { key, c, timer }
+/* ── 合図（2c-2f と同じ管の名・event 'w'）＝受けたらその部屋を読み直す（0.3秒まとめ）
+ *    P1g（pbundle_sadame v2.1 §3.3）：1部屋の読みは lib/aizu-read.mjs で「読み中1本＋待ち1本」（連打されても重ねて読まない・1秒を越さない） ── */
+const chans = new Map(); // rid → { key, c, ar }
 function joinChan(rid) {
   const x = rooms.get(rid);
   const R = x && x.read && x.read.room;
@@ -136,21 +138,19 @@ function joinChan(rid) {
   if (cur && cur.key === key) return;
   leaveChan(rid);
   if (!key) return;
-  const h = { key, c: null, timer: null };
+  const h = { key, c: null, ar: null };
+  h.ar = makeAizuRead(async () => { if (chans.get(rid) !== h) return; await readOne(rid); if (!$('vList').hidden) renderList(); });
   chans.set(rid, h);
   try {
     h.c = sb().channel(key, { config: { private: false } });
-    h.c.on('broadcast', { event: 'w' }, () => {
-      if (chans.get(rid) !== h || h.timer) return;
-      h.timer = setTimeout(async () => { h.timer = null; if (chans.get(rid) !== h) return; await readOne(rid); if (!$('vList').hidden) renderList(); }, 300);
-    }).subscribe(() => {});
+    h.c.on('broadcast', { event: 'w' }, () => { if (chans.get(rid) === h) h.ar.poke(); }).subscribe(() => {});
   } catch { /* 合図が使えなくても開いた時の読みはある */ }
 }
 function leaveChan(rid) {
   const h = chans.get(rid);
   if (!h) return;
   chans.delete(rid);
-  clearTimeout(h.timer);
+  h.ar.stop();
   if (h.c) { try { const p = sb().removeChannel(h.c); if (p && p.catch) p.catch(() => {}); } catch { /* 外せなくても chans に無い＝受けても読まない */ } }
 }
 
