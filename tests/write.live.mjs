@@ -1018,6 +1018,7 @@ const body = `
     ${LG('a', 2, true)} ${LG('b', 1)}
     ${W('zrl1', 2, 'ra', A(RL), OPL)}
     ${ST15('zrl1_s')}
+    ${ROW('zrl1_lv', `select jsonb_build_object('n', (select count(*)::int from mahjong.room_leaves x where x.room_id = ra and x.user_id = us[2]), 'hid', (select bool_and(x.left_hist_id = (select max(h.id) from mahjong.history h where h.room_id = ra and h.op <> 'room_leave')) from mahjong.room_leaves x where x.room_id = ra and x.user_id = us[2]))`)}
     ${W('zrl2', 2, 'ra', A(RL), OPL)}
     ${W('zrl3', 2, 'ra', A(ma(U(), 'zrl3')))}
     ${WA('zrl4', 1, AMR.old, 'ra', A(RL))}
@@ -1674,8 +1675,8 @@ function check(out, lib, say) {
   /* ⑮ 2c-2c 部屋の op 4つ */
   const s15 = (k) => { const o = out[k] || {}; return { ...st(k), own: ui(o.own), del: o.del, ch: o.ch, url: o.url, lg: (o.lg || []).map(ui) }; };
   const raK = (x) => Object.keys(x.ra).map(Number).sort((a, b) => a - b);
-  ok('⑮ room_leave：入が抜ける → ok・行が消え・名簿のつなぎと名乗りが消え・自分が L のリーグ（取り消した物も）は持ち主へ・履歴2', isOk('zrl1') && has('zrl1', { hc: 2, h: 2, rc: 0 })
-    && !raK(s15('zrl1_s')).includes(2) && s15('zrl1_s').lu[0] === null && J(s15('zrl1_s').cl) === '[]' && J(s15('zrl1_s').lg) === '[1,1]', J([R('zrl1'), d('zrl1'), s15('zrl1_s')]));
+  ok('⑮ room_leave：入が抜ける → ok・行が消え・名簿のつなぎは残り（C2-1 §1a）・自分の名乗りが消え・自分が L のリーグ（取り消した物も）は持ち主へ・履歴2・抜けた印1（left_hist_id＝抜ける前の最大 id）', isOk('zrl1') && has('zrl1', { hc: 2, h: 2, rc: 0 })
+    && !raK(s15('zrl1_s')).includes(2) && s15('zrl1_s').lu[0] === 2 && J(s15('zrl1_s').cl) === '[]' && J(s15('zrl1_s').lg) === '[1,1]' && out.zrl1_lv?.n === 1 && out.zrl1_lv?.hid === true, J([R('zrl1'), d('zrl1'), s15('zrl1_s'), out.zrl1_lv]));
   ok('⑮ room_leave：送り直し・抜けた後の書き込み → gone（S5）', isErr('zrl2', 'gone') && isErr('zrl3', 'gone'), J([R('zrl2'), R('zrl3')]));
   ok('⑮ room_leave：持ち主は amr が古いと mj_reauth', isErr('zrl4', 'mj_reauth', { within_min: 10 }) && has('zrl4', { hc: 0 }), J(R('zrl4')));
   ok('⑮ 組に1つだけ：部屋の op を他の op と混ぜる → bad at op・何も書かない', isErr('zrl5', 'bad', { i: 0, at: 'op' }) && isErr('zrl5b', 'bad', { i: 1, at: 'op' }) && has('zrl5', { hc: 0, m: 0 }) && has('zrl5b', { hc: 0, m: 0 }), J([R('zrl5'), R('zrl5b')]));
@@ -1910,7 +1911,9 @@ const WAZA = [
   ["継ぎでリーグを移さない", 'mahjong_private.mj_w_inherit', "where l.room_id = p_room and l.owner_user_id = p_from;", "where l.room_id = p_room and l.owner_user_id = p_from and false;", null, '⑮ room_leave：持ち主が抜ける'],
   ["継いだ人の役を kan に直さない", 'mahjong_private.mj_w_inherit', "update mahjong.room_accounts a set role = 'kan' where a.room_id = p_room and a.user_id = v_to;", "null;", null, '⑮ room_leave：管が居ない'],
   ["room_leave の alone を外す", 'mahjong_private.mj_w_op', "perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'i', p_i, 'at', 'op', 'reason', 'alone'));", "null;", null, '⑮ room_leave：ほかに誰も居ない'],
-  ["room_leave でつなぎと名乗りを外さない", 'mahjong_private.mj_w_op', "update mahjong.members m set user_id = null, version = m.version + 1 where m.id = any(v_ids);\n    delete from mahjong.member_claims x where x.member_id = any(v_ids) or (x.room_id = p_room and x.user_id = p_me);", "null;", null, '⑮ room_leave：入が抜ける'],
+  ["room_leave でつなぎを外す（C2-1 前の形）", 'mahjong_private.mj_w_op', "    insert into mahjong.room_leaves (room_id, user_id, left_at, left_hist_id)", "    update mahjong.members m set user_id = null, version = m.version + 1 where m.room_id = p_room and m.user_id = p_me;\n    insert into mahjong.room_leaves (room_id, user_id, left_at, left_hist_id)", null, '⑮ room_leave：入が抜ける'],
+  ["room_leave で自分の名乗りを消さない", 'mahjong_private.mj_w_op', "delete from mahjong.member_claims x where x.room_id = p_room and x.user_id = p_me;\n    insert into mahjong.room_leaves", "insert into mahjong.room_leaves", null, '⑮ room_leave：入が抜ける'],
+  ["room_leave で抜けた印を書かない", 'mahjong_private.mj_w_op', "insert into mahjong.room_leaves (room_id, user_id, left_at, left_hist_id) values (p_room, p_me, pg_catalog.now(), v_hid)\n      on conflict (room_id, user_id) do update set left_at = excluded.left_at, left_hist_id = excluded.left_hist_id;", "null;", null, '⑮ room_leave：入が抜ける'],
   ["部屋の op を組に混ぜてよい", 'public.mj_write', "if v_len > 1 and v_name in ('room_leave', 'room_delete', 'room_undelete', 'room_secret', 'room_share', 'room_close') then", "if false then", null, '⑮ 組に1つだけ'],
   ["K-3 段1 を外す", 'public.mj_write', "if v_role is not null and not exists (select 1 from auth.users u where u.id = r.owner_user_id) then", "if false then", null, '⑮ K-3 段1'],
   /* ⑭ 2c-2b 人の op 5つ（紙 write4_shiken_keikaku.md の13本） */

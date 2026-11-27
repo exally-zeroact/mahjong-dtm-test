@@ -429,6 +429,15 @@ create table if not exists mahjong.room_bans (
   primary key (room_id, user_id)
 );
 
+-- ── C2-1 §1a 抜けた印（c2_db.md §1a）＝room_leave で書き直す・mj_room_join で消す・room_secret は触らない。left_hist_id＝抜けた時の部屋の history の最大 id（無ければ 0）＝その後の書きを al に数える ──
+create table if not exists mahjong.room_leaves (
+  room_id      uuid not null references mahjong.rooms(id) on delete cascade,
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  left_at      timestamptz not null default now(),
+  left_hist_id bigint not null default 0,
+  primary key (room_id, user_id)
+);
+
 -- ── 名乗り（2c-2b・write4_sekkei.md v1.1 S2・v1.2 N1〜N5）＝他の人がつないだ名簿の人へ member_link した印（v18 F の帯の元）──
 --   帯を出すのは読む側（mj_read・2d＝名乗った人が今その部屋の room_accounts に行が在り room_bans に無い時だけ）。履歴は書かない・P に数えない。
 --   消す：その member の user_id が変わった時（link・unlink・relink・account_remove）にその member の分を全部・つながった人／出した人のその部屋の分を全部。
@@ -1783,6 +1792,7 @@ begin
   if v_n >= 60 then return pg_catalog.jsonb_build_object('ok', false, 'err', 'busy', 'what', 'room'); end if;
 
   insert into mahjong.room_accounts (room_id, user_id, role, joined_via) values (v_room, v_me, 'nyu', p_way);
+  delete from mahjong.room_leaves x where x.room_id = v_room and x.user_id = v_me;   -- C2-1 §1a：入り直し＝抜けた印を消す（名はつながったまま＝ふつうに戻る）
   if p_way = 'pass' then update mahjong.rooms x set fail_count = 0 where x.id = v_room and x.fail_count <> 0; end if;
   delete from mahjong.limits l where l.kind = 'join:ok1h' and l.key = v_room::text and l.window_start <= pg_catalog.now() - interval '1 hour';
   insert into mahjong.limits (kind, key, window_start, count) values ('join:ok1h', v_room::text, v_5m, 1)
@@ -2667,8 +2677,18 @@ declare
   t mahjong.tables; h mahjong.hanchans; s record; c record;
   v_b boolean; v_mode text; v_y record; v_m mahjong.members; v_ss mahjong.sessions;
   v_u uuid; v_own uuid; v_m2 mahjong.members; v_cap2 int; v_us uuid[]; v_ids uuid[];
+  v_hid bigint;   -- C2-1 §1a room_leave の left_hist_id
   g mahjong.leagues; v_ra jsonb; v_d2 date; v_ida uuid; v_rv int; v_rva int; v_alt boolean; v_rk text; v_s2 text;
 begin
+  -- C2-1 §1a：抜けた人の名（user_id が在り・その人の room_accounts が無く・持ち主でない）への rename・relink・link・unlink＝left（持ち主の unlink だけ通す）
+  if v_op in ('member_rename', 'member_relink', 'member_link', 'member_unlink') and not (v_op = 'member_unlink' and p_role = 'owner') then
+    v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
+    if exists (select 1 from mahjong.members m join mahjong.rooms x on x.id = m.room_id
+                where m.id = v_id and m.room_id = p_room and m.user_id is not null and m.user_id is distinct from x.owner_user_id
+                  and not exists (select 1 from mahjong.room_accounts a where a.room_id = p_room and a.user_id = m.user_id)) then
+      perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'left', 'i', p_i, 'member_id', v_id));
+    end if;
+  end if;
   -- ── 作る op ──
   if v_op = 'member_add' then
     v_id := mahjong_private.mj_w_uuid(p_o, 'member_id', p_i);
@@ -3675,6 +3695,8 @@ begin
   elsif v_op = 'room_leave' then
     -- 持ち主なら K-3 で継ぐ（居ない＝alone）・持ち主でなければ自分が L のリーグを部屋の持ち主へ
     select x.owner_user_id into v_own from mahjong.rooms x where x.id = p_room;
+    -- C2-1 §1a：抜けた印（この組の書きより前の history の最大 id）
+    select coalesce(pg_catalog.max(hx.id), 0) into v_hid from mahjong.history hx where hx.room_id = p_room;
     v_n := 0;
     if v_own = p_me then
       v_n := mahjong_private.mj_w_inherit(p_room, p_gid, v_op, p_me, p_role, p_me);
@@ -3692,12 +3714,13 @@ begin
     -- 自分の外し（決めた事2・S3＝まとめ1行・S4＝member_id でも名乗りを消す）
     select a.role, a.joined_via, a.joined_at into c from mahjong.room_accounts a where a.room_id = p_room and a.user_id = p_me for update;
     delete from mahjong.room_accounts a where a.room_id = p_room and a.user_id = p_me;
-    select coalesce(pg_catalog.array_agg(m.id order by m.id), '{}') into v_ids from mahjong.members m where m.room_id = p_room and m.user_id = p_me;
-    update mahjong.members m set user_id = null, version = m.version + 1 where m.id = any(v_ids);
-    delete from mahjong.member_claims x where x.member_id = any(v_ids) or (x.room_id = p_room and x.user_id = p_me);
+    -- C2-1 §1a：つないだ名は外さない（抜けた人の名＝left）・自分の名乗りだけ消す（他の人が自分の名に名乗った行は残す）
+    delete from mahjong.member_claims x where x.room_id = p_room and x.user_id = p_me;
+    insert into mahjong.room_leaves (room_id, user_id, left_at, left_hist_id) values (p_room, p_me, pg_catalog.now(), v_hid)
+      on conflict (room_id, user_id) do update set left_at = excluded.left_at, left_hist_id = excluded.left_hist_id;
     perform mahjong_private.mj_w_hist(p_room, p_gid, v_op, p_me, p_role, 'room_accounts',
       pg_catalog.jsonb_build_object('room_id', p_room, 'user_id', p_me), null,
-      pg_catalog.jsonb_build_object('role', c.role, 'joined_via', c.joined_via, 'joined_at', c.joined_at, 'unlinked', pg_catalog.cardinality(v_ids)), null, null);
+      pg_catalog.jsonb_build_object('role', c.role, 'joined_via', c.joined_via, 'joined_at', c.joined_at, 'unlinked', 0), null, null);
     return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i), 'made', 0, 'hist', v_n + 1);
 
   elsif v_op = 'room_delete' then
@@ -4361,13 +4384,13 @@ create or replace function mahjong_private.mj_r_league3(p_room uuid, p_lid uuid,
 language plpgsql stable set search_path = '' as $fn$
 declare
   c_cap constant int := 524288;
-  v_rv bigint; v_days jsonb; v_mem jsonb; v_ac timestamptz; v_tc timestamptz;
+  v_rv bigint; v_days jsonb; v_mem jsonb; v_ac timestamptz; v_tc timestamptz; v_own uuid;
   d record; t record; v_cont boolean; v_head boolean; v_hj jsonb; v_hs jsonb; v_hsz int := 0;
   v_tj jsonb; v_hh jsonb; v_ex jsonb; v_usz int;
   v_size int := 0; v_units int := 0; v_more boolean := false; v_ls uuid; v_lt uuid;
   a_s jsonb[] := '{}'; a_t jsonb[] := '{}'; a_h jsonb[] := '{}'; a_e jsonb[] := '{}'; a_z jsonb[] := '{}';
 begin
-  select x.read_ver into v_rv from mahjong.rooms x where x.id = p_room;
+  select x.read_ver, x.owner_user_id into v_rv, v_own from mahjong.rooms x where x.id = p_room;
   -- 毎回返す段：days（全部の日）・members
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('session_id', x.id, 'day_ver', x.day_ver,
            'date', pg_catalog.to_char(x.date, 'YYYY-MM-DD'), 'voided', x.voided,
@@ -4377,6 +4400,7 @@ begin
     into v_days from mahjong.sessions x where x.room_id = p_room and x.league_id = p_lid;
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
            || case when m.user_id = p_me then '{"me": true}'::jsonb when m.user_id is not null then '{"taken": true}'::jsonb else '{}'::jsonb end
+           || case when m.user_id is not null and m.user_id is distinct from v_own and not exists (select 1 from mahjong.room_accounts a where a.room_id = m.room_id and a.user_id = m.user_id) then '{"left": true}'::jsonb else '{}'::jsonb end
            order by m.created_at, m.id), '[]'::jsonb)
     into v_mem from mahjong.members m where m.room_id = p_room;
   -- 続きの頁の始め（無い開催・その開催に無い卓＝bad after）
@@ -4642,6 +4666,8 @@ begin
       'members', coalesce((select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('member_id', m.id, 'name', m.name, 'name_key', m.name_key, 'active', m.active)
                              -- C2-0 §1a：me＝呼んだ人がつないだ人・taken＝他の人がつないだ人（user_id は返さない・無い鍵＝false）
                              || case when m.user_id = v_me then '{"me": true}'::jsonb when m.user_id is not null then '{"taken": true}'::jsonb else '{}'::jsonb end
+                             -- C2-1 §1a：left＝抜けた人の名（user_id が在り・room_accounts に行が無く・持ち主でない）
+                             || case when m.user_id is not null and m.user_id is distinct from r.owner_user_id and not exists (select 1 from mahjong.room_accounts a where a.room_id = m.room_id and a.user_id = m.user_id) then '{"left": true}'::jsonb else '{}'::jsonb end
                              -- P5 §2：v3 は n と last（上の v_ns・座っていない人は 0 と null）
                              || case when v_v3 then coalesce(v_ns -> m.id::text, '{"n": 0, "last": null}'::jsonb) else '{}'::jsonb end
                              order by m.created_at, m.id) from mahjong.members m where m.room_id = p_room_id), '[]'::jsonb),

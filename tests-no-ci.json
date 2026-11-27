@@ -59,6 +59,10 @@
     "why": "本物のテスト倉庫の public.mj_read（人の me／taken）と mj_write の member_link（taken の門）で C2-0 §1 を叩く（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
     "back": "CI に倉庫の鍵を置いた日"
   },
+  "tests/c21.live.mjs": {
+    "why": "本物のテスト倉庫の public.mj_write（room_leave・抜けた人の名の left の門）と mj_read（left）で C2-1 §1a を叩く（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
+    "back": "CI に倉庫の鍵を置いた日"
+  },
   "tests/a20.live.mjs": {
     "why": "本物のテスト倉庫の public.mj_write と mj_read で A20（人数替え・follow:false・late）を叩く（鍵 ~/.supabase-token が要る）＝手元で schema.sql を当てた後に走らせる",
     "back": "CI に倉庫の鍵を置いた日"
