@@ -342,7 +342,7 @@ const MUT = [
   { file: G, from: "base_version: row ? row.version : 0 }", to: 'base_version: 0 }', name: '［直す］の base_version を写しの版にしない（C3）', only: 'C3' },
   { file: G, from: "  function setTable(t) { table = chainLast(t);", to: '  function setTable(t) { table = t || null;', name: '卓を鎖の最後にしない（C2・C4）', only: 'C2,C4' },
   { file: G, from: "    if (was && table && table.table_id !== was && tableChain(st, table.table_id).includes(was)) ruleNote", to: '    if (false) ruleNote', name: '区切られた時に帯を出さない（C4）', only: 'C4' },
-  { file: G, from: '    ruleNote = null; takuNote = null;', to: '    takuNote = null;', name: '書いても帯「ルールが変わりました」を消さない（A10）', only: 'C4' },
+  { file: G, from: '    pmErr = null; ruleNote = null; takuNote = null;', to: '    pmErr = null; takuNote = null;', name: '± を入れても帯「ルールが変わりました」を消さない（A10）', only: 'C4' },
   { file: G, from: "      else if (hi.why === 'bad' && outbox[0].held.at === 'table_id' && outbox[0].ops.some((o) => o.op === 'extra_add')) h +=", to: '      else if (false) h +=', name: 'bad at table_id の帯を出さない（C5）', only: 'C5' },
   { file: G, from: "    return needOf(WHO.table_rules, room.role) === null;", to: '    return true;', name: 'nyu にも打てる形を出す（C8）', only: 'C8' },
   { file: G, from: "{ rules: draft, readOnly: !edit, lockPlayers: !memOk,", to: '{ rules: draft, readOnly: !edit, lockPlayers: true,', name: '人数を押せない（C6）', only: 'C6' },
