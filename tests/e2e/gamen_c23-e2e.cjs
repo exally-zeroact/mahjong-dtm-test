@@ -20,6 +20,7 @@ async function call(fn, args) {
     return await r.json();
   } catch (e) { return { data: null, error: { message: String((e && e.message) || e) } }; }
 }
+export async function rpcRaw(fn, args) { return await sb().rpc(fn, args); } // 2b：部屋の mj_read・mj_write は rpcRaw を通る＝偽の sb へ
 export function sb() { return { auth: { onAuthStateChange() {} }, rpc: call }; }
 export async function rpc(fn, args) {
   if (navigator.onLine === false) return { ok: false, err: 'offline' };

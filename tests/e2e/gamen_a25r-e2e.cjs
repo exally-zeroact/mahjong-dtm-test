@@ -24,6 +24,7 @@ window.__aizu = (key) => { for (const f of window.__chans[key] || []) f({ payloa
 export function sb() { return { auth: { onAuthStateChange() {} }, rpc: call,
   channel(key) { const c = { on(t, ev, cb) { (window.__chans[key] = window.__chans[key] || []).push(cb); return c; }, subscribe(cb) { if (cb) cb('SUBSCRIBED'); return c; }, send() { return Promise.resolve('ok'); } }; return c; },
   removeChannel() { return Promise.resolve(); } }; }
+export async function rpcRaw(fn, args) { return await sb().rpc(fn, args); } // 2b：部屋の mj_read・mj_write は rpcRaw を通る＝偽の sb へ
 export async function rpc(fn, args) {
   if (navigator.onLine === false) return { ok: false, err: 'offline' };
   const r = await call(fn, args);

@@ -337,5 +337,5 @@ $('btnCreate').onclick = doCreate;
 $('btnJoin').onclick = doJoin;
 $('btnLoginOpen').onclick = () => showLogin(start);
 
-show('vLogin');
-needLogin(start).catch((e) => { obi('止まりました：' + esc(e.message), 'err'); });
+// 2b：ログインの箱は「ログインしていない」と決まった時だけ出す（先に出すと読みのたびに一瞬出る）
+needLogin(start, () => show('vLogin')).catch((e) => { obi('止まりました：' + esc(e.message), 'err'); });

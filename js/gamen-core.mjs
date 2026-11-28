@@ -20,15 +20,71 @@ export function sb() {
   return sbClient;
 }
 
+/* ── 2b（login2b_sadame v2 §1）：ログインの誤りが来た時だけ鍵を引き直す ──
+ * authCheck()＝{kind:'ok',user}｜{kind:'net',user}｜{kind:'out'}。1本だけ走らせる（同時の呼びは同じ答えを待つ）。
+ * ★ログインの画面を出すのは 'out' の時だけ★（電波の時は端末に残っている同じ人で続ける＝別の人の控えに混ざらない） */
+const AUTH_KEY = 'mj-auth';
+const GUARD_MS = 30000; // 引き直しが通ってから30秒の間に始めた呼びがまた弾かれた＝本当に切れている（引き直しを回し続けない）
+let authP = null, okAt = 0;
+function storedAuth() {
+  try {
+    const s = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null');
+    return s && typeof s.refresh_token === 'string' && s.refresh_token ? s : null;
+  } catch { return null; }
+}
+const realUser = (u) => (u && typeof u.id === 'string' && !u.is_anonymous ? u : null);
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+export function authCheck() {
+  if (authP) return authP;
+  authP = (async () => {
+    const s0 = storedAuth();
+    if (!s0) return { kind: 'out' };
+    const su = realUser(s0.user);
+    if (!su) return { kind: 'out' };
+    if (isOffline()) return { kind: 'net', user: su };
+    let r;
+    try { r = await sb().auth.refreshSession({ refresh_token: s0.refresh_token }); } catch (e) { r = { error: e || {} }; }
+    if (!storedAuth()) return { kind: 'out' }; // 倉庫の部品が控えを消した＝本当に切れた
+    const u = realUser(r && r.data && r.data.session && r.data.session.user);
+    if (r && !r.error && u) { okAt = Date.now(); return { kind: 'ok', user: u }; }
+    const e = (r && r.error) || {};
+    if (e.name === 'AuthApiError' && (e.status === 400 || e.status === 401 || e.status === 403)) return { kind: 'out' }; // 鍵が取り消された・無い
+    return { kind: 'net', user: su }; // つながらない・混んでいる・他の窓と重なった＝切れたとは決めない
+  })().finally(() => { authP = null; });
+  return authP;
+}
+/* ログインの誤り（401・jwt・倉庫の mj_session）か。403 は入れない（権限の外＝今まで通り）・mj_reauth は入れない（パスワードの入れ直しの門） */
+function loginErr(r) {
+  if (!r || typeof r !== 'object') return false;
+  const e = r.error;
+  if (e) {
+    const st = r.status ?? e.status ?? e.statusCode;
+    if (st === 401) return true;
+    if (e.code === 'PGRST301' || e.code === 'PGRST302' || e.code === 'PGRST303') return true;
+    return /JWT expired|invalid JWT|JWSError|not authenticated/i.test(String(e.message || ''));
+  }
+  return !!(r.data && typeof r.data === 'object' && r.data.ok === false && r.data.err === 'mj_session');
+}
+const NET_RES = () => ({ data: null, error: { message: 'net (auth)' } }); // status 無しの error＝どの呼び手でも「電波」の道（outboxStep は retry）
+/* sb().rpc を直に呼ぶ（返し＝{data,error,status} の形のまま）。ログインの誤りなら鍵を引き直して1回だけやり直す
+ * ★1回の呼びにつき引き直しは1回★・電波で届かなかった時は数えない（呼び手の今の送り直しが次にまた来る） */
+export async function rpcRaw(fn, args) {
+  const t0 = Date.now();
+  const call = async () => { try { return await sb().rpc(fn, args); } catch (e) { return { error: { message: String((e && e.message) || e) } }; } };
+  const r = await call();
+  if (!loginErr(r)) return r;
+  if (okAt > t0) return await call(); // 走っている間に別の呼びが引き直した＝新しい鍵でやり直すだけ
+  if (okAt && t0 - okAt < GUARD_MS) return r; // 引き直した後に始めた呼びがまた弾かれた＝本当に切れている
+  const a = await authCheck();
+  if (a.kind === 'ok') return await call();
+  if (a.kind === 'net') return NET_RES();
+  return r;
+}
+
 /* ── 倉庫の呼び：返しは必ず object（{ok:true,…} か {ok:false, err, …}）にそろえる ── */
 export async function rpc(fn, args) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, err: 'offline' };
-  let r;
-  try {
-    r = await sb().rpc(fn, args);
-  } catch (e) {
-    return { ok: false, err: 'net', detail: String(e && e.message || e) };
-  }
+  const r = await rpcRaw(fn, args);
   if (r.error) {
     const st = r.status || 0;
     if (st === 401 || st === 403 || /jwt/i.test(r.error.message || '')) return { ok: false, err: 'mj_session' };
@@ -143,15 +199,25 @@ export function ruleLabel(k) { return RULE_LABEL[k] || k; }
 
 /* ── ログイン ── */
 let loginUi = null;
+const SESSION_WAIT_MS = 5000; // 鍵の引き直しが電波で長引く時（倉庫の部品は最大30秒やり直す）は、端末に残っている同じ人で先に進む（2b §6 O4）
+/* 返しは user か null だけ（印の型は作らない・2b §2）。null＝本当にログインしていない時だけ */
 export async function currentUser() {
-  const r = await sb().auth.getSession();
-  const s = r && r.data && r.data.session;
-  return s && s.user && !s.user.is_anonymous ? s.user : null;
+  const s0 = storedAuth();
+  const g = sb().auth.getSession().then((r) => (r && r.data && r.data.session) || null, () => null);
+  const late = {};
+  const s = s0 ? await Promise.race([g, new Promise((ok) => setTimeout(() => ok(late), SESSION_WAIT_MS))]) : await g;
+  if (s === late) return realUser(s0.user);
+  const u = realUser(s && s.user);
+  if (u) return u;
+  if (!storedAuth()) return null;
+  const a = await authCheck();
+  return a.kind === 'out' ? null : a.user;
 }
-/* ログインしていなければ共通のログイン画面を出し、入ったら onUser(user) を呼ぶ */
-export async function needLogin(onUser) {
+/* ログインしていなければ共通のログイン画面を出し、入ったら onUser(user) を呼ぶ。onOut＝ログインしていないと決まった時だけ（頁のログインの箱を出す） */
+export async function needLogin(onUser, onOut) {
   const u = await currentUser();
   if (u) { onUser(u); return; }
+  if (onOut) onOut();
   showLogin(onUser);
 }
 /* ★呼びごとの onUser を持つ★（部品は mount の1回しか作らない＝最初の cb を閉じ込めると、2回目の showLogin の続きが捨てられる）
