@@ -3253,6 +3253,10 @@ begin
       if v_m.active = v_b then
         return pg_catalog.jsonb_build_object('r', pg_catalog.jsonb_build_object('i', p_i, 'v', v_m.version), 'made', 0, 'hist', 0);
       end if;
+      -- 8b A25r §1-8：アカウントにつないだ人は消せない＝その op を当てる時に見る（同じ組の member_unlink が先なら user_id は空＝通る）・役の門の後・誰がつないだかは返さない
+      if not v_b and v_m.user_id is not null then
+        perform mahjong_private.mj_w_err(pg_catalog.jsonb_build_object('ok', false, 'err', 'tsunagi', 'i', p_i, 'member_id', v_m.id));
+      end if;
       if v_b then
         select x.id, x.name into c from mahjong.members x where x.room_id = p_room and x.active and x.name_key = v_m.name_key and x.id <> v_m.id limit 1;
         if found then
