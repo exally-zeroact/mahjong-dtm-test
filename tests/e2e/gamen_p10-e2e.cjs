@@ -80,7 +80,7 @@ const SEEN = `(() => { const w = window; w.__seen = { hw: 0 };
   new MutationObserver(chk).observe(document, { subtree: true, childList: true }); })();`;
 // 偽の turnstile（本物の api.js の explicit render と同じ呼び方）
 const tsStub = (mode) => `window.turnstile = { render(el, o) { if (!el || o.action !== 'mj_human' || !o.sitekey) { setTimeout(() => o['error-callback'] && o['error-callback'](), 20); return 'w0'; }
-  window.__tsN = (window.__tsN || 0) + 1; setTimeout(() => ${mode === 'ok' ? "o.callback('tok-' + window.__tsN)" : "o['error-callback']()"}, 300); return 'w' + window.__tsN; }, remove() {} };`;
+  window.__tsN = (window.__tsN || 0) + 1; setTimeout(() => ((window.__tsMode || '${mode}') === 'ok' ? o.callback('tok-' + window.__tsN) : o['error-callback']()), 300); return 'w' + window.__tsN; }, remove() {} };`;
 
 let mutate = null, PORT = 0;
 const srv = http.createServer((q, r) => {
@@ -162,7 +162,7 @@ async function run(br) {
       ok('T2 帯は human・［もう一度］在り・［捨てる］無し', shown && b.why === 'human' && b.again && !b.drop && b.text.includes('確認できませんでした'), b);
       ok('T2 点は並びに残る（held human）', ob.length === 1 && ob[0].op_id === 'op-p10-1' && ob[0].held && ob[0].held.err === 'human', ob);
       ok('T2 mj-human は呼ばない（token が無い）', S.human.length === 0, S.human);
-      S.ts = 'ok';
+      S.ts = 'ok'; await pg.evaluate(() => { window.__tsMode = 'ok'; });
       await pg.click('#rHuman');
       const done = await until(async () => (await outbox(pg)).length === 0, 20000);
       await sleep(500);
