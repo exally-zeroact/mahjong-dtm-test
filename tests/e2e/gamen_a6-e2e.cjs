@@ -617,7 +617,7 @@ const MUT = [
   { file: GR, from: "close + delHtml(); // A27 §2", to: "close; // 壊し", name: 'ルールの頁に箱を出さない', only: 'D1,D8,D14' },
   { file: GR, from: "    el.innerHTML = h;\n    const wrap", to: "    h += delHtml();\n    el.innerHTML = h;\n    const wrap", name: '部屋の頁にも箱を出す（A6 の形）', only: 'D1,D6' },
   { file: GR, from: "h += '<button class=\"btn btn-main\" id=\"rEnd\"'", to: "h += '<button class=\"btn btn-main\" id=\"rEndX\"'", name: '部屋の頁に［対局終了］を出さない', only: 'D1,E1' },
-  { file: GR, from: "if (table && v.windows.length && !room.closed && ", to: "if (table && v.windows.length && ", name: '終えた部屋にも［対局終了］を出す', only: 'D14' },
+  { file: GR, from: "if (table && !room.closed && !st.settles.some((x) => x.session_id === sid)) {", to: "if (table && !st.settles.some((x) => x.session_id === sid)) {", name: '終えた部屋にも［対局終了］を出す', only: 'D14' },
   { file: GR, from: "closeErr = null; endAsk = true; render(); };", to: "closeErr = null; render(); };", name: '［対局終了］が精算を開くだけで締めない', only: 'E1' },
   { file: GR, from: "const ask = endAsk; endAsk = false; // A27", to: "const ask = endAsk; // A27", name: '精算の頁の頭で印を下ろさない（止め1 の前の形）', only: 'E4' },
   { file: GR, from: "const ask = endAsk; endAsk = false; // A27", to: "const ask = endAsk; // A27", also: [["const toRoom = () => { endAsk = false; ", "const toRoom = () => { "], ["    if (page !== 'seisan') endAsk = false;", "    //"]], name: '印を一度も下ろさない', only: 'E3' },
