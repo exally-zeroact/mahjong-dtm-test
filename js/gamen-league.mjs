@@ -553,5 +553,5 @@ $('fReread').onclick = () => { if (form && form.msg && form.msg.rereadFn) form.m
 $('btnLoginOpen').onclick = () => showLogin(start);
 
 only = new URLSearchParams(location.search).get('room') || null;
-show('vLogin');
-needLogin(start).catch((e) => { $('vList').hidden = false; $('vList').innerHTML = '<p class="err">止まりました：' + esc(e.message) + '</p>'; });
+// 2b：ログインの箱は「ログインしていない」と決まった時だけ出す
+needLogin(start, () => show('vLogin')).catch((e) => { $('vList').hidden = false; $('vList').innerHTML = '<p class="err">止まりました：' + esc(e.message) + '</p>'; });

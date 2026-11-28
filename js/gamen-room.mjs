@@ -38,7 +38,7 @@ import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した
 import { nameKey } from '../lib/name-key.mjs';
 import { nextSeats } from '../lib/league-round.mjs'; // L A23（l_sadame v1.3 §1 A23）：リーグの日の次の半荘の人（卓の席 t.seats が正・他の卓と重なれば選ぶ）
 import { meiboErr, nameCheck, memberOp, memberUse, offText, pressOp } from '../lib/meibo.mjs'; // 8b A25r（a25r_sadame v2.1）：対局の画面の［名簿を直す］＝リーグの名簿と同じ部品
-import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
+import { esc, uuid, sb, patchRoom, rpc, rpcRaw, errText, myRooms } from './gamen-core.mjs'; // 2b：mj_read・mj_write は rpcRaw（ログインの誤りなら鍵を1回引き直す・電波は送り直しの道）
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
 import { rulesOk } from '../lib/rules.mjs';
@@ -60,13 +60,13 @@ const offline = () => typeof navigator !== 'undefined' && navigator.onLine === f
 export async function readRoom(rid, a) {
   const args = a && typeof a === 'object' ? a : a === null || a === undefined ? { v: 3 } : { v: 3, since: a };
   try {
-    return await sb().rpc('mj_read', { p_room_id: rid, p_what: 'room', p_args: args });
+    return await rpcRaw('mj_read', { p_room_id: rid, p_what: 'room', p_args: args });
   } catch (e) { return { error: { message: String((e && e.message) || e) } }; }
 }
 /* D2：mj_read 'league'（返し＝{data,error,status} か {error}・readRoom と同じ形） */
 export async function readLeague(rid, lid, since) {
   try {
-    return await sb().rpc('mj_read', { p_room_id: rid, p_what: 'league', p_args: since === null || since === undefined ? { league_id: lid } : { league_id: lid, since } });
+    return await rpcRaw('mj_read', { p_room_id: rid, p_what: 'league', p_args: since === null || since === undefined ? { league_id: lid } : { league_id: lid, since } });
   } catch (e) { return { error: { message: String((e && e.message) || e) } }; }
 }
 /* D2：リーグの控え（league＝D1 §2 の形・days＝その日の版）。'league' の返しが ok で league が在る時だけ書く */
@@ -293,7 +293,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy, canDel()].join('|'); }
   function refreshTag() { if (!dead && tagKey() !== shownTag) rerender(); }
 
-  /* 送り（約束⑤＝sb().rpc を直に呼び {data,error,status} を outboxStep へ） */
+  /* 送り（約束⑤＝rpcRaw（sb().rpc と同じ {data,error,status}）を outboxStep へ） */
   async function sendOutbox() {
     if (!WRITE_READY || !mounted || dead || stopped || lane || st.needs_upload) { if (!lane) homeOff(); return; } // lane＝送りの最中（その返りが続ける）
     if (closedHold()) { homeOff(); return; } // 控えが closed で並びが在る＝送らない（倉庫は bad closed で返す・B3b-1 §0 止め3）
@@ -306,7 +306,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (!head.sent_at) { head = { ...head, sent_at: new Date().toISOString() }; outbox = [head, ...outbox.slice(1)]; save(OUTR, outbox); } // ★送った印を先に保存★（v1 止め1）
     lane = true;
     let res;
-    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: head.op_id, p_ops: head.ops }); }
+    try { res = await rpcRaw('mj_write', { p_room_id: rid, p_op_id: head.op_id, p_ops: head.ops }); }
     catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
     lane = false;
     if (dead) return;
@@ -583,7 +583,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
           { op: 'table_add', table_id: ids.tid, session_id: ids.sid, label: '卓1' },
         ];
         let res;
-        try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: ids.op_id, p_ops: ops }); }
+        try { res = await rpcRaw('mj_write', { p_room_id: rid, p_op_id: ids.op_id, p_ops: ops }); }
         catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
         if (dead) return;
         const d = res && res.data;
@@ -978,7 +978,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const op = { ...op0, new_table_id: ids.new_table_id };
     lane = true; ruleBusy = true; rerender();
     let res;
-    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: ids.op_id, p_ops: [op] }); }
+    try { res = await rpcRaw('mj_write', { p_room_id: rid, p_op_id: ids.op_id, p_ops: [op] }); }
     catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
     lane = false; ruleBusy = false;
     if (dead) return;
@@ -1260,7 +1260,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     ed.p = pressOp(ed, ops, uuid);
     lane = true; ed.busy = true; ed.msg = null; meDraw();
     let res;
-    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: ed.p.op_id, p_ops: ops }); }
+    try { res = await rpcRaw('mj_write', { p_room_id: rid, p_op_id: ed.p.op_id, p_ops: ops }); } // 2b：ログインの誤りなら鍵を1回引き直す
     catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
     lane = false; ed.busy = false;
     if (dead) return;
@@ -1333,7 +1333,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const opId = meOp.op_id;
     lane = true; meBusy = true; meMsg = null; meDraw();
     let res;
-    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: opId, p_ops: ops }); }
+    try { res = await rpcRaw('mj_write', { p_room_id: rid, p_op_id: opId, p_ops: ops }); }
     catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
     lane = false; meBusy = false;
     if (dead) return;
