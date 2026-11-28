@@ -66,5 +66,6 @@ console.log('■ A20 §1-7 途中で人数を押す（swapPlayers）');
   ok('3→4（覚え無し）：25000／30000・20/10/−10/−20・赤 3・北 none・レート 50', d.players === 4 && d.start_pts === 25000 && d.return_pts === 30000 && J(d.uma) === J([20, 10, -10, -20]) && d.aka === 3 && d.kita === 'none' && d.rate === 50, J(d));
 }
 
-console.log(`KEKKA rules-memory ${p}/${p + f}`);
+console.log(`rules-memory ${p}/${p + f}`);
+console.log('KEKKA ' + JSON.stringify({ passed: p, failed: f, mimiso: 0 }));   // ci-3tsu（tools/_bunrui.mjs）が読む約束の行
 if (f) process.exit(1);

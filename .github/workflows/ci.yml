@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           node tests/bunrui.test.mjs --self-test | tee bunrui-self.out
-          sh scripts/ci-yuka.sh bunrui-self.out 5
+          sh scripts/ci-yuka.sh bunrui-self.out 7
 
       # ── どちらの線か（テスト倉庫を本番が読む事故を防ぐ） ──────
       - name: テスト環境の帯（本番では出さない・全画面が読み込む）

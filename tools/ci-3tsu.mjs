@@ -7,7 +7,7 @@
  *   （網の 側の 本数は bunrui を oshu-mae に 配線した 後の 押しで 出る）。
  */
 import { spawnSync } from 'node:child_process';
-import { bunrui, OKE_JUN } from './_bunrui.mjs';
+import { bunrui, OKE_JUN, danNoKetsuron } from './_bunrui.mjs';
 
 const gh = (args) => {
   const r = spawnSync('gh', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
@@ -28,6 +28,7 @@ if (!runId) {
 const jobs = JSON.parse(gh(['run', 'view', runId, '--json', 'jobs,headSha,displayTitle']));
 const ketsuron = new Map();   /* key: job\tstep → conclusion */
 jobs.jobs.forEach((jb) => jb.steps.forEach((st) => ketsuron.set(jb.name + '\t' + st.name, st.conclusion)));
+const jobKetsuron = new Map(jobs.jobs.map((jb) => [jb.name, jb.conclusion]));   /* 段名が UNKNOWN STEP の 時だけ 使う */
 
 /* ログを 段ごとに 束ねる（行頭＝job<TAB>step<TAB>時刻 本文） */
 const log = gh(['run', 'view', runId, '--log']);
@@ -50,11 +51,12 @@ for (const [key, out] of dan.entries()) {
      「非試験」として 黙って 除くと ★本物の「赤を緑」も 見逃す★。行頭の ✓␠/✗␠ だけ（凡例 ✓＝… は 外す）。 */
   const hasSignal = /\d+\s*passed|未測定|はかれない|測りません|^\s*KEKKA\s|^\s*自己確認:\s*\d+\s*\/\s*\d+\s*$|^\s*[✓✗]\s+\S/m.test(out);
   if (!hasSignal) { hiShiken++; continue; }   /* 試験でない段は 4つ組に 入れない */
-  const con = ketsuron.get(key);
+  const [jobName, stepName] = key.split('\t');
+  const con = danNoKetsuron(stepName, ketsuron.get(key), jobKetsuron.get(jobName));
   const status = con === 'success' ? 0 : (con === 'skipped' ? 'skip' : 1);
   if (status === 'skip') continue;
   const r = bunrui(status, out);
-  tally[r.oke].push({ step: key.split('\t')[1], r });
+  tally[r.oke].push({ step: stepName === 'UNKNOWN STEP' ? jobName + '（段名 不明＝job の 結論）' : stepName, r });
   if (r.how === '約束') yomikata.約束++; else if (r.how === '目印') yomikata.目印++;
 }
 

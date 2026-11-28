@@ -166,4 +166,5 @@ console.log('■ v2 総当たり：画面の字から組の中の順が読める
   ok('押し方を回した', seen > 1000);
 }
 console.log(`\nkamicha.test: ${p} ok / ${f} ng`);
+console.log('KEKKA ' + JSON.stringify({ passed: p, failed: f, mimiso: 0 }));   // ci-3tsu（tools/_bunrui.mjs）が読む約束の行
 if (f) process.exit(1);

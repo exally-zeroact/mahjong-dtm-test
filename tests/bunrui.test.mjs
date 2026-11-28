@@ -31,8 +31,23 @@ const ROWS = [
   ['画面の自己確認で 自己確認: の行が無い → exit0failed（✗ が在る）', 0, '✓ 赤 釦を出さない（2）\n✓ 赤 もう1回で外さない（1）\n✗ 頁の例外 null is not an object (evaluating \'mulS(pt10, v.rate / 10).toLocaleString\')\n✓ 赤 窓に飛び賞の行を戻す（1）\ntobi-e2e self: 10/10 赤\n', 'exit0failed', 0],
 ];
 
-function judge(bunrui) {
+// [名, 段名, 段の結論, job の結論, 欲しい結論]（tools/_bunrui.mjs の danNoKetsuron・11-28）
+const DAN = [
+  ['段の結論が在ればそれ', '試験', 'success', 'failure', 'success'],
+  ['段の結論が在れば job が success でも段の failure', '試験', 'failure', 'success', 'failure'],
+  ['UNKNOWN STEP は job の結論（run 46086060844 SW webkit）', 'UNKNOWN STEP', undefined, 'success', 'success'],
+  ['UNKNOWN STEP で job が failure → failure', 'UNKNOWN STEP', undefined, 'failure', 'failure'],
+  ['名の在る段で結論が無い → 引けない（job で埋めない）', '試験', undefined, 'success', undefined],
+  ['UNKNOWN STEP で job も無い → 引けない', 'UNKNOWN STEP', undefined, undefined, undefined],
+];
+
+function judge(mod) {
+  const bunrui = mod.bunrui;
   const bad = [];
+  for (const [nm, st, sc, jc, want] of DAN) {
+    const got = mod.danNoKetsuron(st, sc, jc);
+    if (got !== want) bad.push(`${nm}：${got}（欲しい ${want}）`);
+  }
   for (const [nm, st, out, oke, p] of ROWS) {
     const r = bunrui(st, out);
     if (r.oke !== oke || r.passed !== p) bad.push(`${nm}：桶 ${r.oke}／passed ${r.passed}（欲しい ${oke}／${p}）`);
@@ -46,10 +61,12 @@ const BREAKS = [
   ['failed を 0 に', 'return { passed: a, failed: b - a, mimiso: 0 };', 'return { passed: a, failed: 0, mimiso: 0 };'],
   ['最初の 自己確認 を読む', 'const a = +m[m.length - 1][1], b = +m[m.length - 1][2];', 'const a = +m[0][1], b = +m[0][2];'],
   ['行頭でなくても読む', "matchAll(/^\\s*自己確認:", "matchAll(/自己確認:"],
+  ['UNKNOWN STEP でなくても job で埋める', "if (step === 'UNKNOWN STEP' && jobCon !== undefined) return jobCon;", "if (jobCon !== undefined) return jobCon;"],
+  ['UNKNOWN STEP を job で埋めない', "if (step === 'UNKNOWN STEP' && jobCon !== undefined) return jobCon;", "if (false) return jobCon;"],
 ];
 
 if (process.argv.includes('--self-test')) {
-  const base = judge((await import(pathToFileURL(SRC).href)).bunrui);
+  const base = judge((await import(pathToFileURL(SRC).href)));
   if (base.length) { console.log(`✗ 壊す前に赤が ${base.length} 本`); base.forEach((b) => console.log('  ' + b)); process.exit(1); }
   const src = fs.readFileSync(SRC, 'utf8');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mahjong-bunrui-'));
@@ -62,7 +79,7 @@ if (process.argv.includes('--self-test')) {
     for (let i = 0; i < BREAKS.length; i++) {
       const f = path.join(tmp, `b${i}.mjs`);
       if (!fs.existsSync(f)) continue;
-      const n = judge((await import(pathToFileURL(f).href)).bunrui).length;
+      const n = judge((await import(pathToFileURL(f).href))).length;
       if (n > 0) { red++; console.log(`  ✓ 壊し「${BREAKS[i][0]}」→ 赤 ${n}`); }
       else console.log(`  ✗ 壊し「${BREAKS[i][0]}」でも緑`);
     }
@@ -71,7 +88,7 @@ if (process.argv.includes('--self-test')) {
   process.exit(red === BREAKS.length ? 0 : 1);
 }
 
-const bad = judge((await import(pathToFileURL(SRC).href)).bunrui);
+const bad = judge((await import(pathToFileURL(SRC).href)));
 if (bad.length) { console.log(`✗ 段の割り方 ${bad.length}/${ROWS.length} が違う`); bad.forEach((b) => console.log('  ' + b)); process.exit(1); }
-console.log(`✓ 段の割り方 ${ROWS.length} 行 全部 正解表と同じ`);
-console.log('KEKKA ' + JSON.stringify({ passed: ROWS.length, failed: 0, mimiso: 0 }));
+console.log(`✓ 段の割り方 ${ROWS.length} 行＋段の結論 ${DAN.length} 行 全部 正解表と同じ`);
+console.log('KEKKA ' + JSON.stringify({ passed: ROWS.length + DAN.length, failed: 0, mimiso: 0 }));

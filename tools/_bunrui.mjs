@@ -95,4 +95,13 @@ export function bunrui(status, out) {
   return { oke: '読めない', ...base };
 }
 
+/* ★段の 結論★（11-28 麻雀 run 46086060844）… gh run view --log は 段を 当てられない job で 段名を「UNKNOWN STEP」と 書く
+   （本物の SW の自己確認 1〜3/3 webkit の matrix 3 job）。その key は 段の 結論の 表に 無い＝前は 赤に 数えていた（偽の 赤 3）。
+   ⇒ 段名が UNKNOWN STEP の 時だけ job の 結論で 見る（job が success なら 中の 段は 全部 success）。どちらも 引けない時は 引けない＝赤（保守） */
+export function danNoKetsuron(step, stepCon, jobCon) {
+  if (stepCon !== undefined) return stepCon;
+  if (step === 'UNKNOWN STEP' && jobCon !== undefined) return jobCon;
+  return undefined;
+}
+
 export const OKE_JUN = ['測った', '一部抜け', '丸ごと抜け', '読めない', 'exit0failed', '赤'];
