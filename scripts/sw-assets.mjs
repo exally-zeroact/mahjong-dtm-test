@@ -86,6 +86,9 @@ export function collect(root = ROOT) {
   return { list: [...seen].sort(), problems };
 }
 
+/* 他の origin の script を後から読んでよいファイルと、その URL（ここに足すのは1件ずつ・定めの節を書く） */
+const CROSS_ORIGIN_SCRIPT = { '/js/gamen-human.mjs': 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit' }; // P10 §4
+
 /** 後から読む道（名簿に入らない取り）を探す。返り＝[言う事] */
 export function lateLoads(root, list) {
   const bad = [];
@@ -94,7 +97,10 @@ export function lateLoads(root, list) {
       const code = stripJsComments(fs.readFileSync(path.join(root, p.slice(1)), 'utf8'));
       if (/\bimport\s*\(/.test(code)) bad.push(`${p} に import(`);
       if (/\bimportScripts\s*\(/.test(code)) bad.push(`${p} に importScripts(`);
-      if (/createElement\(\s*['"](?:script|link)['"]/.test(code)) bad.push(`${p} に createElement('script'|'link')`);
+      // P10 §4：Turnstile の api.js は Cloudflare からしか読めない（名簿に入れられない他の origin・sw.js は他の origin を触らない）＝この1ファイルが、決めた1つの URL だけを読む時に限って通す
+      const xo = CROSS_ORIGIN_SCRIPT[p];
+      const xoOk = !!xo && code.includes("const API = '" + xo + "'") && /\.src = API;/.test(code) && (code.match(/\.src\s*=/g) || []).length === 1 && (code.match(/createElement\(\s*['"](?:script|link)['"]/g) || []).length === 1;
+      if (/createElement\(\s*['"](?:script|link)['"]/.test(code) && !xoOk) bad.push(`${p} に createElement('script'|'link')`);
     } else if (p.endsWith('.css')) {
       const css = fs.readFileSync(path.join(root, p.slice(1)), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
       if (/url\(\s*(?!['"]?data:)/.test(css)) bad.push(`${p} に url(`);

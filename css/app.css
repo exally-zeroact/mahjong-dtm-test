@@ -154,3 +154,7 @@ body.tensu .steps { display: grid; gap: 8px; margin: 0 0 12px; }
 body.tensu .step { display: grid; grid-template-columns: 1fr 44px 3em 44px; align-items: center; gap: 8px; font-size: 16px; }
 body.tensu .step .v { text-align: center; font-variant-numeric: tabular-nums; }
 body.tensu #pao-box .chips { margin-top: 8px; }
+/* P10 §4：人の確かめ（Turnstile）の窓＝画面の真ん中に1つ（gamen-human.mjs） */
+.mj-human { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: var(--c-kage); }
+.mj-human-in { min-width: 300px; padding: 16px; border-radius: 12px; background: var(--c-haikei); color: var(--c-ji); font-size: 16px; text-align: center; box-shadow: 0 2px 8px var(--c-kage); }
+.mj-human-in p { margin: 0 0 12px; }

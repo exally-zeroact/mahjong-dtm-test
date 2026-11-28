@@ -32,13 +32,13 @@
  * L でない入の1回目（§3 止め1）：リーグの日で L でない人は、半荘0本の卓でも table_seats を送らない（席は hanchan_start の seats だけ）。
  */
 import { emptyState, applyOps, tableView, chainView, tableChain, needOf, WHO, sessionSeisan, sessionBreakdown, tenChanged, tableRate, rateModeOf, checkEntry, pickSession, sessionSig, migrateState, readArgs, sessionOfRef, roomGate, gateText, orderIdx, canon, tobiUsed, OPS_MAX, CELL_MAX, LOST_MAX } from '../lib/room-state.mjs';
-import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, unholdBusy, heldAny } from '../lib/outbox.mjs';
+import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, unholdBusy, heldAny, heldHuman, unholdHuman } from '../lib/outbox.mjs';
 import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
 import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
 import { nextSeats } from '../lib/league-round.mjs'; // L A23（l_sadame v1.3 §1 A23）：リーグの日の次の半荘の人（卓の席 t.seats が正・他の卓と重なれば選ぶ）
 import { meiboErr, nameCheck, memberOp, memberUse, offText, pressOp } from '../lib/meibo.mjs'; // 8b A25r（a25r_sadame v2.1）：対局の画面の［名簿を直す］＝リーグの名簿と同じ部品
-import { esc, uuid, sb, patchRoom, rpc, rpcRaw, errText, myRooms } from './gamen-core.mjs'; // 2b：mj_read・mj_write は rpcRaw（ログインの誤りなら鍵を1回引き直す・電波は送り直しの道）
+import { esc, uuid, sb, patchRoom, rpc, rpcRaw, errText, myRooms, humanCheck } from './gamen-core.mjs'; // 2b：mj_read・mj_write は rpcRaw（ログインの誤りなら鍵を1回引き直す・電波は送り直しの道）
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
 import { rulesOk } from '../lib/rules.mjs';
@@ -133,6 +133,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let st = mig.st;
   if (!st.settles) st.settles = [];
   let outbox = mig.migrated ? [] : load(OUTR, []);
+  let humanBusy = false; // P10 §4：確かめの窓が出ている間（［もう一度］を2重に押さない）
+  if (heldHuman(outbox)) setTimeout(() => humanAgain(), 0); // P10 §4：開いた時に先頭が held human＝確かめを1回出す（通れば送る）
   if (mig.migrated) { save(OUTR, outbox); save(KEYR, st); }
   let page = first || 'room'; // room | edit | pick | seisan | rules
   let entry = null;
@@ -290,6 +292,17 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   }
   // 置き換えた後に描くのは room・seisan・rules の頁だけ（edit・pick は入れ物・focus・打ちかけを壊さない＝出る時に描く・v2 止め2）
   function rerender() { if (!dead && ['room', 'seisan', 'rules'].includes(page)) render(); }
+  /* P10 §4：確かめが通ったら先頭の held human を外して送る（op_id はそのまま）・通らなければ帯のまま（点は捨てない） */
+  function humanAgain() {
+    if (humanBusy || dead || !heldHuman(outbox)) return;
+    humanBusy = true; rerender();
+    humanCheck().then((ok) => {
+      humanBusy = false;
+      if (dead) return;
+      if (ok && heldHuman(outbox)) { outbox = unholdHuman(outbox); save(OUTR, outbox); retryN = 0; rerender(); sendOutbox(); return; }
+      rerender();
+    });
+  }
   function tagKey() { return [liveTag(), staleRead(), stopped, gateNote, startMsg, outbox.length, heldInfo(outbox) && heldInfo(outbox).why, !!room.closed, closingOn(), closeBusy, canDel()].join('|'); }
   function refreshTag() { if (!dead && tagKey() !== shownTag) rerender(); }
 
@@ -613,6 +626,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
           else if (s.kind === 'closed') { roomInfo({ closed: true }); startOp = null; fail = 'この部屋は終わりました。'; }
           else if (s.kind === 'retry') fail = s.err === 'busy' ? '混んでいます。1分待ってもう一度押してください。' : 'つながりませんでした。電波を確かめてもう一度押してください。'; // startOp は残す＝次も同じ op_id
           else if (s.err === 'busy') { startOp = null; fail = errText({ err: 'busy', what: s.what }, LG ? 'league' : 'write'); } // P6g §5：1日の窓は「1分待って」にしない
+          else if (s.err === 'human') { startOp = null; fail = errText({ err: 'human' }); } // P10 §1：確かめが通らなかった＝もう一度押すとまた確かめを出す
           else { startOp = null; fail = LG ? errText(d && typeof d === 'object' ? d : { err: s.err }, 'league') || '始められませんでした（' + s.err + '）。' : '始められませんでした（' + s.err + '）。'; }
         }
       }
@@ -670,6 +684,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       else if (hi.why === 'bad' && outbox[0].held.at === 'table_id' && outbox[0].ops.some((o) => o.op === 'extra_add')) h += '<div class="r-red" id="rHeld"><b>ルールが変わりました。チップ等を入れ直してください</b><button class="btn btn-line" id="rDrop">捨てる</button></div>';
       // 8b §1-7：古い写しのまま積んだ hanchan_start に消された人（倉庫が bad at seats）＝［選び直す］（その組を外して点を人ごとに残し人を選ぶ頁へ）
       else if (hi.why === 'bad' && outbox[0].held && outbox[0].held.at === 'seats' && outbox[0].ops.some((o) => o.op === 'hanchan_start')) h += '<div class="r-red" id="rHeld" data-why="offseat"><b>消された人がいるので入れられませんでした</b><button class="btn btn-main" id="rRePick">選び直す</button><button class="btn btn-line" id="rDrop">捨てる</button></div>';
+      else if (hi.why === 'human') h += '<div class="r-red" id="rHeld" data-why="human"><b>確認できませんでした</b><button class="btn btn-main" id="rHuman"' + (humanBusy ? ' disabled' : '') + '>もう一度</button></div>'; // P10 §1：［捨てる］は出さない（点は通った後に送る）
       else h += '<div class="r-red" id="rHeld"><b>未送信 ' + hi.n + ' 件・この書き込みは入れられません（' + esc(HELD_WHY[hi.why] || hi.why) + '）</b><button class="btn btn-line" id="rDrop">捨てる</button></div>';
     }
     if (gateNote) h += '<div class="r-red" id="rGateNote"><b>' + esc(gateNote) + '</b></div>';
@@ -699,6 +714,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // P6g §3：［全部捨てる］は1段確かめる・merge も空にする（押す前の ± が後で黙って送られない）・［もう一度送る］は先頭の held busy を外して1回だけ送る
     if (q('#rDropAll')) q('#rDropAll').onclick = () => { dropAllAsk = true; rerender(); };
     if (q('#rDropAll2')) q('#rDropAll2').onclick = () => { dropAllAsk = false; clearTimeout(mergeTimer); merge.clear(); outbox = []; save(OUTR, outbox); since = null; rerender(); sync(); };
+    if (q('#rHuman')) q('#rHuman').onclick = () => humanAgain();
     if (q('#rResend')) q('#rResend').onclick = () => { dropAllAsk = false; outbox = unholdBusy(outbox); save(OUTR, outbox); retryN = 0; rerender(); sendOutbox(); };
     if (q('#rRelogin')) q('#rRelogin').onclick = () => relogin(() => { if (dead) return; stopped = null; loginErr = null; rerender(); kick(); sync(); });
   }
