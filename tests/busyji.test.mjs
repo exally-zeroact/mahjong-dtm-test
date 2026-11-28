@@ -1,5 +1,5 @@
 /* busyji.test.mjs — P3g（pbundle_sadame v2.1 §2 S5）：倉庫の busy の what ごとに errText の字が合うか
- * user_min＝少し待って／solo_day＝24時間100・until の時刻から／user_day＝入る試しが多すぎる・until の時刻から／user（共有の部屋1日5つ）は今のまま／'all' はもう返さない＝分かれ道は無い
+ * user_min＝少し待って／user_day＝入る試しが多すぎる・until の時刻から／user＝入るの打ち間違いだけ／'all'・solo_day・room（caps_sadame v1.1 §3）・作るの user（1日5つ）はもう返さない＝分かれ道は無い
  * 使い方: node tests/busyji.test.mjs  /  node tests/busyji.test.mjs --self-test（枝を1つずつ壊すと赤になるか）
  */
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -23,14 +23,14 @@ async function check(src) {
   const eq = (name, got, want) => { if (got === want) pass++; else { fail++; console.log('  ✗ ' + name + ' — ' + JSON.stringify(got) + ' ≠ ' + JSON.stringify(want)); } };
   const B = (what, until) => ({ ok: false, err: 'busy', what, ...(until !== undefined ? { until } : {}) });
   for (const way of ['create', 'name', 'url']) eq('user_min ' + way, t(B('user_min'), way), '少し待ってからもう一度押してください。');
-  eq('solo_day until', t(B('solo_day', U), 'create'), '24時間で始められる対局の数を越えました（100）。時刻 21:05 から始められます。');
-  eq('solo_day until 無し', t(B('solo_day'), 'create'), '24時間で始められる対局の数を越えました（100）。' + WAIT);
-  eq('solo_day until 読めない', t(B('solo_day', 'x'), 'create'), '24時間で始められる対局の数を越えました（100）。' + WAIT);
   for (const way of ['name', 'url', 'create', 'write']) eq('user_day until ' + way, t(B('user_day', U), way), '入る試しが多すぎます。21:05 からもう一度押してください。');
   eq('user_day until 無し', t(B('user_day'), 'name'), '入る試しが多すぎます。' + WAIT);
   eq('user_day until null', t(B('user_day', null), 'name'), '入る試しが多すぎます。' + WAIT);
   // 今のまま
-  eq('user 作る（共有の部屋1日5つ）', t(B('user'), 'create'), '1人が1日に作れる部屋は5つまでです。明日もう一度。');
+  eq('user_day until 読めない', t(B('user_day', 'x'), 'name'), '入る試しが多すぎます。' + WAIT);
+  // 外した窓（caps_sadame v1.1 §3）＝古い倉庫が返しても数を言わない
+  for (const what of ['solo_day', 'room', 'user']) eq(what + ' 作る＝分かれ道なし', t(B(what, U), 'create'), '混んでいます。1分待ってもう一度押してください。');
+  for (const dead of ['solo_day', "w === 'room'", '作れる部屋は5つ', '始められる対局']) { if (src.includes(dead)) { fail++; console.log('  ✗ gamen-core.mjs に ' + dead + ' が残っている'); } else pass++; }
   eq('user 入る', t(B('user'), 'name'), '打ち間違いが続いたので、1分待ってもう一度。');
   eq('what 無し', t(B(undefined), 'create'), '混んでいます。1分待ってもう一度押してください。');
   // 'all' の分かれ道は消した（来ても「1分待って」に落ちる）
@@ -41,13 +41,13 @@ async function check(src) {
 
 const BREAKS = [
   ['user_min の枝を消す', (s) => s.replace("if (w === 'user_min') return", 'if (false) return')],
-  ['solo_day の枝を消す', (s) => s.replace("if (w === 'solo_day') return", 'if (false) return')],
   ['user_day の枝を消す', (s) => s.replace("if (w === 'user_day') return", 'if (false) return')],
   ['until を読まない', (s) => s.replace("const untilOk = (t) => t !== undefined && t !== null && t !== '' && !isNaN(new Date(t));", 'const untilOk = (t) => false;')],
   ['until が無くても時刻を出す', (s) => s.replace("const untilOk = (t) => t !== undefined && t !== null && t !== '' && !isNaN(new Date(t));", 'const untilOk = (t) => true;')],
-  ['solo_day の数を変える', (s) => s.replace('越えました（100）', '越えました（50）')],
+  ['solo_day の枝を戻す', (s) => s.replace("      if (w === 'user_day') return", "      if (w === 'solo_day') return '24時間で始められる対局の数を越えました（100）。';\n      if (w === 'user_day') return")],
+  ['作るの user の字を戻す', (s) => s.replace("if (w === 'user' && join) return '打ち間違いが続いたので、1分待ってもう一度。';", "if (w === 'user') return join ? '打ち間違いが続いたので、1分待ってもう一度。' : '1人が1日に作れる部屋は5つまでです。明日もう一度。';")],
   ["'all' の分かれ道を戻す", (s) => s.replace("      if (w === 'user_min') return", "      if (w === 'all' && way === 'create') return '今は混んでいます。少し待ってからもう一度押してください。';\n      if (w === 'user_min') return")],
-  ['user の字を変える（残す字の見張り）', (s) => s.replace('1人が1日に作れる部屋は5つまでです。明日もう一度。', '作れません。')],
+  ['user の字を変える（残す字の見張り）', (s) => s.replace('打ち間違いが続いたので、1分待ってもう一度。', '入れません。')],
 ];
 
 if (process.argv.includes('--self-test')) {

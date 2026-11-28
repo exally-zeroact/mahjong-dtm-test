@@ -641,7 +641,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     : w === 'write:rk1d' ? '部屋の管の全員で24時間に書ける数を越えました。この点は送れていません。入の人に入れてもらう時は［捨てる］（残すと後で2重）'
     : w === 'write:rn1d' ? '部屋の入の全員で24時間に書ける数を越えました。この点は送れていません。管の人に入れてもらう時は［捨てる］（残すと後で2重）'
     : '書ける数を越えたので止めました（' + (w || '?') + '）。この点は送れていません。');
-  const HELD_WHY = { conflict: '他の端末が先に直しました', dup: '同じ名前の人がもういます', range: '範囲の外です', server: '倉庫で止まりました', full: '部屋がいっぱいです', mj_role: 'この役ではできません' };
+  const HELD_WHY = { conflict: '他の端末が先に直しました', dup: '同じ名前の人がもういます', range: '範囲の外です', server: '倉庫で止まりました', full: '倉庫で止まりました', mj_role: 'この役ではできません' };
   /* 帯（頁の上）＝足し①・消えた部屋・ログイン・止まった並び・読んだ st の門・始められなかった字 */
   function bandsHtml() {
     let h = '';
@@ -1225,7 +1225,6 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (s.err === 'taken') { meRead = true; sync(); return say('『' + t.name + '』は今ほかの人がつなぎました。' + (me ? 'あなたの名前は' + me.name + 'のままです。' : '')); }
     if (s.err === 'linked') { meRead = true; sync(); return say('あなたは別の名前につながっていました。読み直しました。もう一度選んでください。'); }
     if (s.err === 'dup') { meRead = true; sync(); return say('同じ名前が名簿にいます。上の一覧から選んでください。'); }
-    if (s.err === 'full' && typeof s.what === 'string' && s.what.startsWith('member_claims')) return say('名乗りがいっぱいです（管に付け替えを頼んでください）');
     if (s.err === 'mj_role') sync();
     return say(errText({ err: s.err, what: s.what, at: s.at }, 'write'));
   }

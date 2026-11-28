@@ -63,19 +63,10 @@ export function errText(res, way) {
     if (e === 'mj_reauth') return '部屋を消すには、パスワードでもう一度ログインしてください。';
     if (e === 'mj_role') return '部屋を消せるのは部屋の持ち主だけです。';
   }
-  // way 'write'＝部屋の op の直送（名前の頁など・c20_sadame v2.3）：full は what で分ける＝部屋を作る字（下の switch）に落とさない。
-  // 上限が残る表（fullji_sadame v1.1 §2）＝members・admins・room_bans・room_accounts。op_results と what 無しは mj_caps の行の欠け
-  if (way === 'write' && e === 'full') {
-    if (w === 'members') return '名簿がいっぱいです。これ以上名前を足せません。';
-    if (w === 'admins') return '管の人がいっぱいです。';
-    if (w === 'room_bans' || w === 'room_accounts') return '部屋がいっぱいです。';
-    return '倉庫で止まりました。もう一度押しても同じです。';
-  }
   // way 'league'＝リーグの op（league_create・league_save・league_owner_set／d1_sadame v2.1 §1 の表・bad は at か what を見る）。
   // 表に無い err（mj_session・busy・net・offline・server・mj_op_other_user・dup・知らない err）は下の今の字のまま
   if (way === 'league') {
     const at = res && (res.at || res.what);
-    if (e === 'too_many') return '24時間に作れるリーグは5つまでです。';
     // D2（d2_sadame v1.1 §3）：リーグの日の dup＝読み直して開く（字は出さない）・L でない入が卓と日を足そうとした
     if (e === 'dup' && at === 'session') return '';
     if (e === 'mj_role' && res.need === 'L') return '卓と日を足せるのはリーグの L だけです';
@@ -111,16 +102,16 @@ export function errText(res, way) {
       return '打ち間違いが続いたので、' + hhmm(res.until) + ' まで入れません。';
     case 'gone': return 'この部屋は消されています。';
     case 'removed': return 'この部屋からは外されています。部屋の管の人に訊いてください。';
-    case 'full': return join ? 'この部屋は人数がいっぱいで入れません。' : '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。';
+    // 上限を外した後（caps_sadame v1.1 §3）：full は書きの op_results の mj_caps 行の欠けだけ＝入る・作る・名簿・管・名乗りの「いっぱい」は倉庫がもう返さない
+    case 'full': return '倉庫で止まりました。もう一度押しても同じです。';
     case 'mismatch': case 'mj_op_other_user': return '送り直しが合いませんでした。もう一度最初から押してください。';
     case 'range': return 'その数は入れられません（範囲）' + (res.key ? '：' + ruleLabel(res.key) : '');
     case 'busy':
-      if (w === 'user') return join ? '打ち間違いが続いたので、1分待ってもう一度。' : '1人が1日に作れる部屋は5つまでです。明日もう一度。';
+      // user＝入るの打ち間違い（ufail1m）だけ残る・作る／共有の1日の数（u1d）は外した（caps_sadame v1.1 §3）
+      if (w === 'user' && join) return '打ち間違いが続いたので、1分待ってもう一度。';
       if (w === 'name') return 'その名前の部屋が多すぎます。別の名前にしてください。';
-      if (w === 'room') return 'この部屋は今混んでいます。1分待ってもう一度。';
       // P3g（pbundle_sadame v2.1 §2 S5）：人ごとの窓。'all'（全体の窓）は倉庫がもう返さない＝分かれ道を消した
       if (w === 'user_min') return '少し待ってからもう一度押してください。';
-      if (w === 'solo_day') return '24時間で始められる対局の数を越えました（100）。' + (untilOk(res.until) ? '時刻 ' + hhmm(res.until) + ' から始められます。' : '時間をおいてもう一度押してください。');
       if (w === 'user_day') return '入る試しが多すぎます。' + (untilOk(res.until) ? hhmm(res.until) + ' からもう一度押してください。' : '時間をおいてもう一度押してください。');
       // P6g §5（p6g_sadame v1.1）：書きの窓（write:*）は what で字を分ける＝1日の窓で「1分待って」を出さない・頼める人がいない道もあるので「他の人に」は言わない
       if (typeof w === 'string' && w.startsWith('write:')) {

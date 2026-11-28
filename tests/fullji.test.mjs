@@ -1,6 +1,6 @@
 /* fullji.test.mjs — ★H2（対局の記録の上限を外した）の後、errText の full の字が事実に合うか★（fullji_sadame v1.1 §2・§3）
  * close と league の op が受け得る full は op_results の mj_caps 行の欠けだけ＝「記録がいっぱい」「リーグは50まで」は出さない。
- * 入る・作る（97 行）の「いっぱい」は上限が残る（room_accounts・rooms）＝今の字のまま。
+ * 上限を外した後（caps_sadame v1.1 §3）：入る・作る・write の members／admins／room_bans／room_accounts の「いっぱい」は倉庫がもう返さない＝どの道の full も op_results の欠けの字。
  * 使い方: node tests/fullji.test.mjs  /  node tests/fullji.test.mjs --self-test（字を前に戻す・league の枝を消すと赤になるか）
  */
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -33,22 +33,17 @@ async function check(src) {
   eq('league full what history', t({ ok: false, err: 'full', what: 'history' }, 'league'), LEAGUE_FULL);
   eq('league full what *', t({ ok: false, err: 'full', what: '*' }, 'league'), LEAGUE_FULL);
   eq('league full（what 無し）', t({ ok: false, err: 'full' }, 'league'), LEAGUE_FULL);
-  // 残す字（上限が残る）
-  eq('入る（name）full＝人数がいっぱい', t({ ok: false, err: 'full' }, 'name'), 'この部屋は人数がいっぱいで入れません。');
-  eq('入る（url）full＝人数がいっぱい', t({ ok: false, err: 'full' }, 'url'), 'この部屋は人数がいっぱいで入れません。');
-  eq('作る full＝倉庫がいっぱい', t({ ok: false, err: 'full' }, 'create'), '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。');
-  // write（部屋の op の直送・c20_sadame v2.3）＝作る の字に落とさない
-  eq('write full what members＝名簿', t({ ok: false, err: 'full', what: 'members' }, 'write'), '名簿がいっぱいです。これ以上名前を足せません。');
-  eq('write full what admins', t({ ok: false, err: 'full', what: 'admins' }, 'write'), '管の人がいっぱいです。');
-  eq('write full what room_bans', t({ ok: false, err: 'full', what: 'room_bans' }, 'write'), '部屋がいっぱいです。');
+  // 外した上限（caps_sadame v1.1 §3）＝古い倉庫が返しても「いっぱい」を言わない
+  for (const way of ['name', 'url', 'create']) eq('full ' + way + '＝いっぱいと言わない', t({ ok: false, err: 'full' }, way), LEAGUE_FULL);
+  for (const what of ['members', 'admins', 'room_bans', 'room_accounts', 'member_claims', 'member_claims_user']) eq('write full what ' + what, t({ ok: false, err: 'full', what }, 'write'), LEAGUE_FULL);
   eq('write full what op_results', t({ ok: false, err: 'full', what: 'op_results' }, 'write'), LEAGUE_FULL);
   eq('write full（what 無し）', t({ ok: false, err: 'full' }, 'write'), LEAGUE_FULL);
   // close・league の他の字は変わらない
   eq('close bad closed', t({ ok: false, err: 'bad', at: 'closed' }, 'close'), 'この部屋はもう終わっています。');
   eq('close mj_role', t({ ok: false, err: 'mj_role' }, 'close'), '部屋を終えられるのは部屋の持ち主だけです。');
   eq('league internal', t({ ok: false, err: 'internal' }, 'league'), '倉庫で止まりました。もう一度押しても同じです。');
-  eq('league too_many', t({ ok: false, err: 'too_many' }, 'league'), '24時間に作れるリーグは5つまでです。');
   // 死んだ字が残っていない
+  for (const dead of ['人数がいっぱい', '倉庫がいっぱい', '名簿がいっぱい', '管の人がいっぱい', '部屋がいっぱい', '作れるリーグは5つ']) ok('gamen-core.mjs に「' + dead + '」が0', !src.includes(dead));
   ok('gamen-core.mjs に「記録がいっぱい」が0', !src.includes('記録がいっぱい'));
   ok('gamen-core.mjs に「リーグは50まで」が0', !src.includes('リーグは50まで'));
   return { pass, fail };
@@ -56,11 +51,10 @@ async function check(src) {
 
 const BREAKS = [
   ['close の字を前に戻す', (s) => s.replace("return '" + CLOSE_FULL + "'", "return 'この部屋は記録がいっぱいのため、今は終えられません。'")],
-  ['league の full の枝を消す（作る の字へ落ちる）', (s) => s.replace("    if (e === 'full') return '" + LEAGUE_FULL + "';", '')],
   ['league の full を前の what ごとの字に戻す', (s) => s.replace("    if (e === 'full') return '" + LEAGUE_FULL + "';", "    if (e === 'full') { if (at === 'leagues') return 'この部屋のリーグは50までです。'; return 'この部屋は記録がいっぱいです（' + at + '）。'; }")],
-  ['write の full の枝を消す（作る の字へ落ちる）', (s) => s.replace("if (way === 'write' && e === 'full') {", "if (false) {")],
-  ['write の members を他の full と同じ字にする', (s) => s.replace("if (w === 'members') return", "if (false) return")],
-  ['入る の字を変える（残す字の見張り）', (s) => s.replace('この部屋は人数がいっぱいで入れません。', '入れません。')],
+  ['入る・作る の full を前の字に戻す', (s) => s.replace("    case 'full': return '" + LEAGUE_FULL + "';", "    case 'full': return join ? 'この部屋は人数がいっぱいで入れません。' : '今は部屋を作れません（倉庫がいっぱいです）。少し待ってからもう一度。';")],
+  ['write の members の字を戻す', (s) => s.replace("  if (way === 'league') {", "  if (way === 'write' && e === 'full' && w === 'members') return '名簿がいっぱいです。これ以上名前を足せません。';\n  if (way === 'league') {")],
+  ['league の too_many の字を戻す', (s) => s.replace("  if (way === 'league') {", "  if (way === 'league') { if (e === 'too_many') return '24時間に作れるリーグは5つまでです。';")],
 ];
 
 if (process.argv.includes('--self-test')) {

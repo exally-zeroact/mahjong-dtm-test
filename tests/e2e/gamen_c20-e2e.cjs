@@ -388,10 +388,7 @@ async function run(br, port) {
       ok('T14 dup＝字', (await waitMsg(A.pg, /同じ名前が名簿にいます。上の一覧から選んでください/)) >= 0, await meTxt(A.pg));
       c.forceWrite.push({ ok: false, err: 'full', what: 'member_claims_user' });
       await A.pg.click('#meList [data-me="m3"]');
-      ok('T14 full（名乗り）＝字', (await waitMsg(A.pg, /名乗りがいっぱいです（管に付け替えを頼んでください）/)) >= 0, await meTxt(A.pg));
-      c.forceWrite.push({ ok: false, err: 'full', what: 'members' });
-      await A.pg.click('#meList [data-me="m4"]'); // 字はクリックの前の t0 と比べない＝CI では返しがクリックの直後に来て t0 が既に答えの字だった（CI 45954710737）
-      ok('T14 full（名簿）＝名簿の字（名乗りでも 作る でもない）', (await waitMsg(A.pg, /名簿がいっぱいです。これ以上名前を足せません。/, 4000)) >= 0, await meTxt(A.pg));
+      ok('T14 full（名乗り）＝いっぱいと言わない（caps_sadame v1.1 §3）', (await waitMsg(A.pg, /倉庫で止まりました。もう一度押しても同じです。/)) >= 0 && !/いっぱい/.test(await meTxt(A.pg)), await meTxt(A.pg));
       c.forceWrite.push({ ok: false, err: 'mj_session' });
       await A.pg.click('#meList [data-me="m2"]'); await sleep(500);
       const n = mw('T14').length;
@@ -456,10 +453,8 @@ const MUT = [
   { file: GR, from: "(m.me === true ? '<small class=\"r-me-tag\">あなた</small>' : '')", to: "''", name: '印を出さない', only: 'T1' },
   { file: GR, from: 'if (meOk() && !myMember()) h += \'<button data-newme', to: 'if (meOk()) h += \'<button data-newme', name: '（これは私）を me が在っても出す', only: 'T11' },
   { file: GR, from: "{ op: 'member_link', member_id: id }]), { mid: id", to: "{ op: 'member_link', member_id: uuid() }]), { mid: id", name: 'add と link の id を分ける', only: 'T4' },
-  { file: GR, from: "if (s.err === 'full' && typeof s.what === 'string' && s.what.startsWith('member_claims'))", to: "if (s.err === 'full')", name: 'full の what を分けない', only: 'T14' },
   { file: GR, from: 'picking.seats.push(t.mid); // 足した自分', to: 'void 0; // 足した自分', name: '足した自分を半荘に入れない', only: 'T4,T11' },
   { file: GR, from: "if (s.err === 'mj_role') sync();", to: "if (s.err === 'mj_role') sync(); if (s.err === 'full') return say('名乗りがいっぱいです（管に付け替えを頼んでください）');", name: '名簿の full も名乗りの字', only: 'T14' },
-  { file: GR, from: "return say(errText({ err: s.err, what: s.what, at: s.at }, 'write'));", to: "return say(errText({ err: s.err, what: s.what, at: s.at }, 'create'));", name: '名前の頁の返しを 作る の字にする', only: 'T14' },
 ];
 
 (async () => {
