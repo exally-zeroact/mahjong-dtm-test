@@ -145,6 +145,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   let endAsk = false;     // A27 §1：部屋の頁の［対局終了］を押した印＝精算の頁を描いた1回だけ使う（頭で必ず下ろす・精算の頁を離れたら下ろす）
   let closeErr = null;    // 対局終了を残せなかった時の err
   let goHome = false;     // A11：［対局終了］の後、並びを送り切ったらホームへ（端末に残さない・送れずに止まったら精算に残る）
+  let lgAsk = false, lgOk = false; // L §1 A23（l_sadame v1.3 止め2）：［リーグを終了］の卓2つ以上の確かめ＝lgAsk は出している頁（'room'|'seisan'）・lgOk は［締めてホームへ］を押した印
   let pmErr = null;       // チップ等の［−］［＋］が弾かれた時の字（黙らない・v1.1）
   let dropAllAsk = false; // P6g §3：［全部捨てる］の確かめの段
   const HELD_GATE = '止まっている点を先に片付けてください'; // P6g §4 書きの門の字
@@ -157,7 +158,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const cn = (x) => canon(JSON.parse(JSON.stringify(x === undefined ? null : x))); // JSON を通してから鍵の順に左右されない字（倉庫の jsonb を回っても同じ・v4.3）
   const merge = new Map(); let mergeTimer = null; // extra_add のまとめ（最後に押してから 0.3秒・2c-2f で 1秒→0.3秒）
   let fixing = null;      // C4 §3b：精算の内訳で［直す］を開いている前の卓の枚 { t, m, kind }
-  const toRoom = () => { endAsk = false; page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; ruleMem = null; ruleMemSeq++; ruleMemo = false; render(); };
+  const toRoom = () => { endAsk = false; lgAsk = false; lgOk = false; page = 'room'; entry = null; picking = null; viewSnap = false; confirming = false; closeErr = null; pmErr = null; fixing = null; ruleCtl = null; ruleMsg = null; ruleMem = null; ruleMemSeq++; ruleMemo = false; render(); };
 
   if (!room.rules) {
     bar({ back: 'ホーム', title: '対局' });
@@ -518,6 +519,24 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const lgSess = (s) => !!s && (!!LG || (typeof s.league_id === 'string' && !!s.league_id));
   const lgDay = (t) => lgSess(t && st.sessions.find((x) => x.session_id === t.session_id));
   const nonL = (t) => !!LG && lgDay(t) && !isL(); // §3 止め1：リーグの日で L でない
+  // L §1 A23：リーグの対局の頁のリーグの日＝［対局終了］の代わりに［リーグを終了］（L だけ・締めるのは日ごと＝全部の卓）
+  const lgEndSid = (sid) => !!LG && lgSess(st.sessions.find((x) => x.session_id === sid));
+  const endW = (sid, s) => (lgEndSid(sid) ? s.replace('対局終了', 'リーグを終了') : s);
+  const LG_HINT = '今日の対局を終えます。リーグは次の日も続けられます';
+  // 卓が2つ以上の日は押すと必ず1回確かめ（卓ごとの回の数・点がまだの回）。最後に点が入った時刻は倉庫の読みに無い（半荘に時刻の欄が無い）ので出さない
+  const lgNeedAsk = (sid) => lgEndSid(sid) && chainHeads(sid).length > 1;
+  function lgAskHtml(sid, pre) {
+    const parts = [], open = [];
+    for (const hd of chainHeads(sid)) {
+      const t = st.tables.find((x) => x.table_id === hd), v = chainView(st, hd), ch = tableChain(st, hd);
+      const lb = (t && t.label) || '卓';
+      parts.push(lb + ' ' + (v ? v.rows.length : 0) + '回');
+      const nOpen = st.hanchans.filter((h) => ch.includes(h.table_id) && !h.voided && Array.isArray(h.cells) && h.cells.some((c) => c === null || c === undefined)).length;
+      if (nOpen) open.push(lb + ' は点がまだの回が ' + nOpen + ' つあります');
+    }
+    return '<div class="r-white" id="' + pre + 'LgAsk"><b>全部の卓を締めます（' + esc(parts.join('・')) + '）。まだ打っている卓はありませんか</b>' + open.map((x) => '<span>' + esc(x) + '</span>').join('') + '</div>' +
+      '<button class="btn btn-main" id="' + pre + 'LgGo"' + (closingOn() || goHome ? ' disabled' : '') + '>締めてホームへ</button><button class="btn btn-line" id="' + pre + 'LgNo">戻る</button>';
+  }
   const dayOf = (sid) => (lgInfo && Array.isArray(lgInfo.days) ? lgInfo.days.find((d) => d && d.session_id === sid) : null) || null;
   const mainN = (sid) => { const d = dayOf(sid); const r = (d && d.rules) || (lgInfo && lgInfo.league && lgInfo.league.rules); return r && Number.isInteger(r.players) ? r.players : null; };
   const isAlt = (t) => !!(LG && t && lgDay(t) && mainN(t.session_id) !== null && t.rules && t.rules.players !== mainN(t.session_id)); // もう一方の卓＝その日の主と人数が違う
@@ -721,6 +740,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
 
   function render() {
     if (page !== 'seisan') endAsk = false; // A27 §1：押した印は精算の頁の外へ持ち越さない
+    if (lgAsk && lgAsk !== page) lgAsk = false; // L：確かめは出した頁だけ
+    if (page !== 'room' && page !== 'seisan') lgOk = false;
     if (goHome && page !== 'seisan') goHome = false; // A11 止め2：精算を離れた（打ちかけ・別の頁）＝ホームへ飛ばない
     // 終えた部屋の頁は room・seisan・rules だけ（他に居たら room へ・B3b-1 §3）
     if (room.closed && !['room', 'seisan', 'rules'].includes(page)) { page = 'room'; entry = null; picking = null; }
@@ -757,7 +778,13 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (v.windows.length) h += renderCheck(v) + (pmErr ? '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>' : '') + '<button class="btn btn-line" id="rSeisan">精算を見る（誰が誰に）</button>';
     else if (pmErr) h += '<p class="r-check bad" id="rPmErr">' + esc(pmErr) + '</p>';
     // A27 §1（司さん 11-26「ここに出すなら対局終了ボタンやろが」）：頁の一番下は［対局終了］＝精算の頁の［対局終了］と同じ道（出す条件も同じ・押したら精算の頁で押す）
-    if (table && v.windows.length && !room.closed && !st.settles.some((x) => x.session_id === table.session_id)) h += '<button class="btn btn-main" id="rEnd"' + (closingOn() || goHome ? ' disabled' : '') + '>対局終了</button>';
+    // L §1 A23：リーグの日は［リーグを終了］＝L だけ（L でない人は ‹ で戻る）・その日のどの卓かに回が在れば出す・下に字
+    const sid = table && table.session_id;
+    if (table && !room.closed && !st.settles.some((x) => x.session_id === sid)) {
+      if (lgEndSid(sid)) {
+        if (isL() && chainHeads(sid).some((hd) => { const cv = chainView(st, hd); return !!cv && cv.windows.length > 0; })) h += (lgAsk === 'room' ? lgAskHtml(sid, 'r') : '<button class="btn btn-main" id="rEnd"' + (closingOn() || goHome ? ' disabled' : '') + '>リーグを終了</button>') + '<p class="r-hint" id="rLgHint">' + LG_HINT + '</p>';
+      } else if (v.windows.length) h += '<button class="btn btn-main" id="rEnd"' + (closingOn() || goHome ? ' disabled' : '') + '>対局終了</button>';
+    }
     el.innerHTML = h;
     const wrap = el.querySelector('.r-hyou-wrap');
     if (wrap) wrap.scrollTop = wrap.scrollHeight;
@@ -1715,18 +1742,20 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const changed = !!last && (partial ? cn(lastMissing) !== cn(s.missing) : chWho.length > 0);
     const many = chainHeads(d.sid).length > 1; // C4：区切った卓の鎖は1つの卓と数える
     const goBtn = s.missing.length ? '<button class="r-red r-red-btn" id="sGo"><b>入っていない物 ' + s.missing.length + '件</b>' + s.missing.map((m) => '<span>・' + esc(missingText(m, many, d.sid)) + '</span>').join('') + '<span class="r-link">押すとその場所へ</span></button>' : '';
-    const errLine = closeErr ? '<div class="r-red"><b>' + (closeErr === HELD_GATE ? esc(HELD_GATE) : '対局終了を残せませんでした（' + esc(closeErr) + '）') + '</b></div>' : '';
+    const errLine = closeErr ? '<div class="r-red"><b>' + (closeErr === HELD_GATE ? esc(HELD_GATE) : endW(d.sid, '対局終了を残せませんでした（') + esc(closeErr) + '）') + '</b></div>' : '';
     // ［対局終了］の所＝入っていない物があれば1回目は確かめ（同じ位置に［戻って入れる］・その下に赤の箱と［n件のまま対局終了］）
     // 終えた部屋は［対局終了］を出さない・終える送りの最中は押せない形（B3b-1 §3）
     const cz = closingOn() || goHome ? ' disabled' : ''; // A11：ホームへ行く送りの間も押せない
     const bz = ' aria-busy="' + (goHome ? 'true' : 'false') + '"';
-    const closeArea = (label) => (room.closed ? '' : confirming && s.missing.length
-      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2"' + cz + bz + '>' + s.missing.length + '件のまま対局終了</button>'
-      : '<button class="btn btn-main" id="sClose"' + cz + bz + '>' + label + '</button>');
+    // L §1 A23：リーグの日は L だけ・字は［リーグを終了］・卓2つ以上は1回確かめ
+    const closeArea = (label) => (room.closed || (lgEndSid(d.sid) && !isL()) ? '' : lgAsk === 'seisan' ? lgAskHtml(d.sid, 's') : confirming && s.missing.length
+      ? '<button class="btn btn-line" id="sBack">戻って入れる</button><div class="r-red"><b>入っていない物 ' + s.missing.length + '件のまま終了します。この対局の額は出しません</b></div><button class="btn btn-main" id="sClose2"' + cz + bz + '>' + endW(d.sid, s.missing.length + '件のまま対局終了') + '</button>'
+      : '<button class="btn btn-main" id="sClose"' + cz + bz + '>' + endW(d.sid, label) + '</button>');
     let h = top;
     if (last) {
-      if (lastMissing.length) h += '<div class="r-red"><b>' + hm(last.at) + ' に対局終了（入っていない物 ' + lastMissing.length + '件のまま・額は出しません）</b></div>';
-      else h += '<div class="r-white">' + hm(last.at) + ' に対局終了</div>';
+      const endAt = lgEndSid(d.sid) ? ' にこの日を終了' : ' に対局終了'; // L：リーグの日は［対局終了］の字を出さない
+      if (lastMissing.length) h += '<div class="r-red"><b>' + hm(last.at) + endAt + '（入っていない物 ' + lastMissing.length + '件のまま・額は出しません）</b></div>';
+      else h += '<div class="r-white">' + hm(last.at) + endAt + '</div>';
     }
     if (changed && !viewSnap) {
       if (partial) {
@@ -1776,7 +1805,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (viewSnap) h += '<button class="btn btn-line" id="sNow">今の数に戻る</button>';
     else if (!last && !room.closed) {
       h += errLine + closeArea('対局終了');
-      h += '<p class="r-hint">対局終了すると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
+      h += lgEndSid(d.sid) ? (isL() ? '<p class="r-hint" id="sLgHint">' + LG_HINT + '</p>' : '') : '<p class="r-hint">対局終了すると、次に開いた時は新しい対局になる（この対局の点は消えない）。単位は点（円は出さない）。</p>';
     }
     el.innerHTML = h;
     wireSeisanAll(d, settles.length);
@@ -1868,11 +1897,15 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (homeTry()) return; // 並びに積まずに空のまま（起きない見込み・積んだら done で飛ぶ）
       render();
     };
-    if (q('#sClose')) q('#sClose').onclick = () => {
+    const pressClose = () => {
       if (goHome) return;
+      if (lgNeedAsk(d.sid) && !lgOk) { lgAsk = 'seisan'; closeErr = null; render(); return; } // L：卓2つ以上は先に全部の卓を締める確かめ
       if (d.s.missing.length) { confirming = true; closeErr = null; render(); return; } // 1回目は確かめだけ
       doClose();
     };
+    if (q('#sClose')) q('#sClose').onclick = pressClose;
+    if (q('#sLgGo')) q('#sLgGo').onclick = () => { if (goHome || closingOn()) return; lgAsk = false; lgOk = true; pressClose(); };
+    if (q('#sLgNo')) q('#sLgNo').onclick = () => { lgAsk = false; lgOk = false; render(); };
     if (q('#sClose2')) q('#sClose2').onclick = () => { if (confirming && !goHome) doClose(); };
     if (q('#sBack')) q('#sBack').onclick = goMissing;
     if (q('#sGo')) q('#sGo').onclick = goMissing;
@@ -1918,7 +1951,10 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     if (q('#rTakuMain')) q('#rTakuMain').onclick = () => addTaku(false);
     if (q('#rTakuAlt')) q('#rTakuAlt').onclick = () => addTaku(true);
     if (q('#rSeisan')) q('#rSeisan').onclick = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; render(); };
-    if (q('#rEnd')) q('#rEnd').onclick = () => { if (closingOn() || goHome) return; page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; endAsk = true; render(); };
+    const toEnd = () => { page = 'seisan'; viewSnap = false; confirming = false; closeErr = null; endAsk = true; render(); };
+    if (q('#rEnd')) q('#rEnd').onclick = () => { if (closingOn() || goHome) return; if (table && lgNeedAsk(table.session_id) && !lgOk) { lgAsk = 'room'; render(); return; } toEnd(); };
+    if (q('#rLgGo')) q('#rLgGo').onclick = () => { if (closingOn() || goHome) return; lgAsk = false; lgOk = true; toEnd(); };
+    if (q('#rLgNo')) q('#rLgNo').onclick = () => { lgAsk = false; lgOk = false; render(); };
     for (const b of el.querySelectorAll('.r-no')) b.onclick = () => { if (!room.closed) startEntry(b.dataset.h); };
     for (const b of el.querySelectorAll('.r-pm')) b.onclick = () => plusMinus(b.dataset.m, b.dataset.k, Number(b.dataset.a));
   }

@@ -291,6 +291,62 @@ async function run(br, port) {
       const g = groupOf('L3');
       ok('L3 hanchan_start は替えた人・table_seats は送らない', g && g.res && g.res.ok === true && JSON.stringify(g.ops.find((o) => o.op === 'hanchan_start').seats) === JSON.stringify(['m1', 'm2', 'm3', 'm5']) && opsOf('L3', 'table_seats').length === 0, g && { ops: g.ops, res: g.res });
     } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+
+    const settles = (dev) => opsOf(dev, 'settle_snap');
+    const atHome = (pg) => { const u = new URL(pg.url()); return u.pathname === '/' || u.pathname === '/index.html'; };
+    // L4 A23［リーグを終了］（卓1つ）：L にだけ・［対局終了］の字は出さない・下に字・押すと締めてホームへ
+    if (want('L4')) try { NM = 'L4';
+      mkRoom('l4'); mkLeague('l4', { league_id: LID, rules: LR4 });
+      seed('l4', [day(S1), tb(T(1), S1, '卓1'), seats(T(1), M.slice(0, 4)), H(U(331), T(1), M.slice(0, 4), [40000, 30000, 20000, 10000])]);
+      const A = await device('L4', 'u1', seedOf('u1', 'l4'));
+      await openL(A.pg, 'l4'); await A.pg.waitForSelector('#rEnd');
+      ok('L4 L の頁の一番下は［リーグを終了］', ((await txt(A.pg, '#rEnd')) || '') === 'リーグを終了');
+      ok('L4 下に「今日の対局を終えます。リーグは次の日も続けられます」', ((await txt(A.pg, '#rLgHint')) || '') === '今日の対局を終えます。リーグは次の日も続けられます');
+      ok('L4 リーグの日は［対局終了］の字を出さない', !((await vtxt(A.pg)) || '').includes('対局終了'));
+      await shot(A.pg, 'l4_end');
+      await A.pg.click('#rEnd');
+      await waitFor(() => settles('L4').length > 0 && atHome(A.pg), 8000);
+      ok('L4 卓1つの日は確かめ無しで締める（settle_snap 1つ）', settles('L4').length === 1 && settles('L4')[0].session_id === S1, settles('L4'));
+      ok('L4 締めたらホームへ', atHome(A.pg), A.pg.url());
+    } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+
+    // L5 A23［リーグを終了］（卓2つ・v1.2 止め2）：押すと必ず1回確かめ（卓ごとの回の数・点がまだの回）・［戻る］は何も締めない・［締めてホームへ］で締める
+    if (want('L5')) try { NM = 'L5';
+      mkRoom('l5'); mkLeague('l5', { league_id: LID, rules: LR4 });
+      seed('l5', [day(S1), tb(T(1), S1, '卓1'), tb(T(2), S1, '卓2'), seats(T(1), M.slice(0, 4)), seats(T(2), M.slice(4, 8)),
+        H(U(341), T(1), M.slice(0, 4), [40000, 30000, 20000, 10000]),
+        H(U(342), T(2), M.slice(4, 8), [40000, 30000, 20000, 10000]), H(U(343), T(2), M.slice(4, 8), [40000, null, null, null])]);
+      const A = await device('L5', 'u1', seedOf('u1', 'l5'));
+      await openL(A.pg, 'l5'); await A.pg.waitForSelector('#rEnd');
+      await A.pg.click('#rEnd'); await A.pg.waitForSelector('#rLgAsk');
+      const q = (await txt(A.pg, '#rLgAsk')) || '';
+      ok('L5 確かめ＝全部の卓（卓1 1回・卓2 2回）と「まだ打っている卓はありませんか」', q.includes('全部の卓を締めます（卓1 1回・卓2 2回）') && q.includes('まだ打っている卓はありませんか'), q);
+      ok('L5 点がまだの回が在る卓を出す', q.includes('卓2 は点がまだの回が 1 つあります'), q);
+      ok('L5 確かめの間は何も送らない', settles('L5').length === 0);
+      await shot(A.pg, 'l5_ask');
+      await A.pg.click('#rLgNo'); await A.pg.waitForSelector('#rEnd');
+      await sleep(400);
+      ok('L5［戻る］＝何も締めない・頁はそのまま', settles('L5').length === 0 && !(await has(A.pg, '#rLgAsk')) && !atHome(A.pg));
+      await A.pg.click('#rEnd'); await A.pg.waitForSelector('#rLgGo'); await A.pg.click('#rLgGo');
+      await A.pg.waitForSelector('#sClose2'); // 入っていない物（卓2 の2回目）が在る＝今までと同じ確かめ
+      ok('L5 入っていない物の確かめも［リーグを終了］の字', ((await txt(A.pg, '#sClose2')) || '').endsWith('件のままリーグを終了'), await txt(A.pg, '#sClose2'));
+      ok('L5 精算の頁にも［対局終了］の字を出さない', !((await vtxt(A.pg)) || '').includes('対局終了'));
+      await A.pg.click('#sClose2');
+      await waitFor(() => settles('L5').length > 0 && atHome(A.pg), 8000);
+      ok('L5［締めてホームへ］＝その日を締める（settle_snap 1つ）→ホーム', settles('L5').length === 1 && settles('L5')[0].session_id === S1 && atHome(A.pg), { s: settles('L5'), u: A.pg.url() });
+    } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+
+    // L6 A23 L でない人には［リーグを終了］も［対局終了］も出さない（部屋の頁・精算の頁）
+    if (want('L6')) try { NM = 'L6';
+      mkRoom('l6'); mkLeague('l6', { league_id: LID, rules: LR4 });
+      seed('l6', [day(S1), tb(T(1), S1, '卓1'), seats(T(1), M.slice(0, 4)), H(U(351), T(1), M.slice(0, 4), [40000, 30000, 20000, 10000])]);
+      const A = await device('L6', 'u2', seedOf('u2', 'l6'));
+      await openL(A.pg, 'l6'); await A.pg.waitForSelector('#rSeisan');
+      ok('L6 L でない人の部屋の頁＝［リーグを終了］も字も無い', !(await has(A.pg, '#rEnd')) && !(await has(A.pg, '#rLgHint')) && !((await vtxt(A.pg)) || '').includes('対局終了'));
+      await A.pg.click('#rSeisan'); await A.pg.waitForSelector('#vRoom .r-top');
+      await sleep(300);
+      ok('L6 L でない人の精算の頁＝締める釦が無い', !(await has(A.pg, '#sClose')) && !(await has(A.pg, '#sLgHint')) && !((await vtxt(A.pg)) || '').includes('対局終了'));
+    } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
   } catch (e) { fail++; bad.push('止まった: ' + String(e.message || e).split('\n').slice(0, 6).join(' | ')); }
   for (const c of ctxs) await c.close().catch(() => {});
   return { pass, fail, bad, hold };
@@ -304,6 +360,11 @@ const MUT = [
   { file: G, from: "if (e.tSeats && lgDay(tOf(e.tid)) && isL()) {", to: 'if (lgDay(tOf(e.tid))) {', name: 'L でない人の［人を替える］でも卓の席を送る（L3）', only: 'L3' },
   { file: G, from: "'<p class=\"r-hint\" id=\"pOnly\">この半荘だけ</p>'", to: "''", name: '「この半荘だけ」を出さない（L3）', only: 'L3' },
   { file: G, from: "(!p.only && nonL(tOf(p.tid)) ?", to: '(!p.only ?', name: 'L にも「この半荘だけ」（L2）', only: 'L2' },
+  { file: G, from: "'>リーグを終了</button>') + '<p class=\"r-hint\" id=\"rLgHint\">'", to: "'>対局終了</button>') + '<p class=\"r-hint\" id=\"rLgHint\">'", name: 'リーグの日も［対局終了］（L4）', only: 'L4' },
+  { file: G, from: "const lgNeedAsk = (sid) => lgEndSid(sid) && chainHeads(sid).length > 1;", to: 'const lgNeedAsk = (sid) => false;', name: '卓2つでも確かめずに締める（L5）', only: 'L5' },
+  { file: G, from: "if (q('#rLgNo')) q('#rLgNo').onclick = () => { lgAsk = false; lgOk = false; render(); };", to: "if (q('#rLgNo')) q('#rLgNo').onclick = () => { lgAsk = false; lgOk = true; toEnd(); };", name: '［戻る］で締める（L5）', only: 'L5' },
+  { file: G, from: "if (isL() && chainHeads(sid).some(", to: 'if (chainHeads(sid).some(', name: 'L でない人にも［リーグを終了］（L6）', only: 'L6' },
+  { file: G, from: "(room.closed || (lgEndSid(d.sid) && !isL()) ?", to: '(room.closed ?', name: 'L でない人の精算の頁に締める釦（L6）', only: 'L6' },
 ];
 (async () => {
   LIB = await import(pathToFileURL(path.join(ROOT, 'lib/room-state.mjs')).href);
