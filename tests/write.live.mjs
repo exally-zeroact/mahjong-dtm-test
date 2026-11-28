@@ -356,6 +356,7 @@ const body = `
   ${W('unk', 2, 'ra', A(O('cell_set', { hanchan_id: HA1, seat: 0, value: 40000, base_version: 1, foo: 1 })))}
   ${W('lg', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-20', rate: null, league_id: U() })))}
   ${W('dupn', 2, 'ra', A(ma(U(), ' 甲 ')))}
+  ${W('hr1', 2, 'ra', A(O('session_add', { session_id: U(), date: '2026-11-28', rate: null }), O('history_revert')))}
   ${asWho(2)}
   arr := '{}';
   for nm in select name from mahjong.mj_ops where name not in (${NAMES31.map((n) => `'${n}'`).join(', ')}) order by name loop
@@ -1339,6 +1340,7 @@ function check(out, lib, say) {
   ok('② 同じ名前（trim の後）→ dup・member_id と name を添える', isErr('dupn', 'dup') && R('dupn').member_id === MA[0] && R('dupn').name === '甲', J(R('dupn')));
   const ny = out.ny || {};
   ok('② op 33個（段C）の外の4個は全部 not_yet（i:0）', J(Object.keys(ny).sort()) === J(['history_revert', 'rerev_ok', 'room_export', 'rules_save']) && Object.values(ny).every((r) => r.ok === false && r.err === 'not_yet' && r.i === 0), J(ny));
+  ok('② K-2 history_revert は組の2番目でも not_yet（i:1）・前の session_add も書かない（組ごと断る）', isErr('hr1', 'not_yet', { i: 1 }) && has('hr1', none), J([R('hr1'), d('hr1')]));
   ok('② 31個 → too_many', isErr('many', 'too_many'), J(R('many')));
   ok('② 知らない op → bad・配列でない → bad', isErr('fooop', 'bad', { at: 'op' }) && isErr('notarr', 'bad', { what: 'ops' }), J([R('fooop'), R('notarr')]));
   /* ③ */
