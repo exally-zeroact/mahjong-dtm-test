@@ -259,6 +259,9 @@ async function run(br, port) {
       await A.pg.click(PM('m2'));
       await waitFor(() => DB.get('d1').st.extras.some((x) => x.member_id === 'm2'), 8000);
       ok('C4 移った後の ± は鎖の最後の卓', opsOf('A4', 'extra_add').every((o) => o.table_id === T2), opsOf('A4', 'extra_add'));
+      // A10（司さん「ずっと出る」）：帯は変わった直後だけ＝次に書いたら消す
+      await waitFor(async () => !(await has(A.pg, '#rRuleNote')), 4000);
+      ok('C4 書いた後は帯「ルールが変わりました」が消える（A10）', !(await has(A.pg, '#rRuleNote')), await txt(A.pg, '#rRuleNote'));
     }
 
     // C5 follow の無い書き（古い版の並び）が区切った卓（鍵が違う）を指す＝倉庫が bad at table_id → 帯が出て止まる（消えて見えない・二重に入れない）
@@ -339,6 +342,7 @@ const MUT = [
   { file: G, from: "base_version: row ? row.version : 0 }", to: 'base_version: 0 }', name: '［直す］の base_version を写しの版にしない（C3）', only: 'C3' },
   { file: G, from: "  function setTable(t) { table = chainLast(t);", to: '  function setTable(t) { table = t || null;', name: '卓を鎖の最後にしない（C2・C4）', only: 'C2,C4' },
   { file: G, from: "    if (was && table && table.table_id !== was && tableChain(st, table.table_id).includes(was)) ruleNote", to: '    if (false) ruleNote', name: '区切られた時に帯を出さない（C4）', only: 'C4' },
+  { file: G, from: '    pmErr = null; ruleNote = null; takuNote = null;', to: '    pmErr = null; takuNote = null;', name: '± を入れても帯「ルールが変わりました」を消さない（A10）', only: 'C4' },
   { file: G, from: "      else if (hi.why === 'bad' && outbox[0].held.at === 'table_id' && outbox[0].ops.some((o) => o.op === 'extra_add')) h +=", to: '      else if (false) h +=', name: 'bad at table_id の帯を出さない（C5）', only: 'C5' },
   { file: G, from: "    return needOf(WHO.table_rules, room.role) === null;", to: '    return true;', name: 'nyu にも打てる形を出す（C8）', only: 'C8' },
   { file: G, from: "{ rules: draft, readOnly: !edit, lockPlayers: !memOk,", to: '{ rules: draft, readOnly: !edit, lockPlayers: true,', name: '人数を押せない（C6）', only: 'C6' },
