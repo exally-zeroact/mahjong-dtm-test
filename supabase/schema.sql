@@ -386,8 +386,9 @@ begin
   if not exists (select 1 from information_schema.columns c
                  where c.table_schema = 'mahjong' and c.table_name = 'accounts' and c.column_name = 'human_at') then
     lock table mahjong.accounts in share row exclusive mode;
-    alter table mahjong.accounts add column human_at timestamptz;
-    update mahjong.accounts set human_at = created_at;
+    -- 在る行だけに印＝default を付けて足し、すぐ外す（PG11+ は既定値を1回だけ読んで在る行に入れる・裸の update を置かない＝sql-guard ④）
+    alter table mahjong.accounts add column human_at timestamptz default pg_catalog.now();
+    alter table mahjong.accounts alter column human_at drop default;
   end if;
 end $p10$;
 

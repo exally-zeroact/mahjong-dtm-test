@@ -73,6 +73,8 @@ try {
     sb.push(c); clients.push(c);
   }
   ok('捨てアカウント2人を作って本物のセッションで入れた', true);
+  // P10（p10_sadame v1.1 §5）：捨てアカウントに人の確かめの印（無いと作る・入る・書くが err human）
+  await mq(`insert into mahjong.accounts (user_id, human_at) select x::uuid, now() from unnest(array[${who.map((x) => `'${x}'`).join(', ')}]) x on conflict (user_id) do update set human_at = now(); select 1 as k`);
   const [A, B] = sb;
   const cr = await A.rpc('mj_room_create', { p_op_id: crypto.randomUUID(), p_name: RNAME, p_pass: PASS, p_rules: { players: 4 }, p_secrets: { url_token_hash: crypto.randomBytes(32).toString('hex') } });
   room = cr.data?.room_id || null; ck = cr.data?.channel_key || null;
