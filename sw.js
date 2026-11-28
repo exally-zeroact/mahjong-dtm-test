@@ -8,9 +8,9 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'bdd9e8fd504d';
+const VER = '177b49483515';
 const ASSETS = /*ASSETS-BEGIN*/[
-  ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
+  ['/css/app.css', '2126d35f38ab18e31f22a373c74661dad4fc5585b3c81b84268725b94f33a60a'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
@@ -19,10 +19,11 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', 'ff8b680e60da054922e6c5f5636fa5dda34e5a922ecd3b58a9095288aaf97f7a'],
+  ['/js/gamen-core.mjs', '01ab4edd7f4f46e3d385e24ad3347674f544d6208efc8046b7405c26ed20ae74'],
   ['/js/gamen-home.mjs', '885346d9a841582a924e9a48e58a27acfb0c6d27df824ac201dad26822e96572'],
+  ['/js/gamen-human.mjs', 'f32257812d6555e5a937813e8ff2186afdc72e642f4b84bf322dc697a3cfaec7'],
   ['/js/gamen-league.mjs', '15ce54fc0777a9238be61f6dc9a93ce0f9c8f2535f4908345260b32bc5b009f4'],
-  ['/js/gamen-room.mjs', '485c4dc1b7b069a218e6fdbb255107f4b22bbd6fb3046d141f4db387f924b1fd'],
+  ['/js/gamen-room.mjs', '4b40910587b879112e090ae9f1585837e57ced032fa0a5b3c99ca7db21dc5b6c'],
   ['/js/gamen-rules.mjs', '13246bf062b14e9d9dd582e445744c8d9262e43979124576705cb0a0766ed03e'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
   ['/js/gamen-taikyoku.mjs', 'c8244b44e8d23220bb5950253926983f7de9249d660712c4003c3588c5084968'],

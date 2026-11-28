@@ -6,6 +6,7 @@
  * - 外から呼ぶのは public.mj_* の RPC だけ。jwt 切れの 401 も {err:'mj_session'} と同じに扱う（K-10）。
  * - 入った部屋は端末に「人（user_id）ごとに」覚える（別の人が同じ端末で入っても前の人の部屋を出さない・K-10）。
  */
+import { humanPass } from './gamen-human.mjs';
 export const APP = '麻雀〜do the math〜';
 
 let sbClient = null;
@@ -68,7 +69,7 @@ function loginErr(r) {
 const NET_RES = () => ({ data: null, error: { message: 'net (auth)' } }); // status 無しの error＝どの呼び手でも「電波」の道（outboxStep は retry）
 /* sb().rpc を直に呼ぶ（返し＝{data,error,status} の形のまま）。ログインの誤りなら鍵を引き直して1回だけやり直す
  * ★1回の呼びにつき引き直しは1回★・電波で届かなかった時は数えない（呼び手の今の送り直しが次にまた来る） */
-export async function rpcRaw(fn, args) {
+async function rpcAuth(fn, args) {
   const t0 = Date.now();
   const call = async () => { try { return await sb().rpc(fn, args); } catch (e) { return { error: { message: String((e && e.message) || e) } }; } };
   const r = await call();
@@ -79,6 +80,16 @@ export async function rpcRaw(fn, args) {
   if (a.kind === 'ok') return await call();
   if (a.kind === 'net') return NET_RES();
   return r;
+}
+/* P10 §4：書きが {ok:false, err:'human'}（この垢はまだ人の確かめを通っていない）なら、確かめを1回出して、通れば同じ呼びを1回だけやり直す
+ * （同じ args＝同じ op_id。倉庫は human の門で何も書かずに返している）。通らなければ human の返しのまま＝呼び手が「確認できませんでした」を出す。読みには来ない */
+const humanErr = (r) => !!(r && !r.error && r.data && typeof r.data === 'object' && r.data.ok === false && r.data.err === 'human');
+export const humanCheck = () => humanPass({ sb, authCheck });
+export async function rpcRaw(fn, args) {
+  const r = await rpcAuth(fn, args);
+  if (!humanErr(r)) return r;
+  if (!(await humanCheck())) return r;
+  return await rpcAuth(fn, args);
 }
 
 /* ── 倉庫の呼び：返しは必ず object（{ok:true,…} か {ok:false, err, …}）にそろえる ── */
@@ -146,6 +157,7 @@ export function errText(res, way) {
   }
   switch (e) {
     case 'mj_session': return 'ログインが切れました。ログインし直してください。';
+    case 'human': return '確認できませんでした。もう一度押してください。'; // P10 §1（［捨てる］は出さない）
     case 'offline': return '電波がありません。つながってからもう一度押してください。';
     case 'net': return 'つながりませんでした。電波を確かめてもう一度押してください。';
     case 'common': return 'よく使われるパスは使えません。別のパスにしてください。';
