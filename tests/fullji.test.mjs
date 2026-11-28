@@ -19,6 +19,7 @@ async function check(src) {
   const dir = mkdtempSync(join(tmpdir(), 'fullji-'));
   const p = join(dir, 'gamen-core.mjs');
   writeFileSync(p, src);
+  writeFileSync(join(dir, 'gamen-human.mjs'), readFileSync(join(HERE, '..', 'js', 'gamen-human.mjs'), 'utf8')); // P10：core が import する
   const m = await import(pathToFileURL(p).href + '?t=' + Math.random());
   rmSync(dir, { recursive: true, force: true });
   const t = m.errText;
