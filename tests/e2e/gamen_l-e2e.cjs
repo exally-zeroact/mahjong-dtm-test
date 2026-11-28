@@ -45,6 +45,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 const NOW = () => new Date().toISOString();
 const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
 let SPLIT_N = null; // L5s：部屋の読みを分けた読み（v3）にする＝st.loaded と members[].n（倉庫が league の無い全開催で数えた数）
+let LINK = null; // L5t：member_id → つないだ uid（読みの members に me・taken を付ける＝本物の mj_read と同じ印）
 let LG_HOLD = null; // L5：リーグを読む答えを止めておく（読む前の［外す］が押せないかを見る）
 const mkHold = () => { let f; const p = new Promise((s) => { f = s; }); return { p, go: f }; };
 const pad = (n) => String(n).padStart(2, '0');
@@ -142,6 +143,7 @@ function mjRead(uid, a) {
   }
   if (args.since === R.read_ver) return { ok: true, same: true, read_ver: R.read_ver };
   const rst = stPart(R.st, (s) => !s.league_id);
+  if (LINK) rst.members = rst.members.map((m) => (LINK[m.member_id] === uid ? { ...m, me: true } : LINK[m.member_id] ? { ...m, taken: true } : m));
   if (SPLIT_N) { rst.loaded = []; rst.members = rst.members.map((m) => ({ ...m, n: SPLIT_N[m.member_id] || 0, last: null })); }
   return { ok: true, read_ver: R.read_ver, room, st: rst, leagues: R.leagues.map((l) => lgOut(R, l, uid)) };
 }
@@ -388,6 +390,30 @@ async function run(br, port) {
       ok('L5s 分けた読み＝部屋の n 6 ＋リーグ 1 ＝ 7 回', t.includes('佐藤さんは半荘 7 回の点があります。'), t);
     } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
     SPLIT_N = null;
+
+    // L5t a25r §1-8：自分につないだ行に［外す］が無い・他の人がつないだ行は倉庫が tsunagi で断る＝字を出して部屋と名簿を読み直す
+    if (want('L5t')) try { NM = 'L5t';
+      DB.clear(); mkRoom('ra'); mkLeague('ra', { league_id: LID, name: '金曜リーグ', rules: LR4 });
+      LINK = { m1: 'u1', m2: 'u2' };
+      const A = await device('A5t', 'u1');
+      await openList(A.pg);
+      await A.pg.click('[data-roster="ra"]');
+      await A.pg.waitForSelector('[data-off="m2"]:not([disabled])');
+      ok('L5t 自分につないだ行に［外す］が無い（［名前を直す］は在る）', !(await has(A.pg, '[data-off="m1"]')) && (await has(A.pg, '[data-rn="m1"]')));
+      ok('L5t つないでいない行には［外す］', await has(A.pg, '[data-off="m3"]'));
+      const rr = () => LOG.filter((x) => x.dev === 'A5t' && x.fn === 'mj_read' && x.what === 'room').length;
+      const r0 = rr();
+      await A.pg.click('[data-off="m2"]');
+      ctl('A5t').forceWrite.push({ ok: false, err: 'tsunagi', member_id: 'm2' });
+      await A.pg.click('[data-offok="m2"]');
+      await A.pg.waitForSelector('[data-redmsg]');
+      ok('L5t tsunagi は「アカウントにつながっている人です。部屋の画面の［つながりを外して消す］から消してください」', ((await txt(A.pg, '[data-redmsg]')) || '') === 'アカウントにつながっている人です。部屋の画面の［つながりを外して消す］から消してください', await txt(A.pg, '[data-redmsg]'));
+      for (let i = 0; i < 40 && rr() <= r0; i++) await sleep(100);
+      await sleep(200);
+      ok('L5t 断られたら部屋を読み直す', rr() > r0, { r0, r: rr() });
+      ok('L5t 読み直した後も字が残り・確かめは閉じ・行は名簿に残る', ((await txt(A.pg, '[data-redmsg]')) || '') === 'アカウントにつながっている人です。部屋の画面の［つながりを外して消す］から消してください' && !(await has(A.pg, '[data-offt]')) && (await has(A.pg, '[data-mem="m2"]')));
+    } catch (e) { fail++; bad.push('止まった ' + NM + ': ' + String(e.message || e).split(String.fromCharCode(10)).slice(0, 3).join(' | ')); }
+    LINK = null;
   } catch (e) { fail++; bad.push('止まった: ' + String(e.message || e).split('\n').slice(0, 6).join(' | ')); }
   for (const c of ctxs) await c.close().catch(() => {});
   return { pass, fail, bad, hold };
@@ -414,6 +440,9 @@ const MUT = [
   { file: 'lib/meibo.mjs', from: '    if (mm && Number.isInteger(mm.n)) n += mm.n;\n    else count(roomSt);', to: '    count(roomSt);', name: '分けた読みでも写しを数える（L5s）', only: 'L5s' },
   { file: 'lib/meibo.mjs', from: "        if (b && b.includes(mid)) at.push(t.label);", to: '', name: '今の席の卓を出さない（L5）', only: 'L5' },
   { file: G, from: "(x.mm && x.mm.sts ? '' : ' disabled')", to: "''", name: 'リーグを読む前から［外す］を押せる（L5）', only: 'L5' },
+  { file: 'lib/meibo.mjs', from: "  if (e === 'tsunagi') return MEIBO_ERR.tsunagi;\n", to: '', name: 'tsunagi の字を出さない（L5t）', only: 'L5t' },
+  { file: G, from: "(m.me === true ? '' :", to: "(false ? '' :", name: '自分につないだ行にも［外す］（L5t）', only: 'L5t' },
+  { file: G, from: "    const k = await readOne(rid);\n    if (rooms.get(rid) !== x) return;\n", to: "    const k = 'ok';\n    if (rooms.get(rid) !== x) return;\n", name: 'tsunagi の後に読み直さない（L5t）', only: 'L5t' },
   { file: G, from: "const mem = all.filter((m) => m.active !== false), gone = all.filter((m) => m.active === false);", to: 'const mem = all, gone = [];', name: '外した人を名簿に並べたまま（L5）', only: 'L5' },
   { file: G, from: "memberOp.on(b.dataset.on)", to: "memberOp.off(b.dataset.on)", name: '戻すで active true を送らない（L5）', only: 'L5' },
 ];

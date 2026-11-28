@@ -48,6 +48,7 @@ async function run(L, quiet) {
     ok('dup → 同じ名前の人がもういます', L.meiboErr({ err: 'dup' }) === '同じ名前の人がもういます');
     ok('left → この人は部屋を出ています。名前は直せません。', L.meiboErr({ err: 'left' }) === 'この人は部屋を出ています。名前は直せません。');
     ok('mj_role → 部屋の持ち主だけが直せます', L.meiboErr({ err: 'mj_role' }) === 'この人はほかのリーグにも出ているので、部屋の持ち主だけが直せます');
+    ok('tsunagi → 部屋の画面の［つながりを外して消す］へ（a25r §1-8）', L.meiboErr({ err: 'tsunagi' }) === 'アカウントにつながっている人です。部屋の画面の［つながりを外して消す］から消してください', L.meiboErr({ err: 'tsunagi' }));
     ok('知らない err・null は null（各頁の errText に任せる）', L.meiboErr({ err: 'net' }) === null && L.meiboErr(null) === null);
     // 名の確かめ
     ok('前後の空白を除く', J(L.nameCheck('  一郎 ')) === J({ ok: true, name: '一郎' }));
@@ -78,6 +79,10 @@ async function run(L, quiet) {
     // 消す（対局の頁・a25r v1）＝「消します」＋最後に［戻す］・既定は「外す」のまま
     ok('消す：点の無い人', L.offText('佐藤', { n: 0, at: [] }, { verb: '消す' }) === '佐藤さんを消します。人を選ぶ所に出なくなります。下の［戻す］で戻せます。', L.offText('佐藤', { n: 0, at: [] }, { verb: '消す' }));
     ok('消す：点が在る人・今の席', L.offText('佐藤', { n: 2, at: ['卓1'] }, { verb: '消す' }) === '佐藤さんは半荘 2 回の点があります。消しても点はリーグの順位に残ります。今 卓1 の席にいます。その卓の次の半荘は人を選び直します。下の［戻す］で戻せます。', L.offText('佐藤', { n: 2, at: ['卓1'] }, { verb: '消す' }));
+    ok('消す＋つながりも外す：戦績の字を［戻す］の前に', L.offText('佐藤', { n: 2, at: [] }, { verb: '消す', unlink: true }) === '佐藤さんは半荘 2 回の点があります。消しても点はリーグの順位に残ります。その人の戦績とのつながりも外れます（点は残ります）。下の［戻す］で戻せます。', L.offText('佐藤', { n: 2, at: [] }, { verb: '消す', unlink: true }));
+    ok('ふつうの部屋（room）：点は精算に残ります・リーグと言わない', L.offText('佐藤', { n: 3, at: [] }, { verb: '消す', unlink: true, room: true }) === '佐藤さんは半荘 3 回の点があります。消しても点は精算に残ります。その人の戦績とのつながりも外れます（点は残ります）。下の［戻す］で戻せます。', L.offText('佐藤', { n: 3, at: [] }, { verb: '消す', unlink: true, room: true }));
+    ok('room が true でない時はリーグの順位の字', L.offText('佐藤', { n: 3, at: [] }, { verb: '消す', room: 1 }).includes('点はリーグの順位に残ります'));
+    ok('unlink が無い・true でない時は戦績の字を付けない', !L.offText('佐藤', { n: 0, at: [] }, { verb: '消す' }).includes('戦績') && !L.offText('佐藤', { n: 0, at: [] }, { verb: '消す', unlink: 1 }).includes('戦績'));
     ok('知らない verb・opts 無しは外す（［戻す］の字を付けない）', L.offText('佐藤', { n: 0, at: [] }, { verb: 'x' }) === '佐藤さんを外します。人を選ぶ所に出なくなります。' && L.offText('佐藤', { n: 0, at: [] }, {}) === '佐藤さんを外します。人を選ぶ所に出なくなります。');
     // 分けた読み（st.loaded）＝部屋の分は倉庫の members[].n（写しの半荘は数えない）・リーグの分は今まで通り足す
     const split = (nv) => ({ ...roomSt(), loaded: [], members: [{ member_id: 'm1', name: '一', active: true, ...(nv === undefined ? {} : { n: nv }) }] });
@@ -111,6 +116,11 @@ if (!self) {
   const W = [
     ['dup の字を出さない', "  if (e === 'dup') return MEIBO_ERR.dup;\n", ''],
     ['mj_role の字を出さない', "  if (e === 'mj_role') return MEIBO_ERR.role;\n", ''],
+    ['tsunagi の字を出さない', "  if (e === 'tsunagi') return MEIBO_ERR.tsunagi;\n", ''],
+    ['つながりも外す時に戦績の字を付けない', '  if (opts && opts.unlink === true) t.push(', '  if (false) t.push('],
+    ['いつも戦績の字を付ける', '  if (opts && opts.unlink === true) t.push(', '  if (true) t.push('],
+    ['ふつうの部屋でもリーグの順位の字', "(opts && opts.room === true ? '点は精算に残ります'", "(false ? '点は精算に残ります'"],
+    ['いつも精算の字', "(opts && opts.room === true ? '点は精算に残ります'", "(true ? '点は精算に残ります'"],
     ['名の前後の空白を除かない', "typeof raw === 'string' ? raw.trim() : ''", "typeof raw === 'string' ? raw : ''"],
     ['名を 21 字まで通す', 'export const NAME_MAX = 20;', 'export const NAME_MAX = 21;'],
     ['外すで消す（active を見ない op）', "off: (mid) => ({ op: 'member_active', member_id: mid, active: false }),", "off: (mid) => ({ op: 'member_active', member_id: mid, active: true }),"],

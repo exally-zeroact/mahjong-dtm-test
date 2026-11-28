@@ -250,7 +250,8 @@ function rosterHtml(rid, x, mem, gone, closed) {
   for (const m of mem) {
     const mid = esc(m.member_id);
     h += '<div class="li li-sub lg-mem" data-mem="' + mid + '"><span class="row-name">' + esc(m.name) + '</span>';
-    if (!closed) h += '<span class="lg-btns"><button class="btn-s" type="button" data-rn="' + mid + '" data-r="' + R + '">名前を直す</button><button class="btn-s" type="button" data-off="' + mid + '" data-r="' + R + '"' + (x.mm && x.mm.sts ? '' : ' disabled') + '>外す</button></span>';
+    // 自分につないだ行（me）は外せない（倉庫が tsunagi で断る・部屋の画面にも自分の行の［消す］は無い＝a25r §1-8）。他の人がつないだ行は押せて、断られたら tsunagi の字
+    if (!closed) h += '<span class="lg-btns"><button class="btn-s" type="button" data-rn="' + mid + '" data-r="' + R + '">名前を直す</button>' + (m.me === true ? '' : '<button class="btn-s" type="button" data-off="' + mid + '" data-r="' + R + '"' + (x.mm && x.mm.sts ? '' : ' disabled') + '>外す</button>') + '</span>';
     h += '</div>';
     if (ed && ed.mid === m.member_id && ed.kind === 'rename') {
       h += '<div class="li li-sub lg-ed" data-ed="rename"><input class="h-in" id="rnIn" maxlength="20" autocomplete="off" value="' + esc(ed.val != null ? ed.val : m.name) + '" aria-label="新しい名前"><span class="lg-btns"><button class="btn-s" type="button" data-rnok="' + mid + '" data-r="' + R + '"' + (busy ? ' disabled' : '') + '>保存</button><button class="btn-s" type="button" data-edno="' + R + '">やめる</button></span></div>';
@@ -294,6 +295,15 @@ async function rosterSend(rid, mid, kind, op) {
   const e = (res && res.err) || 'net';
   if (!keepId(e)) ed.p = null; // 決まった答え＝次は新しい id
   ed.msg = LOGIN.has(e) ? errText(res, 'league') : rosterErr(res || { err: 'net' });
+  if (e === 'tsunagi') { // 確かめの後に誰かがつないだ＝確かめを閉じて字を残し、部屋と名簿を読み直す（a25r §1-8）
+    x.redit = { mid, kind: 'tsunagi', msg: ed.msg };
+    renderList();
+    const k = await readOne(rid);
+    if (rooms.get(rid) !== x) return;
+    if (k === 'mj_session') relogin(() => loadAll());
+    if (x.roster) rosterLoad(rid);
+    renderList(); return;
+  }
   renderList();
   if (LOGIN.has(e)) relogin(() => rosterSend(rid, mid, kind, op));
 }
