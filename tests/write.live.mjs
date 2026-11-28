@@ -1818,7 +1818,7 @@ const WAZA = [
   ['卓の部屋を確かめない', 'mahjong_private.mj_w_t', 'where x.id = p_tid and x.room_id = p_room for update', 'where x.id = p_tid for update', null, '② 別の部屋の table_id'],
   ['MJ001 を値に直さない（internal に化ける）', 'public.mj_write', 'v_ret := sqlerrm::jsonb; v_n := 0;', "v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'internal'); v_n := 0;", null, '② 別の部屋の hanchan_id'],
   ['limits を塊の中で数える（弾きで戻る）', 'public.mj_write', "    v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);",
-    "    perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);\n    v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);", ['  perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_n);\n  return v_ret;', '  return v_ret;'], '⑧ 後見の busy'],
+    "    perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_w);\n    v_ret := pg_catalog.jsonb_build_object('ok', true, 'results', v_items);", ['  perform mahjong_private.mj_w_count(p_room_id, v_me, v_role, v_w);\n  return v_ret;', '  return v_ret;'], '⑧ 後見の busy'],
   ['mj_tobi_ok が受け取りの席を見ない', 'mahjong_private.mj_tobi_ok', 'if x % 1 <> 0 or x < 0 or x >= p_players or x = k then return false; end if;', 'null;', null, '⑤ 自分の席・players 外'],
   ['チップの式（合計0でなくても ok）', 'mahjong_private.mj_w_tstate', "when v_c = 0 then 'ok'", "when v_c >= 0 then 'ok'", null, '⑦ c4 チップ +1 だけ（祝儀は使わない）：倉庫'],
   ['members の上限 300 を戻す', 'mahjong_private.mj_w_op', 'insert into mahjong.members (id, room_id, name, name_key, created_at) values (v_id, p_room, v_s, v_key, pg_catalog.clock_timestamp());',
