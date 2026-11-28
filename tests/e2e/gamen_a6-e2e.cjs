@@ -243,7 +243,7 @@ async function run(br, port) {
       ok('D1 ホーム＝カードが無い・帯を出さない（A27 §3）', h.hidden === true && h.homeBand === false, h);
       ok('D1 消す印が残っていない', (await lsRaw(A.pg, PDEL('u1', 'd1'))) === null);
       const m = await modosu(A.pg);
-      ok('D1 対局の頁の一番下に見出しと行1つ「「対局」を消しました」', m.shown && m.sec === '消した部屋（7日の間は戻せます）' && m.bands.length === 1 && m.bands[0].t === '「対局」を消しました' && (await isLast(A.pg, '#tModosu')), m);
+      ok('D1 対局の頁の一番下に見出しと行1つ「「do the math」を消しました」（部屋なしの置き名は do the math・11-27 司さん）', m.shown && m.sec === '消した部屋（7日の間は戻せます）' && m.bands.length === 1 && m.bands[0].t === '「do the math」を消しました' && (await isLast(A.pg, '#tModosu')), m);
       const m2 = await undoAt(A.pg, 'd1');
       ok('D1 戻す→倉庫の deleted_at が空・行が消えて見出しごと出ない', DB.get('d1').deleted_at === null && m2.bands.length === 0 && m2.shown === false, m2);
       const h2 = await goHomePage(A.pg);
@@ -501,7 +501,7 @@ async function run(br, port) {
       ok('V1 A：カード無し・ホームに帯無し・対局の頁に行1つ', h.hidden && h.homeBand === false && ma.bands.length === 1 && ma.bands[0].rid === 'v1', [h, ma]);
       const B = await device('V1B', 'u1', {});
       const mb = await modosu(B.pg);
-      ok('V1 B（同じログイン・控え無し）：倉庫から行1つ', mb.bands.length === 1 && mb.bands[0].rid === 'v1' && mb.bands[0].t === '「対局」を消しました', mb);
+      ok('V1 B（同じログイン・控え無し）：倉庫から行1つ', mb.bands.length === 1 && mb.bands[0].rid === 'v1' && mb.bands[0].t === '「do the math」を消しました', mb);
       const mb2 = await undoAt(B.pg, 'v1');
       const hb2 = await goHomePage(B.pg);
       ok('V1 B で戻す→倉庫の deleted_at 空・B にカード・行無し', DB.get('v1').deleted_at === null && hb2.cards.includes('v1') && mb2.bands.length === 0, [mb2, hb2]);

@@ -7,6 +7,9 @@
  * - 入った部屋は端末に「人（user_id）ごとに」覚える（別の人が同じ端末で入っても前の人の部屋を出さない・K-10）。
  */
 export const APP = '麻雀〜do the math〜';
+/* 11-27 23時 司さん「デフォで入ってる名前ださいから do the math にしろ」＝部屋の名が無い時と、部屋なし（solo）の置き名「対局」（倉庫の行もこの字）の時だけ。見出しの題は変えない */
+export const ROOM_DEFAULT = 'do the math';
+export const roomLabel = (r) => (r && r.name && !(r.kind === 'solo' && r.name === '対局') ? r.name : ROOM_DEFAULT);
 
 let sbClient = null;
 export function sb() {

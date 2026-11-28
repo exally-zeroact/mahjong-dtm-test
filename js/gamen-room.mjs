@@ -38,7 +38,7 @@ import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した
 import { nameKey } from '../lib/name-key.mjs';
 import { nextSeats } from '../lib/league-round.mjs'; // L A23（l_sadame v1.3 §1 A23）：リーグの日の次の半荘の人（卓の席 t.seats が正・他の卓と重なれば選ぶ）
 import { meiboErr, nameCheck, memberOp, memberUse, offText, pressOp } from '../lib/meibo.mjs'; // 8b A25r（a25r_sadame v2.1）：対局の画面の［名簿を直す］＝リーグの名簿と同じ部品
-import { esc, uuid, sb, patchRoom, rpc, rpcRaw, errText, myRooms } from './gamen-core.mjs'; // 2b：mj_read・mj_write は rpcRaw（ログインの誤りなら鍵を1回引き直す・電波は送り直しの道）
+import { esc, uuid, sb, patchRoom, rpc, rpcRaw, errText, myRooms, ROOM_DEFAULT } from './gamen-core.mjs'; // 2b：mj_read・mj_write は rpcRaw（ログインの誤りなら鍵を1回引き直す・電波は送り直しの道）
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
 import { rulesOk } from '../lib/rules.mjs';
@@ -718,7 +718,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // ［点数］＝点数計算（記録しない道具・tensu.html）へ。卓のルールを ?r= に、戻り先を ?from= に渡す（tensu.js の頭の取り決め）
     const ten = '/tensu.html?r=' + encodeURIComponent(JSON.stringify(LG ? R : room.rules)) + '&from=' + encodeURIComponent(location.pathname + location.search);
     // D2（絵 v157 ②）：リーグの対局は ‹ リーグの名前・題は「日付 卓n」
-    const lgName = LG && lgInfo && lgInfo.league && typeof lgInfo.league.name === 'string' && lgInfo.league.name ? lgInfo.league.name : 'リーグ';
+    const lgName = LG && lgInfo && lgInfo.league && typeof lgInfo.league.name === 'string' && lgInfo.league.name ? lgInfo.league.name : ROOM_DEFAULT; // 名が無い・まだ読めていない時＝do the math（11-27 司さん）
     const tHead = table ? st.tables.find((x) => x.table_id === tableChain(st, table.table_id)[0]) || table : null;
     const tDate = table ? (st.sessions.find((x) => x.session_id === table.session_id) || {}).date : null;
     bar({ back: LG ? lgName : 'ホーム', onBack: LG ? () => { location.href = '/league.html?room=' + encodeURIComponent(rid); } : undefined,

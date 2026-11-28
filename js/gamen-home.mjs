@@ -10,7 +10,7 @@
  * A6（a6_sadame v1.4.3 §2）：［元に戻す］の帯は倉庫の mj_my_rooms(p_deleted) の一覧で出す（同じログインならどの端末でも）。読めない時だけ控えの deleted_at（7日の内）で出す。
  *   一覧を全部読めたら印を合わせる（一覧の部屋に deleted_at・一覧に無い印は端末の時計で 7日−1時間 より新しい＝他で戻した→外す／古い＝期限切れ→gone:true）。印が変わればカードも描き直す。
  */
-import { currentUser, showLogin, logout, myRooms, patchRoom, rpc, esc, $, sb } from './gamen-core.mjs';
+import { currentUser, showLogin, logout, myRooms, patchRoom, rpc, esc, $, sb, roomLabel } from './gamen-core.mjs';
 import { applyDel } from './heya-modosu.mjs'; // A27：消した部屋の帯はホームに出さない（taikyoku の一番下）・印の当て直しだけここでも
 import { cardCounts, migrateState, gateText, roomEnded } from '../lib/room-state.mjs';
 
@@ -48,7 +48,7 @@ function lastTable(uid, rid) {
 const PAGE = 50;
 const WAIT_MS = 8000; // 1頁の返しをこれだけ待って来なければ控えで出す（後から全部読めたら替える）
 const delRow = (x) => !!x.deleted_at || x.gone === true; // A6 の門
-const nameOf = (r) => r.name || (r.kind === 'solo' ? '対局' : '部屋');
+const nameOf = roomLabel; // 名の無い部屋・部屋なしの置き名＝do the math（gamen-core）
 const card = (rid, name, m, gate) => '<a class="h-cont" href="/taikyoku.html?room=' + encodeURIComponent(rid) + '" data-rid="' + esc(rid) + '"><span class="h-l">続きの部屋</span><span class="h-r">' + esc(name) + '</span>' +
   (m ? '<span class="h-m">' + esc(m) + '</span>' : '') + (gate ? '<span class="h-m h-gate">' + esc(gateText(gate)) + '</span>' : '') + '<span class="h-go">対局に戻る ›</span></a>';
 /* 端末の写しから（倉庫の行が無いカード）＝今までの字のまま */

@@ -8,7 +8,7 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = 'bdd9e8fd504d';
+const VER = '8648917ca338';
 const ASSETS = /*ASSETS-BEGIN*/[
   ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
@@ -19,15 +19,15 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', 'ff8b680e60da054922e6c5f5636fa5dda34e5a922ecd3b58a9095288aaf97f7a'],
-  ['/js/gamen-home.mjs', '885346d9a841582a924e9a48e58a27acfb0c6d27df824ac201dad26822e96572'],
+  ['/js/gamen-core.mjs', '26fb8a56084ab5af81cb893bf34dd7273a567c736bac3d15f4f2fcc6aa4944b3'],
+  ['/js/gamen-home.mjs', '096b1a9f82731eb9ee82613a4226103c19ce54c840187c9db6ec66b2cbe48e73'],
   ['/js/gamen-league.mjs', '15ce54fc0777a9238be61f6dc9a93ce0f9c8f2535f4908345260b32bc5b009f4'],
-  ['/js/gamen-room.mjs', '485c4dc1b7b069a218e6fdbb255107f4b22bbd6fb3046d141f4db387f924b1fd'],
+  ['/js/gamen-room.mjs', '88f836b72151fa96112384781a46dc1821f1eaab94e42aa4f222e4d876e72e25'],
   ['/js/gamen-rules.mjs', '13246bf062b14e9d9dd582e445744c8d9262e43979124576705cb0a0766ed03e'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
   ['/js/gamen-taikyoku.mjs', 'c8244b44e8d23220bb5950253926983f7de9249d660712c4003c3588c5084968'],
   ['/js/hayami.js', '167581be01dd85d035811d003ec14c8a3de274faf10b943d773c9c6db95ddeae'],
-  ['/js/heya-modosu.mjs', '4294a2c87e727dff0754f927b397b8d8f202a18e3e843cf2d80be8f4be0751cb'],
+  ['/js/heya-modosu.mjs', '3e678e183723b1fa36285a2e3c267133c81041a1fb0606fa059af5d25c888e1c'],
   ['/js/kenban.mjs', 'ad7e1f231d24f51d6517e904f1d81fefe883f396a8b0123b1c049b9094715a7a'],
   ['/js/machi.js', '4f67b69bf283207cfa0a92ff5eccc56f23d6e5f6b608b1bfdf7308190234c9c7'],
   ['/js/rules-memory.mjs', '38dc35121e4c63683a3a2ff658803d73368436990a20f121540d9b25b4391495'],

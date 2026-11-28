@@ -4,12 +4,12 @@
  * ・全頁読めたら印を合わせる（applyDel＝ホームの読みも使う）。［元に戻す］＝mj_write room_undelete。戻せなかった字はこの頁の間は残す。
  * ・0件なら見出しごと出さない。
  */
-import { myRooms, patchRoom, rpc, errText, uuid, esc } from './gamen-core.mjs';
+import { myRooms, patchRoom, rpc, errText, uuid, esc, roomLabel } from './gamen-core.mjs';
 
 export const DEL_MS = 7 * 24 * 3600e3;
 const MARGIN_MS = 3600e3, PAGE = 50, WAIT_MS = 8000;
 const ageOf = (x) => Date.now() - Date.parse(x.deleted_at);
-const nameOf = (r) => r.name || (r.kind === 'solo' ? '対局' : '部屋');
+const nameOf = roomLabel; // 名の無い部屋・部屋なしの置き名＝do the math（gamen-core）
 /* 読めない時だけ：控えの deleted_at（端末の時計で7日の内）を新しい順 */
 export const deviceDel = (uid) => myRooms(uid).filter((x) => x && typeof x.deleted_at === 'string' && ageOf(x) < DEL_MS).sort((a, b) => Date.parse(b.deleted_at) - Date.parse(a.deleted_at));
 /* 倉庫の消した一覧を全部読めた時：印を合わせる。返し＝印が変わったか */
