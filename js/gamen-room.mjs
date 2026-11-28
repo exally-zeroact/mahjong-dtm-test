@@ -37,6 +37,7 @@ import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kami
 import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
 import { nextSeats } from '../lib/league-round.mjs'; // L A23（l_sadame v1.3 §1 A23）：リーグの日の次の半荘の人（卓の席 t.seats が正・他の卓と重なれば選ぶ）
+import { meiboErr, nameCheck, memberOp, memberUse, offText, pressOp } from '../lib/meibo.mjs'; // 8b A25r（a25r_sadame v2.1）：対局の画面の［名簿を直す］＝リーグの名簿と同じ部品
 import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
@@ -479,6 +480,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const ln = loadNote;
     const k = takeRead(res);
     if (k === 'ok') entryFollow(); // A20 §1-2：入力中の読み直し＝鎖の最後の人数・ルールに付いて行く
+    if (k === 'ok' && page === 'pick' && picking && picking.shownAct !== actKey()) renderPick(); // 8b §1-7：人を選ぶ頁も読み直しに付いて行く（別の端末で消した・戻した人）
     if (k === 'ok' || ln !== loadNote) rerender(); else refreshTag(); // P5：「読み込み中」の帯が立った・消えた時も描き直す
     if (meRead) { meRead = false; if (page === 'me') renderMe(); } // C2-0：taken・linked・dup の後の読み直しで名前の頁を描き直す（打ちかけの名前は残す）
     kick();
@@ -628,6 +630,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   setTable(ensureTable());
 
   const nameOf = (mid) => (st.members.find((m) => m.member_id === mid) || {}).name || '?';
+  const actOf = (mid) => st.members.some((m) => m.member_id === mid && m.active); // 8b §1-7：hanchan_start は active の人だけ通す（schema.sql mj_w_people）
+  const actKey = () => st.members.map((m) => [m.member_id, m.name, m.active, m.me, m.taken, m.left].join(':')).join('|'); // 8b：名簿の行（名・消した・つながり）が替わったか
+  let mb = null; // 8b §1-1：［名簿を直す］の開き { open, ed:{mid,kind,msg,busy,p,val}, mm:null|{err}|{room,sts}, seq }
   const rateText = (rate) => (rate === null || rate === undefined ? 'レートなし' : '1pt＝' + rate.toLocaleString('ja-JP'));
   const liveTag = () => {
     if (closedHold()) return '<span class="r-live ng">● 送れていない点があります・部屋が終わっています</span>';
@@ -663,6 +668,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       else if (hi.why === 'stale') h += '<div class="r-red" id="rHeld"><b>この端末の点が部屋に入ったか確かめられません。</b><button class="btn btn-line" id="rDrop">捨てる</button></div>';
       // C4 §3 T3：鍵が違う区切りの後の extra_add（倉庫が bad at table_id）＝前のルールで押した枚を新しい単価で数えない
       else if (hi.why === 'bad' && outbox[0].held.at === 'table_id' && outbox[0].ops.some((o) => o.op === 'extra_add')) h += '<div class="r-red" id="rHeld"><b>ルールが変わりました。チップ等を入れ直してください</b><button class="btn btn-line" id="rDrop">捨てる</button></div>';
+      // 8b §1-7：古い写しのまま積んだ hanchan_start に消された人（倉庫が bad at seats）＝［選び直す］（その組を外して点を人ごとに残し人を選ぶ頁へ）
+      else if (hi.why === 'bad' && outbox[0].held && outbox[0].held.at === 'seats' && outbox[0].ops.some((o) => o.op === 'hanchan_start')) h += '<div class="r-red" id="rHeld" data-why="offseat"><b>消された人がいるので入れられませんでした</b><button class="btn btn-main" id="rRePick">選び直す</button><button class="btn btn-line" id="rDrop">捨てる</button></div>';
       else h += '<div class="r-red" id="rHeld"><b>未送信 ' + hi.n + ' 件・この書き込みは入れられません（' + esc(HELD_WHY[hi.why] || hi.why) + '）</b><button class="btn btn-line" id="rDrop">捨てる</button></div>';
     }
     if (gateNote) h += '<div class="r-red" id="rGateNote"><b>' + esc(gateNote) + '</b></div>';
@@ -676,6 +683,18 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   const staleHtml = () => (staleRead() ? '<p class="r-check bad" id="rStale">最新を読めていないので、他の端末の点が入っていないかもしれません。</p>' : '');
   function wireBands() {
     const q = (s) => el.querySelector(s);
+    if (q('#rRePick')) q('#rRePick').onclick = () => { // 8b §1-7：その組を並びから外し・その組の点を carry にして人を選ぶ頁へ
+      const g = outbox[0], hs = g && g.ops.find((o) => o.op === 'hanchan_start');
+      if (!hs) return;
+      const t = tOf(hs.table_id);
+      dropAllAsk = false; outbox = dropHead(outbox); save(OUTR, outbox); since = null;
+      if (!t) { rerender(); sync(); return; }
+      const carry = {};
+      hs.seats.forEach((m, i) => { const v = Array.isArray(hs.cells) ? hs.cells[i] : null; if (v !== null && v !== undefined) carry[m] = boxNum(Number(v)); });
+      const tr = hs.tobi_to && Array.isArray(hs.tobi_to.r) ? hs.tobi_to.r : [];
+      picking = { seats: hs.seats.filter(actOf), tid: t.table_id, n: t.rules.players, carry, tobiM: tr.map((i) => hs.seats[i]).filter(actOf), offB: hs.seats.filter((m) => !actOf(m)).map(nameOf) };
+      entry = null; page = 'pick'; render(); sync();
+    };
     if (q('#rDrop')) q('#rDrop').onclick = () => { dropAllAsk = false; outbox = dropHead(outbox); save(OUTR, outbox); since = null; rerender(); sync(); }; // 後ろは held_after_drop＝読み直しで当て直してから送る（捨てた組は写しに当たっている＝since を戻して必ず置き換える）
     // P6g §3：［全部捨てる］は1段確かめる・merge も空にする（押す前の ± が後で黙って送られない）・［もう一度送る］は先頭の held busy を外して1回だけ送る
     if (q('#rDropAll')) q('#rDropAll').onclick = () => { dropAllAsk = true; rerender(); };
@@ -1159,6 +1178,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       }).join('') + '</div>';
       if (me) h += '<p class="r-hint" id="meWarn">' + esc(me.name) + 'の半荘はあなたの戦績から外れ、選んだ名前の半荘が入ります。</p>';
     } else h += '<p class="r-hint">名簿にほかの名前がありません。</p>';
+    h += mbHtml();
     h += '<p class="sec">名簿にいない時</p><label class="r-in"><span>名前</span><input id="meNew" maxlength="20" autocomplete="off" placeholder="（打つ）"></label>';
     h += '<button class="btn btn-main" id="meNewGo"' + (meBusy ? ' disabled' : '') + '>足して、これは私</button>';
     h += '<p class="err" id="meErr">' + esc(meMsg || '') + '</p>';
@@ -1166,8 +1186,123 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     el.querySelector('#meNew').value = typed;
     for (const b of el.querySelectorAll('#meList [data-me]')) b.onclick = () => mePick(b.dataset.me);
     el.querySelector('#meNewGo').onclick = () => meNew(el.querySelector('#meNew').value.trim());
+    mbWire();
   }
   function meDraw() { if (page === 'me') renderMe(); else if (page === 'pick') renderPick(); }
+  /* ── 8b A25r（a25r_sadame v2.1）［名簿を直す］＝人ごとに［名前を直す］［消す］・下に「消した人」［戻す］。点は人に付いたまま（member_active false）──
+   * §1-5 送り＝並び（outbox）に積まず mj_write へ直に（sendMe と同じ門）・押した時に1回だけ op_id（pressOp）・答えが決まるまで同じ id
+   * §1-8 自分の行は［消す］なし・他の人がつないだ行（taken）と出た人の行（left）は［つながりを外して消す］＝組 [member_unlink, member_active false] */
+  const mbOk = () => !room.closed && !closingOn() && !writeBlocked();
+  const mbTie = (m) => m.taken === true || m.left === true;
+  function mbOffText(m) {
+    let t = offText(m.name, memberUse(mb.mm.room, mb.mm.sts, m.member_id), { verb: '消す', unlink: mbTie(m), room: !LG });
+    if (!LG && table && (lastSeats() || []).includes(m.member_id)) t += '次の半荘は人を選び直します。'; // §1-4 任意3
+    return t;
+  }
+  function mbHtml() {
+    if (!mbOk()) return '';
+    if (!mb || !mb.open) return '<p class="r-mbgo"><button class="btn btn-line btn-s" id="mbGo">名簿を直す</button></p>';
+    const ed = mb.ed, busy = !!(ed && ed.busy);
+    const msg = (m) => (ed && ed.mid === m.member_id && ed.msg ? '<p class="err" id="mbMsg">' + esc(ed.msg) + '</p>' : '');
+    let h = '<p class="r-mbgo"><button class="btn btn-line btn-s" id="mbGo" aria-expanded="true">名簿を直す</button></p><div class="r-mb" id="mbBox">';
+    if (mb.mm && mb.mm.err) h += '<p class="err" id="mbRerr">点が読めませんでした。消す前に読み直してください</p><button class="btn-s" id="mbLoad">読み直す</button>';
+    for (const m of st.members.filter((x) => x.active)) {
+      const mid = esc(m.member_id);
+      h += '<div class="r-mbrow" data-mb="' + mid + '"><span class="row-name">' + esc(m.name) + '</span><span class="lg-btns">';
+      if (m.left !== true) h += '<button class="btn-s" data-mbrn="' + mid + '">名前を直す</button>';
+      if (m.me !== true) h += '<button class="btn-s" data-mboff="' + mid + '">' + (mbTie(m) ? 'つながりを外して消す' : '消す') + '</button>';
+      h += '</span></div>';
+      if (m.me === true) h += '<p class="r-hint" data-mbme>あなたの名前は消せません（［変える］で別の名前に付け替えると消せます）</p>';
+      if (ed && ed.mid === m.member_id && ed.kind === 'rename') h += '<div class="r-mbed" data-ed="rename"><input class="h-in" id="mbIn" maxlength="20" autocomplete="off" value="' + esc(ed.val != null ? ed.val : m.name) + '" aria-label="新しい名前"><span class="lg-btns"><button class="btn-s" id="mbRnOk"' + (busy ? ' disabled' : '') + '>保存</button><button class="btn-s" data-mbno>やめる</button></span></div>';
+      if (ed && ed.mid === m.member_id && ed.kind === 'off') {
+        const ok = !!(mb.mm && mb.mm.room);
+        h += '<div class="r-mbed" data-ed="off"><span id="mbOffT">' + (ok ? esc(mbOffText(m)) : mb.mm && mb.mm.err ? '' : '点を読んでいます…') + '</span><span class="lg-btns"><button class="btn-s" id="mbOffOk"' + (ok && !busy ? '' : ' disabled') + '>' + (mbTie(m) ? 'つながりを外して消す' : '消す') + '</button><button class="btn-s" data-mbno>やめる</button></span></div>';
+      }
+      h += msg(m);
+    }
+    const gone = st.members.filter((x) => !x.active && x.left !== true);
+    if (gone.length) {
+      h += '<p class="sec" id="mbGone">消した人</p>';
+      for (const m of gone) h += '<div class="r-mbrow" data-mbg="' + esc(m.member_id) + '"><span class="row-name">' + esc(m.name) + '</span><span class="lg-btns"><button class="btn-s" data-mbon="' + esc(m.member_id) + '"' + (busy ? ' disabled' : '') + '>戻す</button></span></div>' + msg(m);
+    }
+    return h + '</div>';
+  }
+  // §1-4：［消す］を押した時に読む＝部屋（分けた読みなら members[].n）と取り消していない各リーグ。全部 ok まで確かめの［消す］は押せない
+  async function mbLoad() {
+    if (!mb) return;
+    const seq = (mb.seq = (mb.seq || 0) + 1);
+    mb.mm = null;
+    const r = await readRoom(rid, null);
+    const d = r && r.data;
+    if (dead || !mb || mb.seq !== seq) return;
+    if (r.error || !d || d.ok !== true || !d.st) { mb.mm = { err: true }; meDraw(); return; }
+    const live = (Array.isArray(d.leagues) ? d.leagues : []).filter((l) => !l.voided);
+    const got = await Promise.all(live.map((l) => readLeague(rid, l.league_id, null)));
+    if (dead || !mb || mb.seq !== seq) return;
+    if (got.some((x) => !x || x.error || !x.data || x.data.ok !== true || !x.data.st)) { mb.mm = { err: true }; meDraw(); return; }
+    mb.mm = { room: d.st, sts: got.map((x) => x.data.st) };
+    meDraw();
+  }
+  async function mbSend(mid, kind, ops) {
+    if (!mb || dead) return;
+    if (!(mb.ed && mb.ed.mid === mid && mb.ed.kind === kind)) mb.ed = { mid, kind };
+    const ed = mb.ed;
+    if (ed.busy) return;
+    const say = (m) => { ed.msg = m; meDraw(); };
+    if (stopped) return say('今は書き込めません（上の帯を見てください）。');
+    if (writeBlocked()) return say('この部屋は終わりました（終えています）。名簿は直せません。');
+    if (heldInfo(outbox)) return say('止まっている書き込みがあります。先にそちらを片付けてください。');
+    flushMerge(true, true);
+    if (outbox.length || merge.size) { kick(); return say('前に入れた点を送っています。送れたら、もう一度押してください。'); } // §1-5 v1 止め1
+    if (st.needs_upload) return say('この端末の点をまだ部屋に入れていません。入れてから直してください。');
+    if (offline()) return say('電波がつながってから直せます。');
+    if (lane) return say('読み込み中です。少し待ってもう一度押してください。');
+    ed.p = pressOp(ed, ops, uuid);
+    lane = true; ed.busy = true; ed.msg = null; meDraw();
+    let res;
+    try { res = await sb().rpc('mj_write', { p_room_id: rid, p_op_id: ed.p.op_id, p_ops: ops }); }
+    catch (e) { res = { error: { message: String((e && e.message) || e) } }; }
+    lane = false; ed.busy = false;
+    if (dead) return;
+    const d = res && res.data, s = outboxStep(res);
+    if (s.kind !== 'retry') ed.p = null;
+    if (s.kind === 'done') {
+      aizuOut(d);
+      const a = applyOps(st, ops, aopts({ direct: true, role: room.role })); // §1-5 v1 止め2：読みが skip でも写しは新しい
+      if (a.ok) { st = a.state; save(KEYR, st); }
+      if (mb) mb.ed = null;
+      sync(); meDraw(); return;
+    }
+    if (s.kind === 'login') { loginStop(s.err); return; }
+    if (s.kind === 'reload') { goneStop(); return; }
+    if (s.kind === 'closed') { roomInfo({ closed: true }); render(); return; }
+    if (s.kind === 'retry') return say('送れませんでした。電波を確かめてもう一度押してください。');
+    if (s.err === 'tsunagi') { sync(); return say('この人は今アカウントにつながりました。読み直すと［つながりを外して消す］になります。'); } // §1-8 止めA
+    if (['dup', 'left', 'mj_role'].includes(s.err)) sync();
+    return say(meiboErr({ err: s.err }) || errText({ err: s.err, what: s.what, at: s.at }, 'write'));
+  }
+  function mbWire() {
+    const q = (s) => el.querySelector(s), all = (s) => el.querySelectorAll(s);
+    if (q('#mbGo')) q('#mbGo').onclick = () => { mb = mb && mb.open ? null : { open: true, ed: null, mm: null }; meDraw(); };
+    if (!mb || !mb.open) return;
+    if (q('#mbLoad')) q('#mbLoad').onclick = () => { mbLoad(); meDraw(); };
+    for (const b of all('[data-mbrn]')) b.onclick = () => { mb.ed = { mid: b.dataset.mbrn, kind: 'rename' }; meDraw(); const i = q('#mbIn'); if (i) i.focus(); };
+    for (const b of all('[data-mboff]')) b.onclick = () => { mb.ed = { mid: b.dataset.mboff, kind: 'off' }; mbLoad(); meDraw(); };
+    for (const b of all('[data-mbno]')) b.onclick = () => { mb.ed = null; meDraw(); };
+    for (const b of all('[data-mbon]')) b.onclick = () => mbSend(b.dataset.mbon, 'on', [memberOp.on(b.dataset.mbon)]);
+    if (q('#mbIn')) q('#mbIn').oninput = (e) => { if (mb && mb.ed) mb.ed.val = e.target.value; };
+    if (q('#mbRnOk')) q('#mbRnOk').onclick = () => {
+      const i = q('#mbIn'), c = nameCheck(i ? i.value : '');
+      mb.ed.val = i ? i.value : null;
+      if (!c.ok) { mb.ed.msg = c.msg; meDraw(); return; }
+      mbSend(mb.ed.mid, 'rename', [memberOp.rename(mb.ed.mid, c.name)]);
+    };
+    if (q('#mbOffOk')) q('#mbOffOk').onclick = () => {
+      const mid = mb.ed.mid, m = st.members.find((x) => x.member_id === mid);
+      if (!m || !(mb.mm && mb.mm.room)) return;
+      mbSend(mid, 'off', (mbTie(m) ? [{ op: 'member_unlink', member_id: mid }] : []).concat([memberOp.off(mid)])); // §1-8：unlink が先（user_id が空になって tsunagi の門を通る）
+    };
+  }
   function mePick(mid) {
     const x = st.members.find((m) => m.member_id === mid && m.active);
     if (!x) return;
@@ -1231,10 +1366,12 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
   function renderPick() {
     bar({ back: '対局', onBack: toRoom, title: '人を選ぶ' });
     const p = picking;
+    if (p.seats.some((m) => !actOf(m))) { p.offB = [...new Set((p.offB || []).concat(p.seats.filter((m) => !actOf(m)).map(nameOf)))]; p.seats = p.seats.filter(actOf); } // 8b §1-7：開いている間に消した人は抜く（帯に名前）
+    p.shownAct = actKey();
     const n = p.n; // D2 止め2：開いた時の卓の人数（読み直しで今の卓が替わっても）
     const act = st.members.filter((m) => m.active);
     const hist = histNames();
-    let h = meHtml() + (p.reN ? '<div class="r-red" id="pReN"><b>今の回から' + n + '人打ちです。打つ人を選び直してください（打った点は残っています）。</b></div>' : '') + '<div id="pBase">';
+    let h = meHtml() + (p.offB && p.offB.length ? '<div class="r-red" id="pOffB"><b>' + esc(p.offB.join('・')) + 'さんを消したので、打つ人を選び直してください（打った点は残っています）</b></div>' : '') + (p.reN ? '<div class="r-red" id="pReN"><b>今の回から' + n + '人打ちです。打つ人を選び直してください（打った点は残っています）。</b></div>' : '') + '<div id="pBase">';
     if (act.length) h += '<p class="sec">この部屋の人（名簿）・この半荘の' + n + '人を押す　<b class="kon">' + p.seats.length + '／' + n + '</b></p><div class="chips">' + act.map((m) => '<button data-pick="' + esc(m.member_id) + '" aria-pressed="' + p.seats.includes(m.member_id) + '">' + esc(m.name) + (m.me === true ? '<small class="r-me-tag">あなた</small>' : '') + '</button>').join('') + '</div>';
     if (hist.length) h += '<p class="sec">この端末で前に使った名前（ほかの部屋）</p><div class="chips">' + hist.map((nm) => '<button data-hist="' + esc(nm) + '">' + esc(nm) + '</button>').join('') + '</div>';
     if (act.length || hist.length) h += '<p class="r-hint">押すだけでこの半荘に入る。ほかの部屋の名前を押すと、この部屋の名簿にも足される。</p>';
@@ -1242,6 +1379,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     h += '<div id="pCand"></div><p class="err" id="pErr"></p>';
     // A20 §3：外した人の打った点は保存するまで見せ続ける（押し直せば戻る）
     const out = Object.keys(p.carry || {}).filter((m) => !p.seats.includes(m));
+    h += mbHtml();
     h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で' + (p.only ? '決める' : '始める') + '</button>' +
       '<p class="r-hint">席（東南西北）は選ばない。</p>' + (!p.only && nonL(tOf(p.tid)) ? '<p class="r-hint" id="pOnly">この半荘だけ</p>' : '') + (out.length ? '<p class="r-hint" id="pOut">外した人：' + out.map((m) => esc(nameOf(m)) + ' ' + esc(p.carry[m])).join('・') + '</p>' : '') + '</div>';
     el.innerHTML = h;
@@ -1321,6 +1459,11 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     } else {
       // L A23：リーグの日は nextSeats（卓の席が正しければそれ・空なら前の半荘・他の卓と重なる・外した人入り＝null＝選ぶ）。ふつうの部屋は今まで通り
       const lgT = lgDay(table), ls = lastSeats();
+      { // 8b §1-7：前の回か卓の席に消した人が居れば点の頁へ行かず人を選ぶ（preSeats・nextSeats より前）
+        const tS = (tOf(table.table_id) || table).seats, tA = Array.isArray(tS) && tS.length ? tS : null;
+        const base = lgT ? tA || ls : ls || tA;
+        if (Array.isArray(base) && base.some((m) => !actOf(m))) { picking = pickOf({ seats: base.filter(actOf), carry: {}, tobiM: [], offB: base.filter((m) => !actOf(m)).map(nameOf) }); page = 'pick'; render(); return; }
+      }
       const seats = lgT ? nextSeats(st, table.table_id, n, { league: true }) || (ls && ls.length !== n ? ls : null) : ls || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人（A20 の人数違いはリーグの日も選び直しの帯）
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
       if (seats.length !== n) { picking = pickOf({ seats, carry: {}, tobiM: [], reN: true }); page = 'pick'; render(); return; } // A20 §1-2・§3：前の回と人数が違う＝打つ人を選び直す
@@ -1345,6 +1488,14 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     const carry = { ...(e.carry || {}) };
     e.seats.forEach((m, i) => { if (String(e.cells[i]).trim() !== '') carry[m] = e.cells[i]; else delete carry[m]; });
     picking = { seats: e.seats.slice(), tid: t.table_id, n: t.rules.players, carry, tobiM: e.tobiR.map((i) => e.seats[i]), reN: true };
+    entry = null; page = 'pick'; render();
+  }
+  // 8b §1-7 v1 止め3：新しい回の点の頁で［入れる］の時に消した人が居る＝積まずに人を選ぶ（打った点は人ごとに carry）
+  function offPick() {
+    const e = entry, t = eFollow() || tOf(e.tid);
+    const carry = { ...(e.carry || {}) };
+    e.seats.forEach((m, i) => { if (String(e.cells[i]).trim() !== '') carry[m] = e.cells[i]; else delete carry[m]; });
+    picking = { seats: e.seats.filter(actOf), tid: t.table_id, n: t.rules.players, carry, tobiM: e.tobiR.map((i) => e.seats[i]).filter(actOf), offB: e.seats.filter((m) => !actOf(m)).map(nameOf) };
     entry = null; page = 'pick'; render();
   }
   // A20 §1-2：入力中の読み直し（sync の後）＝人数が違えば選び直し・同じ人数でルールが替わったら見えている数えを替える（送る卓と揃える）
@@ -1436,6 +1587,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     {
       readCells();
       if (needReN()) return reNPick(); // A20 §1-2：［保存］を押した時も人数を見る（古い長さのまま送らない）
+      if (!e.hanchan_id && e.seats.some((m) => !actOf(m))) return offPick(); // 8b §1-7 v1 止め3
       const cells = e.cells.map(toInt);
       // E2 §1（11-26 司さん＝代表1人でも各自でも）：1つでも入っていれば入れる（空いた席は null）・全部空は止める
       const blank = e.cells.map((v) => String(v).trim() === '');
@@ -1761,6 +1913,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     inp.addEventListener('compositionend', drawCand);
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { const b = q('[data-new]') || q('#pSame'); if (b) b.click(); } });
     if (q('#pMeGo')) q('#pMeGo').onclick = () => { meMsg = null; page = 'me'; render(); };
+    mbWire();
     for (const b of q('#pBase').querySelectorAll('[data-pick]')) b.onclick = () => { if (seat(b.dataset.pick)) renderPick(); };
     for (const b of q('#pBase').querySelectorAll('[data-hist]')) b.onclick = () => { const r = addMember(b.dataset.hist); pickDone(r.mid || r.dup); };
     q('#pGo').onclick = () => {
