@@ -158,7 +158,7 @@ async function run(br) {
     }
     // T2b ホームから部屋を開く（readRules）の mj_read が1回 401 ⇒ 引き直して開く・重ねなし
     if (want('T2b')) {
-      fresh({ plan: { mj_read: [{ status: 401, body: { code: 'PGRST301', message: 'JWT expired' } }] }, body: { mj_read: (a) => (a.p_args === null ? { ok: true, room: { rules: R4, name: '卓', kind: 'shared', owner: true, role: null }, read_ver: 1 } : { ok: true, same: true }) } });
+      fresh({ plan: { mj_read: [{ status: 401, body: { code: 'PGRST301', message: 'JWT expired' } }] }, body: { mj_read: (a) => (!a.p_args || a.p_args.since === undefined ? { ok: true, room: { rules: R4, name: '卓', kind: 'shared', owner: true, role: null }, read_ver: 1 } : { ok: true, same: true }) } });
       cur = await open({ stored: 'fresh', page: '/taikyoku.html?room=r1' }); const { pg } = cur;
       const opened = await until(pg, async () => !(await pg.$('#rReading')) && S.calls.filter((c) => c.fn === 'mj_read').length >= 2, 20000);
       const sn = await seen(pg);
