@@ -131,7 +131,7 @@ const timing = `
 
 const sql = `do ${q('rj')} declare res jsonb := '{}'; r jsonb; cx jsonb; rid uuid; v_no text; v_ghost text; i int;
   us uuid[] := '{}'; ss uuid[] := '{}'; va uuid := gen_random_uuid(); sa uuid := gen_random_uuid();
-  t0 timestamptz; a_in float8[] := '{}'; a_gh float8[] := '{}'; a_bf float8[] := '{}'; a_ag float8[] := '{}';
+  t0 timestamptz; a_in float8[] := '{}'; a_gh float8[] := '{}'; a_bf float8[] := '{}'; a_ag float8[] := '{}'; a_sw float8[] := '{}';
   v_min timestamptz := date_trunc('minute', now());
 begin
   /* 2b-2：khaw の前から在る古い行を先に掃く（掃除は ok の返しで走る＝表全体の数えが揺れない・塊の最後で全部戻る） */
@@ -168,6 +168,11 @@ begin
   for i in 1..20 loop
     t0 := clock_timestamp(); r := ${JP(BADPASS)}; a_ag := a_ag || (extract(epoch from clock_timestamp() - t0) * 1000)::float8;
   end loop;
+  /* again の ok の返しの直前は掃除 mj_sweep が走る（khaw で約19ms＝bf/4 と同じ位・11-28 測り）＝同じ回数の掃除の時間を測って引く */
+  for i in 1..20 loop
+    t0 := clock_timestamp(); begin perform mahjong_private.mj_sweep(); exception when others then null; end; a_sw := a_sw || (extract(epoch from clock_timestamp() - t0) * 1000)::float8;
+  end loop;
+  res := res || jsonb_build_object('tm_sweep', (select percentile_cont(0.5) within group (order by x) from unnest(a_sw) x));
   res := res || jsonb_build_object('p_rows', (select count(*) from mahjong.room_accounts where room_id = rid and user_id = us[2]),
     'tm_again', (select percentile_cont(0.5) within group (order by x) from unnest(a_ag) x));
   /* 持ち主も again（持ち主の行は create の kan） */
@@ -376,7 +381,7 @@ if (out) {
   ok('② 外れのパスでも again:true（bf を回していない）', okRet('p3', true), JSON.stringify(R('p3')));
   ok('② 外れのパスの again で数えが増えない', still('p3'), JSON.stringify(delta('p3')));
   ok('② 行は1つのまま', Number(out.p_rows) === 1, String(out.p_rows));
-  ok('② again の時間は bf 1回の 1/4 より短い', out.tm && Number(out.tm_again) < Number(out.tm.bf) / 4, JSON.stringify({ again: out.tm_again, bf: out.tm && out.tm.bf }));
+  ok('② again の時間（掃除の分を引く）は bf 1回の 1/4 より短い', out.tm && Number(out.tm_again) - Number(out.tm_sweep) < Number(out.tm.bf) / 4, JSON.stringify({ again: out.tm_again, sweep: out.tm_sweep, bf: out.tm && out.tm.bf }));
   ok('② 持ち主も again:true・役は kan', okRet('own', true, 'kan'), JSON.stringify(R('own')));
   /* ③ */
   ok('③ 倉庫の hash（sha256 の hex）と lib の hash が同じ', out.h_db === TOKH, `${out.h_db} / ${TOKH}`);
@@ -480,7 +485,8 @@ if (isTest) {
   const email = `mjrj-${crypto.randomBytes(4).toString('hex')}@${MAIL}`;
   const pw = 'Pw-' + crypto.randomBytes(12).toString('hex');
   let who = null;
-  const uf = async (id) => { const r = await mq(`select coalesce(sum(count), 0)::int as n from mahjong.limits where kind = 'join:ufail1m' and key = ${lit(id)}`);
+  /* 11-28：ufail1m は外れのたびに前の分の行を消す（mj_room_join）＝分の境で 1→1 になる。24時間の ufail1d（24時間より古い物だけ消す）で数える */
+  const uf = async (id) => { const r = await mq(`select coalesce(sum(count), 0)::int as n from mahjong.limits where kind = 'join:ufail1d' and key = ${lit(id)}`);
     try { return JSON.parse(r.text)[0].n; } catch (_) { return null; } };
   /* 無い番号（倉庫に無い事を先に見る） */
   let ghost = null;
