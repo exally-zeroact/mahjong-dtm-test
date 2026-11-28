@@ -312,6 +312,7 @@ jobs:
           - { name: l2, script: tests/e2e/gamen_l2-e2e.cjs, yuka: 6 }
           - { name: a25r, script: tests/e2e/gamen_a25r-e2e.cjs, yuka: 11 }
           - { name: 2b, script: tests/e2e/gamen_2b-e2e.cjs, yuka: 11 }
+          - { name: p10, script: tests/e2e/gamen_p10-e2e.cjs, yuka: 9 }  # P10 §5 人の確かめ（Turnstile は差し替え・外へ0）
     name: 画面 ${{ matrix.name }}（webkit）
     steps:
       - uses: actions/checkout@v4
