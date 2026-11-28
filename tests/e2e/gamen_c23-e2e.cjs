@@ -128,7 +128,7 @@ async function run(br, port) {
       ok('T1 相性＝佐藤 6 1.50 +180.0／鈴木 3 2.00 +30.0', vs.includes('佐藤|6|1.50|+180.0') && vs.includes('鈴木|3|2.00|+30.0') && vs.includes('伊藤|3|1.00|+150.0'), vs);
       ok('T1 3人の組は出さない', !(await has(pg, '.s-grp[data-pl="3"]')));
       ok('T1 出た部屋なし（in だけ）', !(await has(pg, '.s-out')));
-      ok('T1 目安の字（6＜10）', await has(pg, '#sRough'));
+      ok('T1 目安の字を出さない（6＜10 でも・司さん 11-27「警告文いらん」）', !(await has(pg, '#sRough')) && !(await pg.evaluate(() => document.body.innerText.includes('目安'))));
       ok('T1 名前を選ぶ釦なし（unlinked 0）', !(await has(pg, '#sPickMe')));
       ok('T1 移り変わりの線', await has(pg, '.s-trend[data-pl="4"] polyline'));
       const h = await cells(pg, '.s-hist');

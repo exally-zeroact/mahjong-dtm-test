@@ -140,12 +140,7 @@ function draw(o) {
   const gs = [res.groups[4], res.groups[3]].filter((g) => g && g.n > 0);
   if (!gs.length && !res.afterLeave.length) h += '<p class="empty" id="sEmpty">まだ戦績はありません</p>';
   const unit = mode === 'ten' ? '点' : 'pt';
-  let rough = false;
-  for (const g of gs) {
-    if (g.rough) rough = true;
-    h += groupHtml(g, unit, ch, (r) => { if (r) rough = true; });
-  }
-  if (rough) h += '<p class="note" id="sRough">半荘が10回より少ない所は目安です</p>';
+  for (const g of gs) h += groupHtml(g, unit, ch); // n<10 の「目安」の字は出さない（司さん 11-27「警告文いらん」・コンサル 11-28）
   for (const g of gs) h += vsHtml(g);
   h += outHtml(gs, res.afterLeave);
   h += histHtml(gs);
@@ -154,7 +149,7 @@ function draw(o) {
 }
 const segHtml = (id, list, cur) => '<div class="seg" id="' + id + '">' + list.map(([v, lb]) => '<button type="button" data-v="' + v + '" aria-pressed="' + (String(v) === String(cur)) + '">' + lb + '</button>').join('') + '</div>';
 
-function groupHtml(g, unit, ch, markRough) {
+function groupHtml(g, unit, ch) {
   const P = g.players;
   const fl = anyFilter() ? DIMS.filter(([k]) => filt[k] !== undefined).map(([k]) => (ch[k].find((x) => x[0] === filt[k]) || [0, '?'])[1]).join('・') : '全部';
   let h = '<div class="card s-grp" data-pl="' + P + '"><p class="sec-h">' + P + '人打ち　' + esc(fl) + '（' + g.n + '半荘）</p>';
@@ -171,7 +166,6 @@ function groupHtml(g, unit, ch, markRough) {
       const x = myStats(pages, { filter: filterObj({ rate: r }), mode, players: P });
       const q = x.ok && x.groups[P];
       if (!q || !q.n) continue;
-      if (q.rough) markRough(true);
       rows += '<tr><td>' + esc(lb) + '</td><td>' + q.n + '</td><td class="' + cls(q.v) + '">' + fmtV(q.v, mode) + '</td><td>' + avg(q.rankSum, q.n) + '</td><td>' + pct(q.top, q.n) + '</td></tr>';
     }
     if (rows) h += '<div class="card s-rate" data-pl="' + P + '"><p class="sec-h">レート別</p><table class="s-tb"><tr><th>レート</th><th>半荘</th><th>合計' + unit + '</th><th>平均順位</th><th>トップ</th></tr>' + rows + '</table></div>';
