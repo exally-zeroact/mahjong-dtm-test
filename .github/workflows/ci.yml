@@ -300,7 +300,7 @@ jobs:
           - { name: tobi, script: tests/e2e/gamen_tobi-e2e.cjs, yuka: 10 }
           - { name: b1, script: tests/e2e/gamen_b1-e2e.cjs, yuka: 10 }
           - { name: kenban, script: tests/e2e/gamen_kenban-e2e.cjs, yuka: 8 }
-          - { name: c4, script: tests/e2e/gamen_c4-e2e.cjs, yuka: 16 }
+          - { name: c4, script: tests/e2e/gamen_c4-e2e.cjs, yuka: 17 }
           - { name: d2, script: tests/e2e/gamen_d2-e2e.cjs, yuka: 25 }
           - { name: e2, script: tests/e2e/gamen_e2-e2e.cjs, yuka: 15 }
           - { name: c20, script: tests/e2e/gamen_c20-e2e.cjs, yuka: 19 }
