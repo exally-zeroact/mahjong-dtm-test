@@ -236,6 +236,10 @@ async function run(d) {
     const man = JSON.parse(rd(d, 'manifest.json'));
     const start = new URL(man.start_url, base + 'manifest.json');
     ok('f start_url は素の /index.html', start.pathname === '/index.html', start.pathname);
+    // f の前に q1 の登録が残っているか（11-28 調べ diag-swb3：赤 5/2880 は全部、q1 が controller ありのまま getRegistration が空＝bump の前に webkit が登録を落とした。
+    // アプリに unregister は 0 か所＝客の端末なら次に開いた時に最新を入れ直すだけ。webkit の落ちとして runFresh の1回やり直し＋summary に回す）
+    const lost = await q1.evaluate(async () => !!navigator.serviceWorker.controller && !(await navigator.serviceWorker.getRegistration())).catch(() => false);
+    ok('f の前に q1 の登録が残っている', !lost, 'webkit internal error 扱い：controller ありで getRegistration が空（アプリに unregister 0）');
     const V3 = bump(d);
     const f1 = await ctxE.newPage();
     await f1.goto(base + 'index.html');
