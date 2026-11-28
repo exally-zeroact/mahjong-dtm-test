@@ -101,7 +101,7 @@ begin
   for i in 1..50 loop perform mahjong_private.mj_sweep(1000000); end loop;
   delete from mahjong.limits where kind in ('create:1m', 'create:1d');   -- 外の回りの数えに揺らされない（塊の最後で戻る）
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
-  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
+  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u; insert into mahjong.accounts (user_id, human_at) select u, now() from unnest(us) u on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, ${N_U}) k;
   ${ROW('f0', `select jsonb_build_object('t', (select rooms_all from mahjong.totals where id = 1), 'f', ${FORMULA})`)}
   loop ghost := lpad((floor(random() * 100000000))::bigint::text, 8, '0'); exit when not exists (select 1 from mahjong.rooms where room_no = ghost); end loop;
@@ -483,7 +483,7 @@ async function race(i, label, make) {
   const mine = [];
   let res = null, made = 0;
   try {
-    await rows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${u[0]}', '${u[0]}@${MAIL}', 'authenticated', 'authenticated', false), ('${u[2]}', '${u[2]}@${MAIL}', 'authenticated', 'authenticated', false);
+    await rows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${u[0]}', '${u[0]}@${MAIL}', 'authenticated', 'authenticated', false), ('${u[2]}', '${u[2]}@${MAIL}', 'authenticated', 'authenticated', false); insert into mahjong.accounts (user_id, human_at) values ('${u[0]}', now()), ('${u[2]}', now()) on conflict (user_id) do update set human_at = now(); -- P10 印
       insert into auth.sessions (id, user_id) values ('${u[1]}', '${u[0]}'), ('${u[3]}', '${u[2]}'); select 1 as k`);
     const mk = async (id, owner, kind, name, pass) => { mine.push(id); await rows(mkRoomSql(id, owner, kind, name, pass) + ' select 1 as k'); };
     const w = (await rows(`select date_trunc('minute', now()) as m, date_trunc('hour', now()) as h`))[0];
