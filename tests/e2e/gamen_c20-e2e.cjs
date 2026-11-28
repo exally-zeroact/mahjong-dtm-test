@@ -162,7 +162,7 @@ const srv = http.createServer(async (q, r) => {
   if (ext === '.png') { r.writeHead(200, { 'content-type': MT[ext] }); r.end(fs.readFileSync(f)); return; }
   let b = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n');
   if (mutate && mutate.file && f.replace(/\\/g, '/').endsWith(mutate.file)) {
-    for (const [from, to] of [[mutate.from, mutate.to], ...(mutate.also ? [mutate.also] : [])]) { if (!b.includes(from)) { console.log('✗ 壊しの字が無い ' + from); process.exit(2); } b = b.replace(from, to); }
+    for (const [from, to] of [[mutate.from, mutate.to], ...(mutate.also ? [mutate.also] : [])]) { if (!b.includes(from)) { console.log('✗ 壊しの字が無い ' + from); process.exit(2); } if (b.split(from).length !== 2) { console.log('✗ 壊しの字が2か所以上 ' + from); process.exit(2); } b = b.replace(from, to); }
   }
   r.writeHead(200, { 'content-type': MT[ext] || 'text/plain' }); r.end(b);
 });
@@ -444,10 +444,10 @@ const MUT = [
   { file: GR, from: "if (meRead) { meRead = false; if (page === 'me') renderMe(); }", to: '', name: '読み直しで名前の頁を描き直さない', only: 'T17' },
   { file: GR, from: "const typed = el.querySelector('#meNew') ? el.querySelector('#meNew').value : '';", to: "const typed = '';", name: '打ちかけの名前を消す', only: 'T4' },
   { file: GR, from: 'const meOk = () => !room.closed && !st.needs_upload;', to: 'const meOk = () => !room.closed;', name: '端末だけの写しでも出す', only: 'T9' },
-  { file: GR, from: "if (outbox.length || merge.size) { kick(); return say('前に入れた点", to: "if (false) { kick(); return say('前に入れた点", name: '並びの門を抜く', only: 'T6' },
+  { file: GR, from: "if (outbox.length || merge.size) { kick(); return say('前に入れた点を送っています。送れたら、もう一度押してください。'); }\n    if (offline()) return say('電波がつながってから選べます。');", to: "if (false) { kick(); return say('前に入れた点を送っています。送れたら、もう一度押してください。'); }\n    if (offline()) return say('電波がつながってから選べます。');", name: '並びの門を抜く', only: 'T6' }, // meSend だけ（8b の mbSend にも同じ門が在る＝次の行で1つに絞る）
   { file: GR, from: "if (offline()) return say('電波がつながってから選べます。');", to: '', name: '電波の門を抜く', only: 'T7' },
   { file: GR, from: 'if (meBusy || dead) return;', to: 'if (dead) return;', name: '送り中の門を抜く', only: 'T10' },
-  { file: GR, from: "if (lane) return say('読み込み中です。少し待ってもう一度押してください。');", to: 'if (lane) return;', name: '読み中を黙って返す', only: 'T10b' },
+  { file: GR, from: "if (lane) return say('読み込み中です。少し待ってもう一度押してください。');\n    const key = JSON.stringify(ops);", to: 'if (lane) return;\n    const key = JSON.stringify(ops);', name: '読み中を黙って返す', only: 'T10b' }, // meSend だけ（mbSend にも同じ字）
   { file: GR, from: 'if (!meOp || meOp.key !== key) meOp =', to: 'if (!meOp) meOp =', name: 'op_id を組に結ばない', only: 'T16' },
   { file: GR, from: "if (s.kind !== 'retry') meOp = null;", to: 'meOp = null;', name: '切れた後に op_id を替える', only: 'T16' },
   { file: GR, from: "(m.me === true ? '<small class=\"r-me-tag\">あなた</small>' : '')", to: "''", name: '印を出さない', only: 'T1' },
