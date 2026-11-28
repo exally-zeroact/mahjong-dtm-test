@@ -167,7 +167,7 @@ function myRooms(uid) {
 const srv = http.createServer(async (q, r) => {
   let u = decodeURIComponent(q.url.split('?')[0]);
   if (u === '/__rpc') {
-    let body = ''; for await (const c of q) body += c;
+    let body = ''; try { for await (const c of q) body += c; } catch (_) { return; } // 画面が閉じて問いが切れた（aborted・ECONNRESET）＝答えずに捨てる（握らないと試験の箱ごと落ちる・33c4f7f の a25r で1回）
     const { fn, args, dev, uid } = JSON.parse(body);
     const send = (o) => { r.writeHead(200, { 'content-type': 'application/json' }); r.end(JSON.stringify({ data: o, error: null, status: 200 })); };
     if (fn === 'mj_read') { LOG.push({ dev, fn, what: args.p_what, args: clone(args.p_args || {}) }); if (args.p_what === 'league' && LG_HOLD) await LG_HOLD.p; send(mjRead(uid, args)); return; }

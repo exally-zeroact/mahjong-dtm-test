@@ -54,7 +54,7 @@ function myStatsPage(c, a) {
 const srv = http.createServer(async (q, r) => {
   let u = decodeURIComponent(q.url.split('?')[0]);
   if (u === '/__rpc') {
-    let body = ''; for await (const ch of q) body += ch;
+    let body = ''; try { for await (const ch of q) body += ch; } catch (_) { return; } // 画面が閉じて問いが切れた（aborted・ECONNRESET）＝答えずに捨てる（握らないと試験の箱ごと落ちる・33c4f7f の a25r で1回）
     const { fn, args, dev } = JSON.parse(body);
     const c = ctl(dev);
     const send = (o) => { r.writeHead(200, { 'content-type': 'application/json' }); r.end(JSON.stringify({ data: o, error: null, status: 200 })); };
