@@ -27,6 +27,7 @@ async function call(fn, args) {
   } catch (e) { return { data: null, error: { message: String((e && e.message) || e) } }; }
 }
 window.__chans = {};
+export async function rpcRaw(fn, args) { return await sb().rpc(fn, args); } // 2b：部屋の mj_read・mj_write は rpcRaw を通る＝偽の sb へ
 export function sb() { return { auth: { onAuthStateChange() {}, signOut() { return Promise.resolve(); } }, rpc: call,
   channel(key) { const c = { on(t, ev, cb) { (window.__chans[key] = window.__chans[key] || []).push(cb); return c; }, subscribe(cb) { if (cb) cb('SUBSCRIBED'); return c; }, send() { return Promise.resolve('ok'); } }; return c; },
   removeChannel() { return Promise.resolve(); } }; }

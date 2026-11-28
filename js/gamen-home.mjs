@@ -93,10 +93,13 @@ function paint(list, band) {
 }
 
 let drawSeq = 0;
+let drawnId; // 2b：最後に描いた人（null＝ログインしていない・undefined＝まだ描いていない）
+let readFell = false; // 2b：最後の読みが届かなかった（電波）＝鍵が戻った時に描き直す
 async function draw() {
   const seq = ++drawSeq;
   const u = await currentUser();
   if (seq !== drawSeq) return;
+  drawnId = u ? u.id : null; readFell = false;
   const acct = $('acct');
   if (!u) {
     acct.innerHTML = '<button class="btn-s" type="button" id="btnIn">ログイン</button>';
@@ -126,8 +129,16 @@ async function draw() {
     return;
   }
   if (res.err === 'mj_session') showLogin(() => draw());
+  readFell = true;
   fell = false; fallback();
 }
 
-sb().auth.onAuthStateChange(() => { draw(); });
+// 2b：描き直すのは人が替わった時（null⇔人・A→B）と、電波で読めなかった後に鍵が戻った時だけ（鍵の引き直しのたびに読み直さない）
+sb().auth.onAuthStateChange((ev, session) => {
+  const su = session && session.user && !session.user.is_anonymous ? session.user : null;
+  const id = su ? su.id : null;
+  if (drawnId !== undefined && id === drawnId && !(readFell && id)) return;
+  if (drawnId !== undefined && id === null && drawnId !== null && ev !== 'SIGNED_OUT') return; // 鍵が一時読めないだけ（INITIAL_SESSION 等）＝端末に残っている人のまま
+  draw();
+});
 draw();

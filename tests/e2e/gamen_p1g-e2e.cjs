@@ -16,6 +16,7 @@ window.__chans = {};
 window.__aizu = (key) => { for (const f of window.__chans[key] || []) f({ payload: { v: 999999 } }); };
 window.__n = { read: 0, live: 0, max: 0, starts: [] };
 window.__readMs = 50;
+export async function rpcRaw(fn, args) { return await sb().rpc(fn, args); } // 2b：部屋の mj_read・mj_write は rpcRaw を通る＝偽の sb へ
 export function sb() { return { auth: { onAuthStateChange() {} },
   channel(key) { const c = { on(t, ev, cb) { (window.__chans[key] = window.__chans[key] || []).push(cb); return c; }, subscribe(cb) { if (cb) cb('SUBSCRIBED'); return c; }, send() { return Promise.resolve('ok'); } }; return c; },
   removeChannel() { return Promise.resolve(); } }; }
