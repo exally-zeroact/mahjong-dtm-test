@@ -126,6 +126,10 @@ jobs:
         run: node tests/outbox.test.mjs
       - name: 送り口の見張りの自己確認（振り分けをわざと壊して赤になるか）
         run: node tests/outbox.test.mjs --self-test
+      - name: P10 Edge Function mj-human の判定（supabase/functions/mj-human/check.mjs）＝設定無しは閉じる・試しの鍵は TESTKEY_OK=1 だけ・host と action・網の失敗（p10_sadame v1.1 §3）
+        run: node tests/mj-human.test.mjs
+      - name: mj-human の見張りの自己確認（判定をわざと壊して赤になるか）
+        run: node tests/mj-human.test.mjs --self-test
       - name: 返しの字の full（js/gamen-core.mjs errText）＝H2 の後に close と league で「記録がいっぱい」を出さない・入る／作るの字は残す（fullji_sadame v1.1）
         run: node tests/fullji.test.mjs
       - name: full の字の見張りの自己確認（字を前に戻す・league の枝を消すと赤になるか）

@@ -83,7 +83,7 @@ const mkSql = (prefix = '') => `do ${q('a25r')} declare res jsonb := '{}'; r jso
 begin
   ${prefix}
   for i in 1..5 loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
-  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
+  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u; insert into mahjong.accounts (user_id, human_at) select u, now() from unnest(us) u on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, 5) k;
   ${undo('s', `delete from mahjong.limits where kind like 'create:%' or kind like 'join:%';
     ${asWho(1)}
