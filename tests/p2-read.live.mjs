@@ -157,7 +157,7 @@ begin
   delete from mahjong.limits where kind like 'create:%' or kind like 'join:%';
   ${RSR}
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
-  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
+  insert into auth.users (id, email, aud, role, is_anonymous) select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u; insert into mahjong.accounts (user_id, human_at) select u, now() from unnest(us) u on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, ${N_U}) k;
   ${asWho(1)}
   ${T('made', CR(NB + 'の部屋', FR))} rg := (r->>'room_id')::uuid;
@@ -530,7 +530,7 @@ async function runB(mode) {   // mode: null｜'try'（待つ鍵を try に）｜
   try {
     if (mode === 'try') await mqRows(wzCopy([[NS_LOCK_FROM, NS_LOCK_TRY]]));
     if (mode === 'noslow') await mqRows(wzCopy([[SLOW_FROM, SLOW_NONE]]));
-    await mqRows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${me}', '${me}@${MAIL}', 'authenticated', 'authenticated', false);
+    await mqRows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${me}', '${me}@${MAIL}', 'authenticated', 'authenticated', false); insert into mahjong.accounts (user_id, human_at) values ('${me}', now()) on conflict (user_id) do update set human_at = now(); -- P10 印
       insert into auth.sessions (id, user_id) values ('${ss}', '${me}');`);
     const rr = await mqRows(`select public.mj_room_create('${opid}'::uuid, ${lit(NB + 'b')}, ${lit(PASS)}, ${jb(FR)},
       jsonb_build_object('url_token_hash', md5(random()::text) || md5(random()::text))) as r from ${SET}`);

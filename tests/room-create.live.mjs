@@ -132,7 +132,7 @@ begin
   insert into auth.users (id, email, aud, role, is_anonymous) values
     (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false),
     (v_u2, v_u2::text || '@${MAIL}', 'authenticated', 'authenticated', false),
-    (v_u3, null, 'authenticated', 'authenticated', true);
+    (v_u3, null, 'authenticated', 'authenticated', true); insert into mahjong.accounts (user_id, human_at) values (v_u, now()), (v_u2, now()) on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) values (v_s, v_u), (v_s2, v_u2), (v_s3, v_u3);
   ${AS_U2}
   perform mahjong_private.mj_me();                         -- U2 の accounts を先に作る（後の比べを accounts で汚さない）

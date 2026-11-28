@@ -379,6 +379,17 @@ create table if not exists mahjong.accounts (
   last_seen    timestamptz not null default now(),
   check ((display_name is null) = (name_key is null))
 );
+-- P10（p10_sadame v1.1 §2.1・S4）：人の確かめの印 human_at（null＝まだ・Turnstile を通った時刻）。
+--   ★欄が無かった時だけ1回★ 欄を足し、その時に在った垢だけ created_at で通す（全文の当て直しで印なしの垢を通さない）。
+do $p10$
+begin
+  if not exists (select 1 from information_schema.columns c
+                 where c.table_schema = 'mahjong' and c.table_name = 'accounts' and c.column_name = 'human_at') then
+    lock table mahjong.accounts in share row exclusive mode;
+    alter table mahjong.accounts add column human_at timestamptz;
+    update mahjong.accounts set human_at = created_at;
+  end if;
+end $p10$;
 
 -- ── 部屋の人（人×部屋・devices の代わり＝v18 C）・持ち主は rooms.owner_user_id（行が無くても段1を通る） ──
 create table if not exists mahjong.room_accounts (
@@ -1024,6 +1035,22 @@ begin
   return v_uid;
 end $fn$;
 revoke all on function mahjong_private.mj_me_read() from public, anon, authenticated;
+-- P10 §2.4：人の確かめを通った垢か（作る・入る・書くの門）。
+create or replace function mahjong_private.mj_human_ok(p_uid uuid) returns boolean
+language sql stable set search_path = '' as $fn$
+  select exists (select 1 from mahjong.accounts a where a.user_id = p_uid and a.human_at is not null);
+$fn$;
+revoke all on function mahjong_private.mj_human_ok(uuid) from public, anon, authenticated;
+-- P10 §2.3（S5）：印を付ける＝Edge Function mj-human だけが直の接続（SUPABASE_DB_URL）で呼ぶ。public に置かない（客は呼べない）。
+create or replace function mahjong_private.mj_human_mark(p_uid uuid) returns boolean
+language plpgsql volatile security definer set search_path = '' as $fn$
+begin
+  if p_uid is null or not exists (select 1 from auth.users u where u.id = p_uid) then return false; end if;
+  insert into mahjong.accounts as a (user_id, human_at) values (p_uid, pg_catalog.now())
+    on conflict (user_id) do update set human_at = coalesce(a.human_at, pg_catalog.now());
+  return true;
+end $fn$;
+revoke all on function mahjong_private.mj_human_mark(uuid) from public, anon, authenticated;
 
 -- P3（pbundle_sadame v2.1 §2）：全体の窓（create:1m・create:1d・join:fail1m の 'all'）はやめた＝残りの行は mj_sweep の 3 古い行（1m＝10分・1d＝2日）で消える（関数の外に delete を置かない＝sql-guard ④）
 
@@ -1531,6 +1558,7 @@ begin
   -- ⓪ 人（K-10）
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+  if not mahjong_private.mj_human_ok(v_me) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'human'); end if; -- P10 §2.2
 
   -- ① 形（数えに入れない）。段C：名前もパスも null＝部屋なし（solo）・片方だけ null は bad・shared のパスはそろえた後に数字4つ
   if p_op_id is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'op_id'); end if;
@@ -1697,6 +1725,7 @@ begin
   -- ⓪ 人（K-10）
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+  if not mahjong_private.mj_human_ok(v_me) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'human'); end if; -- P10 §2.2
 
   -- ① 形（数えに入れない・何も残さない）＝使わない方の引数が在っても bad（取り違えを黙って通さない）
   if p_way is null or p_way not in ('pass', 'url', 'name') then return pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'way'); end if;
@@ -4103,6 +4132,7 @@ begin
   -- ⓪ 人（数えない）
   v_me := mahjong_private.mj_me();
   if v_me is null then return pg_catalog.jsonb_build_object('ok', false, 'err', 'mj_session'); end if;
+  if not mahjong_private.mj_human_ok(v_me) then return pg_catalog.jsonb_build_object('ok', false, 'err', 'human'); end if; -- P10 §2.2
 
   -- ① 形（行は読まない）＝弾きは u1m に1
   if p_room_id is null then v_ret := pg_catalog.jsonb_build_object('ok', false, 'err', 'bad', 'what', 'room_id');

@@ -125,7 +125,7 @@ const mkSql = (prefix = '', only = 'A') => `do ${q('p8')} declare res jsonb := '
 begin
   ${prefix}
   delete from mahjong.limits where kind like 'create:%' or kind like 'join:%';
-  insert into auth.users (id, email, aud, role, is_anonymous) values (us[1], us[1]::text || '@${MAIL}', 'authenticated', 'authenticated', false);
+  insert into auth.users (id, email, aud, role, is_anonymous) values (us[1], us[1]::text || '@${MAIL}', 'authenticated', 'authenticated', false); insert into mahjong.accounts (user_id, human_at) values (us[1], now()) on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) values (ss[1], us[1]);
   ${asWho}
   ${T('made', `public.mj_room_create(gen_random_uuid(), ${lit(NB)}, ${lit(PASS)}, ${jb(R1)}, jsonb_build_object('url_token_hash', md5(random()::text) || md5(random()::text)))`)}
@@ -243,7 +243,7 @@ async function race(label, keyDiff) {
   let room = null, made = 0, res = null;
   const ids = [T0, U(), U()], L1 = U();
   try {
-    await mqRows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${me}', '${me}@${MAIL}', 'authenticated', 'authenticated', false);
+    await mqRows(`insert into auth.users (id, email, aud, role, is_anonymous) values ('${me}', '${me}@${MAIL}', 'authenticated', 'authenticated', false); insert into mahjong.accounts (user_id, human_at) values ('${me}', now()) on conflict (user_id) do update set human_at = now(); -- P10 印
       insert into auth.sessions (id, user_id) values ('${ss}', '${me}');`);
     const rr = await mqRows(`select public.mj_room_create('${opid}'::uuid, ${lit(NB + 'r')}, ${lit(PASS)}, ${jb(R1)},
       jsonb_build_object('url_token_hash', md5(random()::text) || md5(random()::text))) as r from (select set_config('request.jwt.claims', ${claims}, true)) c`);

@@ -128,7 +128,7 @@ begin
   res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days'));   -- 段C v10.1：掃除は ⓐ だけ
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
   insert into auth.users (id, email, aud, role, is_anonymous)
-    select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
+    select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u; insert into mahjong.accounts (user_id, human_at) select u, now() from unnest(us) u on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, ${N_U}) k;
   /* ⓪ */
   res := res || jsonb_build_object('priv', (select jsonb_build_object('anon', has_function_privilege('anon', p.oid, 'EXECUTE'),

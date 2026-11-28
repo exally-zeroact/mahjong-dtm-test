@@ -1,7 +1,7 @@
 /* outbox.test.mjs — ★lib/outbox.mjs（未送信の並びの受け方）が取り決め §6-11・12・14・14' の通りに振り分けるか★（CI）
  * 使い方: node tests/outbox.test.mjs  /  node tests/outbox.test.mjs --self-test（振り分けをわざと壊して赤になるか）
  */
-import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, BUSY_RETRY, BUSY_STOP, unholdBusy, heldAny } from '../lib/outbox.mjs';
+import { outboxStep, retryDelay, holdHead, dropHead, canSend, heldInfo, heldClosed, aizuSendV, aizuReadV, AIZU_GAP_MS, BUSY_RETRY, BUSY_STOP, unholdBusy, heldAny, heldHuman, unholdHuman } from '../lib/outbox.mjs';
 import { readFileSync } from 'node:fs';
 
 const CASES = [
@@ -73,6 +73,17 @@ function run(step, drop = dropHead) {
   const hc = [{ op_id: 'a', ops: [1], held: { err: 'closed' } }, { op_id: 'b', ops: [2] }];
   const hd = drop(hc);
   ok('2d 先頭が held closed なら［捨てる］でも外さない', hd.length === 2 && hd[0].op_id === 'a' && hd[0].held.err === 'closed' && !hd[1].held_after_drop, JSON.stringify(hd));
+  // P10 §4（S2）：human＝人の確かめ待ち。捨てない・［捨てる］で外さない・確かめの後に外して送る
+  const hu = step({ data: { ok: false, err: 'human' } });
+  ok('P10 human は human（stop・retry に倒さない）', hu.kind === 'human' && hu.err === 'human', JSON.stringify(hu));
+  const hh = [{ op_id: 'a', sent_at: 't', ops: [1], held: { err: 'human' } }, { op_id: 'b', ops: [2] }];
+  const hhd = drop(hh);
+  ok('P10 先頭が held human なら［捨てる］でも外さない', hhd.length === 2 && hhd[0].op_id === 'a' && hhd[0].held.err === 'human' && !hhd[1].held_after_drop, JSON.stringify(hhd));
+  ok('P10 held human の間は送らない', !canSend(hh) && heldInfo(hh).why === 'human');
+  const uh = unholdHuman(hh);
+  ok('P10 unholdHuman は先頭の held human だけ外す（op_id・sent_at はそのまま）', uh[0].op_id === 'a' && uh[0].sent_at === 't' && !uh[0].held && canSend(uh) && uh.length === 2);
+  const ubz = [{ op_id: 'a', held: { err: 'busy', what: 'write:u1d' } }];
+  ok('P10 human でない held は unholdHuman で外さない', unholdHuman(ubz) === ubz && !heldHuman(ubz) && heldHuman(hh));
   ok('2d heldClosed は held closed の先頭だけ真', heldClosed(hc) && !heldClosed([{ op_id: 'a', held: { err: 'range' } }]) && !heldClosed([]) && !heldClosed([{ op_id: 'a' }]));
   // P6g §3（v1.1 止め1）：busy の［捨てる］は次の組へ held を移す（後ろを黙って送らない）
   const bw = step({ data: { ok: false, err: 'busy', what: 'write:un1d' } });
@@ -159,6 +170,9 @@ if (!self) {
     ['2d stop の what を落とす', wrap((res, r) => (r.kind === 'stop' ? { ...r, what: undefined } : r))],
     ['2d 403 を retry にする（回し続ける）', wrap((res, r) => (r.err === 'server' ? { kind: 'retry', err: 'net' } : r))],
     ['2d held closed も［捨てる］で外す', outboxStep, (ob) => ob.slice(1).map((it) => ({ ...it, held_after_drop: true }))],
+    ['P10 human を stop にする（知らない err と同じ）', wrap((res, r) => (r.err === 'human' ? { kind: 'stop', err: 'human', known: false } : r))],
+    ['P10 human を retry にする（網と同じ・永久に送り直す）', wrap((res, r) => (r.err === 'human' ? { kind: 'retry', err: 'net' } : r))],
+    ['P10 held human も［捨てる］で外す', outboxStep, (ob) => (heldClosed(ob) ? ob : ob.slice(1).map((it) => ({ ...it, held_after_drop: true })))],
   ];
   let p = 0, f = 0;
   console.log('[outbox --self-test] 振り分けをわざと壊して赤になるか');
