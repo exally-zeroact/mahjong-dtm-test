@@ -105,6 +105,13 @@ jobs:
         run: node tests/meibo.test.mjs
       - name: 人の部品の自己確認（lib をわざと壊して赤になるか）
         run: node tests/meibo.test.mjs --self-test
+      - name: 2b ログイン済みならログインの画面を出さない（gamen-core の authCheck・rpcRaw・currentUser・needLogin・部屋の読み書き・ホームの描き直しの形）
+        run: node tests/login2b.test.mjs
+      - name: 2b の見張りの自己確認（17か所壊して全部赤になるか・部屋の送りを sb().rpc に戻すを含む）
+        shell: bash
+        run: |
+          node tests/login2b.test.mjs --self-test | tee login2b-self.out
+          sh scripts/ci-yuka.sh login2b-self.out 17
       - name: 自分の戦績（lib/my-stats.mjs・C2-2）＝期待値（pt／込み／点・4人と3人・出た部屋・出た後の印・全部読めた印）
         run: node tests/my-stats.test.mjs
       - name: 自分の戦績の自己確認（lib をわざと壊して赤になるか）
@@ -304,6 +311,7 @@ jobs:
           - { name: w2a, script: tests/e2e/gamen_w2a-e2e.cjs, yuka: 4 }
           - { name: l2, script: tests/e2e/gamen_l2-e2e.cjs, yuka: 6 }
           - { name: a25r, script: tests/e2e/gamen_a25r-e2e.cjs, yuka: 11 }
+          - { name: 2b, script: tests/e2e/gamen_2b-e2e.cjs, yuka: 12 }
     name: 画面 ${{ matrix.name }}（webkit）
     steps:
       - uses: actions/checkout@v4
