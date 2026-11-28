@@ -12,5 +12,6 @@
 window.SUPA = {
   url: 'https://khawdrnvssdenumbiwfg.supabase.co',
   key: 'sb_publishable_UrRIobyVFbaJI_85RBxBOA_GZ4OUxPm',
-  env: 'test'
+  env: 'test',
+  turnstile: '1x00000000000000000000AA' // P10 §4：Cloudflare Turnstile の site key（テスト＝必ず通る公開の試しの key・本番の supa-config は本番の key）
 };

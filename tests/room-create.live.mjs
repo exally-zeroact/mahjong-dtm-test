@@ -3,7 +3,7 @@
  * v18（全員ログイン・人×部屋＝room_accounts・合言葉と端末の秘密なし・案 v18_login_sekkei.md G・K-7・K-10）：
  *  ⓪ 人＝mj_me：claims 無し・匿名・session 無し・users 無し・消した人・止めた人・not_after 切れ・他人の session_id・
  *     uuid でない字＝mj_session（何も増えない）
- *  ① 作れて rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits の create:* は増えない（caps v1.1＝u1m・u1d・su1d をやめた）
+ *  ① 作れて rooms・rule_sets・room_accounts・creates・totals が1ずつ（accounts は P10 の印で前から在る＝+0）・limits の create:* は増えない（caps v1.1＝u1m・u1d・su1d をやめた）
  *     持ち主＝作った人・room_accounts は kan・create・admin_secret_hash 空・creates.user_id・返しの鍵は ok・room_id・room_no・channel_key の4つ
  *  ② 同じ op_id で送り直し＝同じ返し ／ url が違う＝mismatch ／ 消した部屋＝gone ／ 別の人の同じ op_id＝mj_op_other_user
  *  ③ 形の違い（secrets は url_token_hash の1つだけ・2つ3つは bad:secrets）・ルールの範囲の外・よくあるパスを弾く ④ 既定のルール（44鍵）
@@ -132,7 +132,7 @@ begin
   insert into auth.users (id, email, aud, role, is_anonymous) values
     (v_u, v_u::text || '@${MAIL}', 'authenticated', 'authenticated', false),
     (v_u2, v_u2::text || '@${MAIL}', 'authenticated', 'authenticated', false),
-    (v_u3, null, 'authenticated', 'authenticated', true);
+    (v_u3, null, 'authenticated', 'authenticated', true); insert into mahjong.accounts (user_id, human_at) values (v_u, now()), (v_u2, now()) on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.sessions (id, user_id) values (v_s, v_u), (v_s2, v_u2), (v_s3, v_u3);
   ${AS_U2}
   perform mahjong_private.mj_me();                         -- U2 の accounts を先に作る（後の比べを accounts で汚さない）
@@ -264,15 +264,15 @@ if (out) {
   SESS.forEach(([name], i) => {
     const r = out.sess[i] || {};
     ok('⓪ ' + name + ' → mj_session', r.ok === false && r.err === 'mj_session' && Object.keys(r).length === 2, JSON.stringify(r));
-    ok('⓪ ' + name + ' で何も増えない（accounts も）', out[`s${i}_c`] && same(out[`s${i}_c`], out[`s${i}_c1`]) && Number(out[`s${i}_acc`]) === 0,
+    ok('⓪ ' + name + ' で何も増えない（accounts も）', out[`s${i}_c`] && same(out[`s${i}_c`], out[`s${i}_c1`]) && Number(out[`s${i}_acc`]) === 1, // P10：作った人の accounts の行は人の確かめの印で前から1（増えないのは same の accounts で見る）
       JSON.stringify(out[`s${i}_c`] && d(out[`s${i}_c`], out[`s${i}_c1`])));
   });
   /* ① */
   const r1 = out.r1 || {};
   ok('① 作れた', r1.ok === true, JSON.stringify(r1));
   ok('① 返しの鍵は ok・room_id・kind・room_no・channel_key の5つ（段C で kind）・kind shared', Object.keys(r1).sort().join(',') === 'channel_key,kind,ok,room_id,room_no' && r1.kind === 'shared', JSON.stringify(Object.keys(r1)));
-  ok('① rooms・rule_sets・room_accounts・creates・totals・accounts が1ずつ・limits の create:* は +0（caps v1.1）',
-    same(d(out.c0, out.c1), { rooms: 1, rule_sets: 1, room_accounts: 1, creates: 1, accounts: 1, totals: 1, lim: 0, lim_u: 0, lim_rows: 0 }), JSON.stringify(d(out.c0, out.c1)));
+  ok('① rooms・rule_sets・room_accounts・creates・totals が1ずつ・accounts は +0（P10 の印で前から在る）・limits の create:* は +0（caps v1.1）',
+    same(d(out.c0, out.c1), { rooms: 1, rule_sets: 1, room_accounts: 1, creates: 1, accounts: 0, totals: 1, lim: 0, lim_u: 0, lim_rows: 0 }), JSON.stringify(d(out.c0, out.c1)));
   ok('① caps v1.1：作った人の create:* の窓は1つも無い（u1m・u1d・su1d を書かない）', Object.keys(out.lim_kinds || {}).filter((k) => k.endsWith(':U')).length === 0, JSON.stringify(out.lim_kinds));
   ok('① 部屋番号は8桁', /^[0-9]{8}$/.test(r1.room_no || ''), r1.room_no);
   ok('① channel_key は倉庫が作った32字の hex', /^[0-9a-f]{32}$/.test(r1.channel_key || '') && out.room.channel_key === r1.channel_key);
@@ -361,6 +361,8 @@ if (isTest) {
       const cu = await AU('/admin/users', { method: 'POST', headers: { Authorization: `Bearer ${srv}` }, body: JSON.stringify({ email, password: pw, email_confirm: true }) }, srv);
       who = cu.j?.id || cu.j?.user?.id || null;
       ok('⑩ 捨てアカウントを admin で作れた（メールは送らない）', !!who, `${cu.s} ${JSON.stringify(cu.j).slice(0, 200)}`);
+      // P10（p10_sadame v1.1 §5）：捨てアカウントに人の確かめの印（無いと作るが err human）
+      if (who) await mq(`insert into mahjong.accounts (user_id, human_at) values ('${who}'::uuid, now()) on conflict (user_id) do update set human_at = now(); select 1 as k`);
       const li = await AU('/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email, password: pw }) });
       const at = li.j?.access_token;
       ok('⑩ パスワードで入れた', !!at, `${li.s}`);

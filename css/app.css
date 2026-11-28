@@ -128,6 +128,10 @@ details.card > summary { min-height: 44px; display: flex; align-items: center; f
 /* 取り込み中の札（swupd v1.1 §3）＝右上の小さな札・押せない（下の鍵盤と［対局終了］を隠さない・指は下へ通す） */
 .mj-swband.is-busy { top: calc(8px + env(safe-area-inset-top)); bottom: auto; left: auto; padding: 4px 12px; gap: 0; font-size: 14px; pointer-events: none; }
 
+/* P10 §4：人の確かめ（Turnstile）の窓＝画面の真ん中に1つ（gamen-human.mjs） */
+.mj-human { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; background: var(--c-kage); }
+.mj-human-in { min-width: 300px; padding: 16px; border-radius: 12px; background: var(--c-haikei); color: var(--c-ji); font-size: 16px; text-align: center; box-shadow: 0 2px 8px var(--c-kage); }
+.mj-human-in p { margin: 0 0 12px; }
 /* ── 点数計算（tensu.html・絵 dougu_v153 ①）── 押す所は字 16px→44・14px→36（11-19 の決め）・★body.tensu の時だけ効かせる（対局の gamen.css の .chips 等を変えない・11-20 taiketsu 止め2）★ */
 body.tensu .obi { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--c-man); color: var(--c-ji); font-size: 14px; }
 body.tensu .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; align-items: center; }

@@ -139,7 +139,7 @@ begin
   res := res || jsonb_build_object('others_left', (select count(*) from mahjong.rooms x where x.deleted_at < now() - interval '7 days' or (x.deleted_at is null and x.created_at < now() - interval '7 days' and (x.last_write_at is null or x.last_write_at < now() - interval '7 days') and not exists (select 1 from mahjong.hanchans h where h.room_id = x.id) and not exists (select 1 from mahjong.room_accounts a where a.room_id = x.id and a.last_seen >= now() - interval '7 days'))));
   for i in 1..${N_U} loop us := us || gen_random_uuid(); ss := ss || gen_random_uuid(); end loop;
   insert into auth.users (id, email, aud, role, is_anonymous)
-    select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u;
+    select u, u::text || '@${MAIL}', 'authenticated', 'authenticated', false from unnest(us) u; insert into mahjong.accounts (user_id, human_at) select u, now() from unnest(us) u on conflict (user_id) do update set human_at = now(); -- P10 印
   insert into auth.users (id, email, aud, role, is_anonymous) values (va, null, 'authenticated', 'authenticated', true);
   insert into auth.sessions (id, user_id) select ss[k], us[k] from generate_series(1, ${N_U}) k;
   insert into auth.sessions (id, user_id) values (sa, va);
@@ -496,6 +496,8 @@ if (isTest) {
       const cu = await AU('/admin/users', { method: 'POST', headers: { Authorization: `Bearer ${srv}` }, body: JSON.stringify({ email, password: pw, email_confirm: true }) }, srv);
       who = cu.j?.id || cu.j?.user?.id || null;
       ok('⑬ 捨てアカウントを admin で作れた（メールは送らない）', !!who, `${cu.s} ${JSON.stringify(cu.j).slice(0, 200)}`);
+      // P10（p10_sadame v1.1 §5）：捨てアカウントに人の確かめの印（無いと入るが err human）
+      if (who) await mq(`insert into mahjong.accounts (user_id, human_at) values ('${who}'::uuid, now()) on conflict (user_id) do update set human_at = now(); select 1 as k`);
       const li = await AU('/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email, password: pw }) });
       const at = li.j?.access_token;
       ok('⑬ パスワードで入れた', !!at, `${li.s}`);

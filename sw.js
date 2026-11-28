@@ -8,9 +8,9 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '8648917ca338';
+const VER = 'dc6db36e8fcb';
 const ASSETS = /*ASSETS-BEGIN*/[
-  ['/css/app.css', 'e2f9a2d2e2971870ac04a562e8f47187a21b406d3f4e20ed5442cb4a67f7a1d2'],
+  ['/css/app.css', 'a6e53f787d1abea30eb68312e845b011a8dd664f5a84dc61a8e6ed05079323ce'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
@@ -19,10 +19,11 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/index.html', '0dc9aba9ca83990c25df06e7d16b8f2fa3adebfb494d5afda83365595cfc907a'],
   ['/js/env-badge.js', '30640dd937852a701454d15305038370525bb5d836156d910e7691118fc736df'],
   ['/js/exally-login.js', 'fa2b5a3dfbef2889c2c37fc66dfbc8de4b53e770e8aa20fc6e0d6d769c940573'],
-  ['/js/gamen-core.mjs', '26fb8a56084ab5af81cb893bf34dd7273a567c736bac3d15f4f2fcc6aa4944b3'],
+  ['/js/gamen-core.mjs', '634d3cc7d796a87680684d6c2a9f9131d9be7d266c21505d8457cb70f7bfed76'],
   ['/js/gamen-home.mjs', '096b1a9f82731eb9ee82613a4226103c19ce54c840187c9db6ec66b2cbe48e73'],
+  ['/js/gamen-human.mjs', 'f32257812d6555e5a937813e8ff2186afdc72e642f4b84bf322dc697a3cfaec7'],
   ['/js/gamen-league.mjs', '15ce54fc0777a9238be61f6dc9a93ce0f9c8f2535f4908345260b32bc5b009f4'],
-  ['/js/gamen-room.mjs', '88f836b72151fa96112384781a46dc1821f1eaab94e42aa4f222e4d876e72e25'],
+  ['/js/gamen-room.mjs', '4d379fc74744688527222d90ab4ad3bd2ac53b8c0c71ef1aafdc85facc11376a'],
   ['/js/gamen-rules.mjs', '13246bf062b14e9d9dd582e445744c8d9262e43979124576705cb0a0766ed03e'],
   ['/js/gamen-senseki.mjs', 'f302eb92131c0f78e4214c4b806252266261000f0dd5280e6cca5658793789e1'],
   ['/js/gamen-taikyoku.mjs', 'c8244b44e8d23220bb5950253926983f7de9249d660712c4003c3588c5084968'],
@@ -44,7 +45,7 @@ const ASSETS = /*ASSETS-BEGIN*/[
   ['/lib/my-stats.mjs', 'c69ac0283a7a6d8f45adcf973c746ff10cb538ebc59b21e1d8fdf4ae4b44f4bb'],
   ['/lib/name-key.mjs', '1e5f1c335584fc1b346706ffabc1a446a72496d9834600f4585dcb702f426b43'],
   ['/lib/needs-order.mjs', 'ce391d9728b7d0b7697b40a83452f23395c12277997351ca4396166d95e5f2e2'],
-  ['/lib/outbox.mjs', '7497e6304db803d2d163dae2a281c63672774420f6f03af7d7c186eb561159cb'],
+  ['/lib/outbox.mjs', 'f4ea32f35292c29c0d37c04c40a0749cfbe6c1c980125fb1c8a7b03b9b4fd99e'],
   ['/lib/room-state.mjs', 'a3fc5d23c5040eea4a262acc0a2fee27012164df80fff90accc08e37bc0a2dec'],
   ['/lib/rules.mjs', 'e389644031b87167e7f9f5fec6b20d997e6d93fee5862e4ba66677856d034f36'],
   ['/lib/safe-int.mjs', 'c3d97c57acb9e2308a2e0e827a715a18b39659985877044b8c5b8d4379fb6b83'],
