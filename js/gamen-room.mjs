@@ -36,6 +36,7 @@ import { heldInfo, outboxStep, retryDelay, holdHead, dropHead, canSend, heldClos
 import { fromMarks, marksFromOrder, sameTie, tapMark, labels } from '../lib/kamicha.mjs';
 import { orderCovered } from '../lib/needs-order.mjs'; // A13 §6：保存した人が見た同点の組だけ ton_order が効く
 import { nameKey } from '../lib/name-key.mjs';
+import { nextSeats } from '../lib/league-round.mjs'; // L A23（l_sadame v1.3 §1 A23）：リーグの日の次の半荘の人（卓の席 t.seats が正・他の卓と重なれば選ぶ）
 import { esc, uuid, sb, patchRoom, rpc, errText, myRooms } from './gamen-core.mjs';
 import { mountRules, RULE_ERR } from './gamen-rules.mjs';
 import { pickStart } from './rules-memory.mjs'; // A20 §1-7：途中で人数を押した時の覚え（A14 mj_my_rules・gamen-taikyoku と同じ取り込み）
@@ -1243,7 +1244,7 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
     // A20 §3：外した人の打った点は保存するまで見せ続ける（押し直せば戻る）
     const out = Object.keys(p.carry || {}).filter((m) => !p.seats.includes(m));
     h += '<div id="pFoot"><button class="btn btn-main" id="pGo"' + (p.seats.length === n ? '' : ' disabled') + '>この' + n + '人で' + (p.only ? '決める' : '始める') + '</button>' +
-      '<p class="r-hint">席（東南西北）は選ばない。</p>' + (out.length ? '<p class="r-hint" id="pOut">外した人：' + out.map((m) => esc(nameOf(m)) + ' ' + esc(p.carry[m])).join('・') + '</p>' : '') + '</div>';
+      '<p class="r-hint">席（東南西北）は選ばない。</p>' + (!p.only && nonL(tOf(p.tid)) ? '<p class="r-hint" id="pOnly">この半荘だけ</p>' : '') + (out.length ? '<p class="r-hint" id="pOut">外した人：' + out.map((m) => esc(nameOf(m)) + ' ' + esc(p.carry[m])).join('・') + '</p>' : '') + '</div>';
     el.innerHTML = h;
     wirePick();
   }
@@ -1319,7 +1320,9 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
         // 開いた時の値と版（2d §3「edit の entry の版は今のまま」＝読み直しで写しが替わっても、ぶつかれば conflict で止める）
         orig: { cells: x.cells.slice(), cell_ver: x.cell_ver.slice(), lost: x.lost, version: x.version, ton_order: x.ton_order, order_version: x.order_version, order_cells: Object.prototype.hasOwnProperty.call(x, 'order_cells') ? x.order_cells : null, tobiR: tobiROf(x.tobi_to), tobi_version: x.tobi_version } };
     } else {
-      const seats = lastSeats() || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人
+      // L A23：リーグの日は nextSeats（卓の席が正しければそれ・空なら前の半荘・他の卓と重なる・外した人入り＝null＝選ぶ）。ふつうの部屋は今まで通り
+      const lgT = lgDay(table), ls = lastSeats();
+      const seats = lgT ? nextSeats(st, table.table_id, n, { league: true }) || (ls && ls.length !== n ? ls : null) : ls || preSeats(); // 半荘が在れば前の席・無ければ前もって決めた卓の人（A20 の人数違いはリーグの日も選び直しの帯）
       if (!seats) { picking = pickOf({ seats: [] }); page = 'pick'; render(); return; }
       if (seats.length !== n) { picking = pickOf({ seats, carry: {}, tobiM: [], reN: true }); page = 'pick'; render(); return; } // A20 §1-2・§3：前の回と人数が違う＝打つ人を選び直す
       entry = { seats, tid: table.table_id, no: chainView(st, table.table_id).nextNo, R, cells: new Array(n).fill(''), lost: '0', marks: [], tobiR: [] }; // D2 止め2：保存は開いた時の卓へ
@@ -1466,6 +1469,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       if (e.order.length) { op.ton_order = e.order.map((i) => e.seats[i]); op.seen_cells = e.num.slice(); }
       if (tobiBtnOn() && e.tobiR.length) op.tobi_to = { r: tobiRSorted(e.tobiR) }; // E1 §6 // 順は member_id の配列（§6-6）・A13 §6＝見た点を付ける
       ops = [op];
+      // L A23：L がリーグの日に［人を替える］で替えた＝同じ組で卓の席も替える（次の半荘も同じ人）。送る卓＝押した時の鎖の最後（e.tid）
+      if (e.tSeats && lgDay(tOf(e.tid)) && isL()) { const tl = tOf(e.tid); if (tl && cn(tl.seats || []) !== cn(e.seats)) ops.push({ op: 'table_seats', table_id: tl.table_id, seats: e.seats.slice() }); }
     } else {
       const h = { hanchan_id: e.hanchan_id, ...e.orig };
       ops = [];
@@ -1775,7 +1780,8 @@ export function mountRoom(el, { me, room, showShare, bar, page: first, relogin, 
       const carry = picking.carry || {}, tobiM = picking.tobiM || [];
       picking = null;
       if (only) { toRoom(); return; }
-      entry = { seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: seats.map((m) => (Object.prototype.hasOwnProperty.call(carry, m) ? carry[m] : '')), lost: '0', marks: [], tobiR: seats.map((m, i) => (tobiM.includes(m) ? i : -1)).filter((i) => i >= 0), carry }; // A20 §3：点は人ごとに戻す（外した人の点は carry に残る＝送らない）・E1：［飛び賞］の印（1200 と同じ形・無いと描く所の e.tobiR.includes で落ちる＝CI 45891321404 d2 B4）
+      const tSeats = lgDay(t) && isL() && cn(t.seats || []) !== cn(seats); // L A23：L の［人を替える］は保存の時に table_seats も（L でない人はその半荘だけ）
+      entry = { tSeats, seats, tid: t.table_id, no: chainView(st, t.table_id).nextNo, R: t.rules, cells: seats.map((m) => (Object.prototype.hasOwnProperty.call(carry, m) ? carry[m] : '')), lost: '0', marks: [], tobiR: seats.map((m, i) => (tobiM.includes(m) ? i : -1)).filter((i) => i >= 0), carry }; // A20 §3：点は人ごとに戻す（外した人の点は carry に残る＝送らない）・E1：［飛び賞］の印（1200 と同じ形・無いと描く所の e.tobiR.includes で落ちる＝CI 45891321404 d2 B4）
       page = 'edit'; render();
     };
   }
