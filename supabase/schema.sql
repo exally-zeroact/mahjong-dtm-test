@@ -2563,6 +2563,13 @@ create or replace function mahjong_private.mj_w_signal(p_ch text, p_v bigint) re
 language plpgsql set search_path = '' as $fn$
 begin
   if p_ch is null or p_v is null then return; end if;
+  -- P-e（pe_sadame v1.1 §1.1）：鍵つき（private）の合図＝部屋の人だけが受ける・客は送れない（realtime.messages に insert の決まり無し）
+  begin
+    perform realtime.send(pg_catalog.jsonb_build_object('v', p_v), 'w', p_ch, true);
+  exception when others then
+    raise log 'mj_w_signal private % %', sqlstate, sqlerrm;
+  end;
+  -- P-e §1.1 移る間：公開の合図にも送る（古い版の端末＝公開で待つ・帯を押すまで入れ替わらない）。古い版が0台と数えてから別の件で外す
   begin
     perform realtime.send(pg_catalog.jsonb_build_object('v', p_v), 'w', p_ch, false);
   exception when others then
@@ -5080,6 +5087,29 @@ begin
 end $fn$;
 revoke all on function public.mj_account(text, jsonb) from public, anon, authenticated;
 grant execute on function public.mj_account(text, jsonb) to authenticated;
+
+-- ── P-e 合図の受けの門（pe_sadame v1.1 §1.2）──────────────────────────────
+--   realtime.messages の select の決まりから呼ぶ＝入ろうとする客の権限で走る＝mahjong_private は使えない（:21 usage 無し）→ public の definer。
+--   通す人＝mj_read の部屋の門と同じ（消していない部屋の持ち主・room_accounts の行が在り room_bans に無い人）。返すのは自分が入れるかだけ（他の部屋の在る無しは出さない）。
+create or replace function public.mj_rt_ok(p_topic text) returns boolean
+language plpgsql stable security definer set search_path = '' as $fn$
+declare v_me uuid; r record;
+begin
+  if p_topic is null then return false; end if;
+  v_me := mahjong_private.mj_who();   -- stable のまま（mj_me_read は last_seen を書く＝stable の中では書けず決まりが落ちる）
+  if v_me is null then return false; end if;
+  select x.id, x.owner_user_id, x.deleted_at into r from mahjong.rooms x where x.channel_key = p_topic;
+  if not found or r.deleted_at is not null then return false; end if;
+  if r.owner_user_id = v_me then return true; end if;
+  return exists (select 1 from mahjong.room_accounts a where a.room_id = r.id and a.user_id = v_me)
+     and not exists (select 1 from mahjong.room_bans b where b.room_id = r.id and b.user_id = v_me);
+end $fn$;
+revoke all on function public.mj_rt_ok(text) from public, anon, authenticated;
+grant execute on function public.mj_rt_ok(text) to authenticated;
+--   受けだけ（select）。insert の決まりは置かない＝客は鍵つきの合図を送れない（送るのは倉庫の mj_w_signal だけ）
+drop policy if exists mj_rt_recv on realtime.messages;
+create policy mj_rt_recv on realtime.messages for select to authenticated
+  using (realtime.messages.extension = 'broadcast' and public.mj_rt_ok((select realtime.topic())));
 
 
 

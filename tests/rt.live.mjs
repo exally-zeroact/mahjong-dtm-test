@@ -47,8 +47,9 @@ const RS = `delete from mahjong.limits where kind like 'write:%';`;
 const T = (key, expr) => `begin r := ${expr}; exception when others then r := jsonb_build_object('raised', sqlerrm); end;
     res := res || jsonb_build_object('${key}', r);`;
 const ROW = (key, sql) => `res := res || jsonb_build_object('${key}', (${sql}));`;
-/* 合図の行＝topic と event 'w' の行の v の並び（入れた順） */
-const MSG = (key, ch) => ROW(key, `select coalesce(jsonb_agg((m.payload ->> 'v')::bigint order by m.inserted_at, m.id), '[]'::jsonb) from realtime.messages m where m.topic = ${ch} and m.event = 'w'`);
+/* 合図の行＝topic と event 'w' の行の v の並び（入れた順）。P-e（pe_sadame v1.1 §1.1）：移る間は公開と鍵つきに1つずつ＝key は公開・key_p は鍵つき */
+const MSG1 = (key, ch, pv) => ROW(key, `select coalesce(jsonb_agg((m.payload ->> 'v')::bigint order by m.inserted_at, m.id), '[]'::jsonb) from realtime.messages m where m.topic = ${ch} and m.event = 'w' and m.private = ${pv}`);
+const MSG = (key, ch) => MSG1(key, ch, 'false') + ' ' + MSG1(key + '_p', ch, 'true');
 const RV = (key, room) => ROW(key, `select to_jsonb(read_ver) from mahjong.rooms where id = ${room}`);
 const CK = (room) => `(select channel_key from mahjong.rooms where id = ${room})`;
 const MA = (name) => `jsonb_build_array(jsonb_build_object('op', 'member_add', 'member_id', gen_random_uuid(), 'name', ${lit(name)}))`;
@@ -161,6 +162,9 @@ function check(o) {
   ok('P1 room_leave は古い名と新しい名に1つずつ', isOk(o.wl) && eqv(o.ml_old, [o.wa_rv, o.wl_rv]) && eqv(o.ml_new, [o.wl_rv]), J([o.wl_rv, o.ml_old, o.ml_new]));
   ok('P1 その後の書きは今の名だけに来る（出した人・抜けた人の名に来ない）', isOk(o.wz) && eqv(o.mz_cl1, [o.wl_rv, o.wz_rv]) && eqv(o.mz_ca1, o.ml_old) && J(o.mz_ck1) === J(o.ma_old), J([o.wz_rv, o.mz_ck1, o.mz_ca1, o.mz_cl1]));
   ok('P1 残った人の mj_read は新しい名を返す', o.cl1_ok === true, J(o.cl1_ok));
+  const pk = Object.keys(o).filter((k) => k.endsWith('_p') && Array.isArray(o[k]));
+  const pbad = pk.filter((k) => !eqv(o[k], o[k.slice(0, -2)]));
+  ok('P-e §1.1 鍵つき（private）にも公開と同じ合図が同じ順で来る（全部の名）', pk.length >= 15 && pbad.length === 0, pk.length + ' 本・違う=' + pbad.map((k) => k + J(o[k]) + '≠' + J(o[k.slice(0, -2)])).join(' '));
   return L;
 }
 
@@ -190,6 +194,8 @@ const WZ = [
     ['§3-1 room_secret は古い名と新しい名', '§3-1 room_share は古い名と新しい名']],
   ['Z4 account_remove の付け替えを外す', () => brk('mahjong_private.mj_w_op', [[P1A, '']]), ['P1 account_remove は channel_key']],
   ['Z5 room_leave の付け替えを外す', () => brk('mahjong_private.mj_w_op', [[P1L, '']]), ['P1 room_leave は channel_key']],
+  ['Z6 鍵つきの送りを外す', () => brk('mahjong_private.mj_w_signal', [["perform realtime.send(pg_catalog.jsonb_build_object('v', p_v), 'w', p_ch, true);", 'null;']]),
+    ['P-e §1.1 鍵つき']],
 ];
 
 let pass = 0, fail = 0;

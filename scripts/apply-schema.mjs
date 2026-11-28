@@ -19,7 +19,7 @@ import { check } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ★今の設計図で在るべき数★（段を足したらここも直す＝数が合わなければ NG） */
-export const EXPECT = { tables: 29, ops: 38, caps: 1, rule_keys: 44, common_pass: 0, public_funcs: 7 };   // caps v1.1：caps 7→1（op_results だけ・司さん 11-27 上限いらん）   // P3：caps 8→7（rooms/all＝R をやめた）   // P9：tables 28→29（wwatch）   // C2-1 §1b：public_funcs 6→7（mj_account）   // C2-1：tables 27→28（room_leaves）   // A14：tables 26→27（account_rules）・public_funcs 5→6（mj_my_rules）   // 段C：ops 35→37（room_share・room_close）・public_funcs 3→4（mj_my_rooms）・2d：4→5（mj_read）・C4：ops 37→38（table_rules）・P2：tables 25→26（room_ns）
+export const EXPECT = { tables: 29, ops: 38, caps: 1, rule_keys: 44, common_pass: 0, public_funcs: 8, rt_recv: 1 };   // P-e：public.mj_rt_ok（合図の受けの門）＋ realtime.messages の select 決まり1本・insert 0本   // caps v1.1：caps 7→1（op_results だけ・司さん 11-27 上限いらん）   // P3：caps 8→7（rooms/all＝R をやめた）   // P9：tables 28→29（wwatch）   // C2-1 §1b：public_funcs 6→7（mj_account）   // C2-1：tables 27→28（room_leaves）   // A14：tables 26→27（account_rules）・public_funcs 5→6（mj_my_rules）   // 段C：ops 35→37（room_share・room_close）・public_funcs 3→4（mj_my_rooms）・2d：4→5（mj_read）・C4：ops 37→38（table_rules）・P2：tables 25→26（room_ns）
 
 /** ★コメントを落としてから読む★（説明文の env:'prod' を拾って誤読しない） */
 export function stripJsComments(src) {
@@ -70,6 +70,8 @@ select
     and p.prosecdef and p.proconfig @> array['search_path=""']
     and not has_function_privilege('anon', p.oid, 'EXECUTE') and has_function_privilege('authenticated', p.oid, 'EXECUTE')
     and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) x where x.grantee = 0)) as public_funcs_ok,
+ (select count(*) from pg_policies where schemaname='realtime' and tablename='messages' and policyname='mj_rt_recv' and cmd='SELECT') as rt_recv,
+ (select count(*) from pg_policies where schemaname='realtime' and tablename='messages' and cmd in ('INSERT','ALL','UPDATE')) as rt_send,
  (select count(*) from n where has_schema_privilege('anon', n.oid, 'USAGE') or has_schema_privilege('authenticated', n.oid, 'USAGE')) as client_usage,
  (select count(*) from pg_class c join n on n.oid=c.relnamespace where c.relkind in ('r','v','S')
     and (has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE') or has_table_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,DELETE'))) as client_table_priv,
@@ -120,13 +122,15 @@ async function main() {
   const ok = Number(a.tables) === EXPECT.tables && Number(a.rls_on) === EXPECT.tables && Number(a.policies) === 0
     && Number(s.ops) === EXPECT.ops && Number(s.caps) === EXPECT.caps && Number(s.rule_keys) === EXPECT.rule_keys && Number(s.totals_rows) === 1
     && Number(s.common_pass) === EXPECT.common_pass
-    && Number(a.public_funcs) === EXPECT.public_funcs && Number(a.public_funcs_ok) === EXPECT.public_funcs && clientOk;
+    && Number(a.public_funcs) === EXPECT.public_funcs && Number(a.public_funcs_ok) === EXPECT.public_funcs && clientOk
+    && Number(a.rt_recv) === EXPECT.rt_recv && Number(a.rt_send) === 0;
   console.log(`\nAPPLY RESULT: ${ok ? 'OK' : 'NG'}`
     + `  表=${a.tables}/${EXPECT.tables} RLS=${a.rls_on} 決まり書き=${a.policies} 操作=${s.ops}/${EXPECT.ops}`
     + ` 上限=${s.caps}/${EXPECT.caps} ルールの鍵=${s.rule_keys}/${EXPECT.rule_keys} よくあるパス=${s.common_pass}/${EXPECT.common_pass}`
     + ` public.mj_*=${a.public_funcs}/${EXPECT.public_funcs}（definer・search_path 空・authenticated だけに EXECUTE〔anon に無い〕・PUBLIC 無し=${a.public_funcs_ok}）`);
   console.log(`  客（anon・authenticated）… 部屋の USAGE=${a.client_usage} 表の権限=${a.client_table_priv} 部屋の関数=${a.client_private_funcs}`
     + `（★全部0★）${clientOk ? '' : ' ← ★ここが NG★'}`);
+  console.log(`  合図（P-e）… 受けの決まり mj_rt_recv=${a.rt_recv}/${EXPECT.rt_recv} 送れる決まり（insert・all・update）=${a.rt_send}（★0★）`);
   process.exit(ok ? 0 : 1);
 }
 
