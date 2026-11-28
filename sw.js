@@ -8,9 +8,9 @@
  * ★install は続きの置き場を作らない★（swupd_sadame v1.3.1 §1：WebKit は落ちた install だけが触った控えを中身ごと捨て、名前だけ残して以後の put を黙って捨てる＝11-27 測った）。
  * 入れ替え：install で skipWaiting しない。画面の［入れ替える］で SKIP_WAITING が来た時だけ（js/sw-reg.js）。
  */
-const VER = '177b49483515';
+const VER = 'c8714171ed31';
 const ASSETS = /*ASSETS-BEGIN*/[
-  ['/css/app.css', '2126d35f38ab18e31f22a373c74661dad4fc5585b3c81b84268725b94f33a60a'],
+  ['/css/app.css', 'a6e53f787d1abea30eb68312e845b011a8dd664f5a84dc61a8e6ed05079323ce'],
   ['/css/gamen.css', '23dc29163b81070b05bdc08837356eb01a55c3ea2239f48ac0a665346700f428'],
   ['/hayami.html', 'c7bc810ac6db0b854f1c390ed4eeaba37c95f4c4685d4ad8f50db8f36d598cc4'],
   ['/icons/apple-touch-icon.png', '21c5521d6542c0ba80efacadf3821ee9a56c499a008619075f75f6c6d9f56ff0'],
